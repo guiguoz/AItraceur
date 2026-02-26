@@ -1,0 +1,562 @@
+{
+  "version": "ISOM_2017",
+  "description": "Ontologie sémantique des symboles OCAD/ISOM 2017 pour l'analyse terrain IA",
+  "note": "ocad_code = numero_isom * 1000 (format ocad2geojson). passability: 0.0=impassable, 1.0=pleine vitesse.",
+
+  "symbols": {
+
+    "CONTOURS (100-199)": "_group",
+
+    "101": {
+      "name_fr": "Courbe de niveau",
+      "terrain_type": "contour",
+      "passability": 1.0,
+      "speed_multiplier": 1.0,
+      "control_attractiveness": "low",
+      "td_contribution": "medium",
+      "notes": "Feature de navigation. Plus les courbes sont denses, plus le terrain est accidenté."
+    },
+    "102": {
+      "name_fr": "Courbe de niveau maîtresse",
+      "terrain_type": "contour",
+      "passability": 1.0,
+      "speed_multiplier": 1.0,
+      "control_attractiveness": "low",
+      "td_contribution": "medium",
+      "notes": "Courbe index (toutes les 25m ou 5m selon échelle)"
+    },
+    "103": {
+      "name_fr": "Courbe de forme",
+      "terrain_type": "contour",
+      "passability": 1.0,
+      "speed_multiplier": 1.0,
+      "control_attractiveness": "low",
+      "td_contribution": "high",
+      "notes": "Feature de détail topographique fin, utile pour navigation précise"
+    },
+    "106": {
+      "name_fr": "Talus terreux",
+      "terrain_type": "obstacle",
+      "passability": 0.6,
+      "speed_multiplier": 0.5,
+      "control_attractiveness": "high",
+      "td_contribution": "high",
+      "notes": "Feature distinctive, difficile à franchir, bon poste possible au pied"
+    },
+    "108": {
+      "name_fr": "Murette de terre",
+      "terrain_type": "obstacle",
+      "passability": 0.7,
+      "speed_multiplier": 0.6,
+      "control_attractiveness": "high",
+      "td_contribution": "medium",
+      "notes": "Feature linéaire distinctif, bon directeur"
+    },
+    "109": {
+      "name_fr": "Ravin d'érosion",
+      "terrain_type": "obstacle",
+      "passability": 0.3,
+      "speed_multiplier": 0.4,
+      "control_attractiveness": "high",
+      "td_contribution": "high",
+      "notes": "Feature très distinctif, difficile à franchir, excellent poste possible"
+    },
+    "111": {
+      "name_fr": "Trou/Fosse",
+      "terrain_type": "depression",
+      "passability": 0.8,
+      "speed_multiplier": 0.7,
+      "control_attractiveness": "high",
+      "td_contribution": "high",
+      "notes": "Feature ponctuel distinctif, excellent pour poste de contrôle"
+    },
+    "115": {
+      "name_fr": "Fosse rocheuse",
+      "terrain_type": "rock_depression",
+      "passability": 0.5,
+      "speed_multiplier": 0.5,
+      "control_attractiveness": "high",
+      "td_contribution": "high",
+      "notes": "Feature distinctif mais difficile d'accès"
+    },
+    "116": {
+      "name_fr": "Falaise",
+      "terrain_type": "cliff",
+      "passability": 0.0,
+      "speed_multiplier": 0.0,
+      "control_attractiveness": "high",
+      "td_contribution": "high",
+      "notes": "IMPASSABLE. Poste possible au pied uniquement. Feature très distinctif."
+    },
+    "118": {
+      "name_fr": "Rocher/Boulder",
+      "terrain_type": "rock_point",
+      "passability": 0.9,
+      "speed_multiplier": 0.8,
+      "control_attractiveness": "high",
+      "td_contribution": "high",
+      "notes": "Feature ponctuel distinct, excellent pour poste. TD élevé si isolé."
+    },
+    "119": {
+      "name_fr": "Groupe de rochers",
+      "terrain_type": "rock_cluster",
+      "passability": 0.7,
+      "speed_multiplier": 0.6,
+      "control_attractiveness": "high",
+      "td_contribution": "medium",
+      "notes": "Feature de groupe, moins précis qu'un boulder isolé pour poste"
+    },
+    "120": {
+      "name_fr": "Champ de rochers",
+      "terrain_type": "rock_field",
+      "passability": 0.5,
+      "speed_multiplier": 0.4,
+      "control_attractiveness": "medium",
+      "td_contribution": "medium",
+      "notes": "Ralentit significativement, difficile à traverser"
+    },
+
+    "EAU (200-215)": "_group",
+
+    "201": {
+      "name_fr": "Plan d'eau non franchissable",
+      "terrain_type": "water_uncrossable",
+      "passability": 0.0,
+      "speed_multiplier": 0.0,
+      "control_attractiveness": "high",
+      "td_contribution": "high",
+      "notes": "IMPASSABLE. Feature très distinctif, bord excellent pour poste."
+    },
+    "202": {
+      "name_fr": "Surface d'eau",
+      "terrain_type": "water_surface",
+      "passability": 0.0,
+      "speed_multiplier": 0.0,
+      "control_attractiveness": "medium",
+      "td_contribution": "medium",
+      "notes": "IMPASSABLE. Zones bleues."
+    },
+    "203": {
+      "name_fr": "Eau peu profonde",
+      "terrain_type": "shallow_water",
+      "passability": 0.3,
+      "speed_multiplier": 0.3,
+      "control_attractiveness": "medium",
+      "td_contribution": "medium",
+      "notes": "Franchissable mais très lent, à éviter dans tracé"
+    },
+    "204": {
+      "name_fr": "Marécage non franchissable",
+      "terrain_type": "marsh_uncrossable",
+      "passability": 0.0,
+      "speed_multiplier": 0.0,
+      "control_attractiveness": "high",
+      "td_contribution": "high",
+      "notes": "IMPASSABLE. Bord excellent pour poste."
+    },
+    "205": {
+      "name_fr": "Marécage",
+      "terrain_type": "marsh",
+      "passability": 0.2,
+      "speed_multiplier": 0.2,
+      "control_attractiveness": "medium",
+      "td_contribution": "medium",
+      "notes": "Franchissable mais très difficile. Éviter dans tracé sauf si feature distinctif."
+    },
+    "206": {
+      "name_fr": "Marécage peu marqué",
+      "terrain_type": "marsh_indistinct",
+      "passability": 0.4,
+      "speed_multiplier": 0.4,
+      "control_attractiveness": "low",
+      "td_contribution": "low",
+      "notes": "Peu distinctif, pas idéal pour poste"
+    },
+    "210": {
+      "name_fr": "Cours d'eau franchissable",
+      "terrain_type": "stream_crossable",
+      "passability": 0.7,
+      "speed_multiplier": 0.6,
+      "control_attractiveness": "high",
+      "td_contribution": "medium",
+      "notes": "Feature distinctif linéaire, bon directeur. Poste possible à un croisement."
+    },
+    "211": {
+      "name_fr": "Petit cours d'eau franchissable",
+      "terrain_type": "stream_small",
+      "passability": 0.85,
+      "speed_multiplier": 0.8,
+      "control_attractiveness": "medium",
+      "td_contribution": "low",
+      "notes": "Feature de détail, franchissable facilement"
+    },
+
+    "VEGETATION (300-320)": "_group",
+
+    "301": {
+      "name_fr": "Terrain découvert",
+      "terrain_type": "open",
+      "passability": 1.0,
+      "speed_multiplier": 1.0,
+      "control_attractiveness": "medium",
+      "td_contribution": "low",
+      "notes": "Pleine vitesse de course. Zones blanches/jaunes. Bonne visibilité."
+    },
+    "302": {
+      "name_fr": "Terrain découvert avec arbres épars",
+      "terrain_type": "semi_open",
+      "passability": 1.0,
+      "speed_multiplier": 0.95,
+      "control_attractiveness": "medium",
+      "td_contribution": "low",
+      "notes": "Quasi pleine vitesse, légère perte de visibilité"
+    },
+    "303": {
+      "name_fr": "Terrain découvert accidenté",
+      "terrain_type": "rough_open",
+      "passability": 0.9,
+      "speed_multiplier": 0.85,
+      "control_attractiveness": "medium",
+      "td_contribution": "low",
+      "notes": "Terrain irrégulier mais courrable, légèrement plus lent"
+    },
+    "304": {
+      "name_fr": "Terrain découvert accidenté avec arbres épars",
+      "terrain_type": "rough_semi_open",
+      "passability": 0.85,
+      "speed_multiplier": 0.8,
+      "control_attractiveness": "medium",
+      "td_contribution": "low",
+      "notes": "Combinaison rugosité et arbres"
+    },
+    "305": {
+      "name_fr": "Forêt courrable",
+      "terrain_type": "forest",
+      "passability": 1.0,
+      "speed_multiplier": 0.8,
+      "control_attractiveness": "low",
+      "td_contribution": "medium",
+      "notes": "Forêt normale (blanc sur carte). Courrable mais ralentit 20%."
+    },
+    "306": {
+      "name_fr": "Limite de végétation",
+      "terrain_type": "vegetation_boundary",
+      "passability": 1.0,
+      "speed_multiplier": 1.0,
+      "control_attractiveness": "high",
+      "td_contribution": "medium",
+      "notes": "Feature linéaire distinctif, excellent directeur ou poste"
+    },
+    "309": {
+      "name_fr": "Vignoble ou jardin",
+      "terrain_type": "cultivated_slow",
+      "passability": 0.4,
+      "speed_multiplier": 0.4,
+      "control_attractiveness": "low",
+      "td_contribution": "low",
+      "notes": "Difficile à traverser, éviter dans tracé"
+    },
+    "311": {
+      "name_fr": "Végétation impraticable",
+      "terrain_type": "impassable",
+      "passability": 0.0,
+      "speed_multiplier": 0.0,
+      "control_attractiveness": "high",
+      "td_contribution": "high",
+      "notes": "IMPASSABLE (vert foncé). Contournement obligatoire. Bord excellent pour poste."
+    },
+    "312": {
+      "name_fr": "Forêt: course lente",
+      "terrain_type": "slow_run",
+      "passability": 0.7,
+      "speed_multiplier": 0.6,
+      "control_attractiveness": "low",
+      "td_contribution": "medium",
+      "notes": "Vert clair. Significativement plus lent que la forêt normale."
+    },
+    "313": {
+      "name_fr": "Forêt: marche",
+      "terrain_type": "walk",
+      "passability": 0.5,
+      "speed_multiplier": 0.4,
+      "control_attractiveness": "low",
+      "td_contribution": "high",
+      "notes": "Vert moyen. Réduit à la marche, très difficile."
+    },
+    "314": {
+      "name_fr": "Forêt: combat",
+      "terrain_type": "fight",
+      "passability": 0.2,
+      "speed_multiplier": 0.2,
+      "control_attractiveness": "low",
+      "td_contribution": "high",
+      "notes": "Vert foncé. Quasi-impraticable, à éviter absolument dans tracé."
+    },
+    "315": {
+      "name_fr": "Végétation: course lente",
+      "terrain_type": "slow_run",
+      "passability": 0.7,
+      "speed_multiplier": 0.6,
+      "control_attractiveness": "low",
+      "td_contribution": "medium",
+      "notes": "Vert clair (variante végétation)"
+    },
+    "316": {
+      "name_fr": "Végétation: marche",
+      "terrain_type": "walk",
+      "passability": 0.5,
+      "speed_multiplier": 0.4,
+      "control_attractiveness": "low",
+      "td_contribution": "high",
+      "notes": "Vert moyen (variante végétation)"
+    },
+    "317": {
+      "name_fr": "Végétation impraticable",
+      "terrain_type": "impassable",
+      "passability": 0.0,
+      "speed_multiplier": 0.0,
+      "control_attractiveness": "high",
+      "td_contribution": "high",
+      "notes": "IMPASSABLE (vert très foncé). Équivalent à 311."
+    },
+
+    "AMENAGEMENTS (400-440)": "_group",
+
+    "401": {
+      "name_fr": "Route goudronnée",
+      "terrain_type": "road_paved",
+      "passability": 1.0,
+      "speed_multiplier": 1.1,
+      "control_attractiveness": "low",
+      "td_contribution": "low",
+      "notes": "Très rapide mais à éviter pour postes (dangereux, pas sportif)"
+    },
+    "402": {
+      "name_fr": "Route carrossable",
+      "terrain_type": "road",
+      "passability": 1.0,
+      "speed_multiplier": 1.05,
+      "control_attractiveness": "low",
+      "td_contribution": "low",
+      "notes": "Rapide, utile comme itinéraire alternatif"
+    },
+    "403": {
+      "name_fr": "Large sentier",
+      "terrain_type": "wide_path",
+      "passability": 1.0,
+      "speed_multiplier": 1.05,
+      "control_attractiveness": "medium",
+      "td_contribution": "low",
+      "notes": "Feature linéaire distinct, très courrable, bon directeur"
+    },
+    "404": {
+      "name_fr": "Sentier",
+      "terrain_type": "path",
+      "passability": 1.0,
+      "speed_multiplier": 1.0,
+      "control_attractiveness": "high",
+      "td_contribution": "low",
+      "notes": "Feature de navigation excellent. Carrefour = très bon poste TD1-TD2."
+    },
+    "405": {
+      "name_fr": "Sentier étroit",
+      "terrain_type": "narrow_path",
+      "passability": 1.0,
+      "speed_multiplier": 0.95,
+      "control_attractiveness": "high",
+      "td_contribution": "low",
+      "notes": "Feature distinctif, bon pour poste, légèrement plus étroit"
+    },
+    "406": {
+      "name_fr": "Chemin peu visible",
+      "terrain_type": "poor_path",
+      "passability": 0.95,
+      "speed_multiplier": 0.9,
+      "control_attractiveness": "medium",
+      "td_contribution": "medium",
+      "notes": "Moins distinct, nécessite lecture de carte attentive"
+    },
+    "408": {
+      "name_fr": "Ligne électrique",
+      "terrain_type": "powerline",
+      "passability": 0.8,
+      "speed_multiplier": 0.8,
+      "control_attractiveness": "medium",
+      "td_contribution": "low",
+      "notes": "Feature linéaire aérien, coupe distinctive mais terrain souvent dégradé"
+    },
+    "411": {
+      "name_fr": "Mur",
+      "terrain_type": "wall",
+      "passability": 0.5,
+      "speed_multiplier": 0.5,
+      "control_attractiveness": "high",
+      "td_contribution": "medium",
+      "notes": "Feature linéaire distinctif, difficile à franchir. Bon directeur. Poste au coin."
+    },
+    "412": {
+      "name_fr": "Clôture",
+      "terrain_type": "fence",
+      "passability": 0.6,
+      "speed_multiplier": 0.6,
+      "control_attractiveness": "medium",
+      "td_contribution": "low",
+      "notes": "Feature linéaire, franchissable mais ralentit. Souvent bon directeur."
+    },
+    "414": {
+      "name_fr": "Bâtiment",
+      "terrain_type": "building",
+      "passability": 0.0,
+      "speed_multiplier": 0.0,
+      "control_attractiveness": "high",
+      "td_contribution": "low",
+      "notes": "IMPASSABLE. Angle de bâtiment = bon poste distinctif."
+    },
+    "415": {
+      "name_fr": "Ruine",
+      "terrain_type": "ruin",
+      "passability": 0.5,
+      "speed_multiplier": 0.5,
+      "control_attractiveness": "high",
+      "td_contribution": "medium",
+      "notes": "Feature ponctuel distinctif, bon poste possible"
+    },
+
+    "ZONE INTERDITE (500-510)": "_group",
+
+    "505": {
+      "name_fr": "Zone hors limites",
+      "terrain_type": "forbidden",
+      "passability": 0.0,
+      "speed_multiplier": 0.0,
+      "control_attractiveness": "none",
+      "td_contribution": "low",
+      "notes": "INTERDIT. Aucun poste ou passage possible. Règle IOF absolue."
+    },
+    "506": {
+      "name_fr": "Zone privée",
+      "terrain_type": "private",
+      "passability": 0.0,
+      "speed_multiplier": 0.0,
+      "control_attractiveness": "none",
+      "td_contribution": "low",
+      "notes": "INTERDIT. Zone privée, ne pas entrer."
+    },
+    "509": {
+      "name_fr": "Zone dangereuse",
+      "terrain_type": "dangerous",
+      "passability": 0.0,
+      "speed_multiplier": 0.0,
+      "control_attractiveness": "none",
+      "td_contribution": "low",
+      "notes": "INTERDIT pour raisons de sécurité."
+    },
+
+    "SYMBOLES DE PARCOURS (700-799)": "_group",
+
+    "701": {
+      "name_fr": "Triangle de départ",
+      "terrain_type": "course_start",
+      "passability": 1.0,
+      "speed_multiplier": 1.0,
+      "control_attractiveness": "none",
+      "td_contribution": "none",
+      "notes": "Symbole de circuit, pas un feature terrain"
+    },
+    "702": {
+      "name_fr": "Cercle de poste",
+      "terrain_type": "course_control",
+      "passability": 1.0,
+      "speed_multiplier": 1.0,
+      "control_attractiveness": "none",
+      "td_contribution": "none",
+      "notes": "Symbole de circuit"
+    },
+    "703": {
+      "name_fr": "Double cercle d'arrivée",
+      "terrain_type": "course_finish",
+      "passability": 1.0,
+      "speed_multiplier": 1.0,
+      "control_attractiveness": "none",
+      "td_contribution": "none",
+      "notes": "Symbole de circuit"
+    }
+  },
+
+  "terrain_type_groups": {
+    "impassable": ["water_uncrossable", "marsh_uncrossable", "impassable", "fight", "forbidden", "private", "dangerous", "cliff", "building"],
+    "very_slow": ["marsh", "walk", "fight", "shallow_water"],
+    "slow": ["rock_field", "slow_run", "obstacle", "cultivated_slow"],
+    "normal_forest": ["forest"],
+    "open": ["open", "semi_open", "rough_open", "rough_semi_open"],
+    "path_network": ["path", "narrow_path", "wide_path", "road", "road_paved", "poor_path"],
+    "water_features": ["water_uncrossable", "water_surface", "marsh_uncrossable", "marsh", "stream_crossable", "stream_small"],
+    "distinctive_point_features": ["rock_point", "depression", "rock_depression"]
+  },
+
+  "td_rules": {
+    "TD1": {
+      "description": "Très facile — Blanc/Jaune",
+      "max_leg_length_m": 200,
+      "features": ["path", "wide_path", "road", "open"],
+      "notes": "Postes uniquement sur carrefours de sentiers ou clairières. Pas de boussole nécessaire."
+    },
+    "TD2": {
+      "description": "Facile — Jaune",
+      "max_leg_length_m": 350,
+      "features": ["path", "wide_path", "vegetation_boundary", "stream_crossable"],
+      "notes": "Postes sur features linéaires. Navigation simple le long de lignes directrices."
+    },
+    "TD3": {
+      "description": "Moyen — Orange",
+      "max_leg_length_m": 700,
+      "features": ["contour", "rock_point", "depression", "stream_small"],
+      "notes": "Postes sur features de contour ou ponctuels. Boussole utile. Points d'attaque requis."
+    },
+    "TD4": {
+      "description": "Difficile — Vert",
+      "max_leg_length_m": 1500,
+      "features": ["contour", "rock_point", "depression", "wall"],
+      "notes": "Postes sur tout type de feature. Longues jambes sur boussole. Terrain technique."
+    },
+    "TD5": {
+      "description": "Très difficile — Bleu/Noir",
+      "max_leg_length_m": 9999,
+      "features": ["contour", "rock_point", "depression"],
+      "notes": "Postes sur features peu distinctifs. Terrain très technique, longues distances sans directeur."
+    }
+  },
+
+  "pd_rules": {
+    "PD1": {
+      "description": "Très facile physiquement",
+      "max_climb_ratio": 0.01,
+      "terrain": ["open", "path_network"],
+      "notes": "Quasi plat, sentiers. Idéal débutants."
+    },
+    "PD2": {
+      "description": "Facile physiquement",
+      "max_climb_ratio": 0.02,
+      "terrain": ["open", "forest", "path_network"],
+      "notes": "Légère montée, terrain courrable."
+    },
+    "PD3": {
+      "description": "Moyen physiquement",
+      "max_climb_ratio": 0.04,
+      "terrain": ["forest", "semi_open"],
+      "notes": "Dénivelé modéré. Limite IOF standard pour parcours compétition."
+    },
+    "PD4": {
+      "description": "Difficile physiquement",
+      "max_climb_ratio": 0.06,
+      "terrain": ["forest", "slow_run"],
+      "notes": "Fort dénivelé, terrain contraignant. Dépasse la limite IOF recommandée."
+    },
+    "PD5": {
+      "description": "Très difficile physiquement",
+      "max_climb_ratio": 9999,
+      "terrain": ["any"],
+      "notes": "Dénivelé extrême. Réservé aux experts."
+    }
+  }
+}

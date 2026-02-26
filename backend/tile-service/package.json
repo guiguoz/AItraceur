@@ -1,0 +1,18 @@
+{
+  "name": "aitraceur-tile-service",
+  "version": "1.0.0",
+  "description": "OCAD tile generation service for AItraceur",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "multer": "^1.4.5-lts.1",
+    "ocad2geojson": "^2.1.20",
+    "ocad2tiles": "^1.3.1",
+    "proj4": "^2.20.2"
+  }
+}

@@ -1,0 +1,19 @@
+# Normalisation des fins de ligne
+# Tous les fichiers texte utilisent LF (Unix) dans le dépôt
+* text=auto eol=lf
+
+# Fichiers binaires — pas de conversion
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.db binary
+*.sqlite binary
+*.laz binary
+*.las binary
+*.tiff binary
+*.pdf binary
+*.docx binary
+*.zip binary
+*.kmz binary

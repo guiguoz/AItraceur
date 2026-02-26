@@ -1,0 +1,83 @@
+# ============================================
+# AItraceur — .gitignore
+# ============================================
+
+# ---- Python / Backend ----
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.env
+.venv/
+venv/
+env/
+*.db
+*.sqlite
+*.sqlite3
+
+# Uploads et fichiers temporaires
+backend/uploads/
+backend/tile-service/uploads/
+backend/tile-service/renders/
+backend/tile-service/tiles/
+
+# Lidar / données volumineuses
+*.laz
+*.las
+*.tiff
+*.tif
+*.geotiff
+Lora/
+
+# ---- Node.js / Tile service & Frontend ----
+node_modules/
+.npm
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build frontend
+frontend/dist/
+frontend/.vite/
+
+# ---- Données sensibles ----
+.env.local
+.env.*.local
+*.pem
+*.key
+*.cert
+secrets/
+credentials/
+
+# ---- Éditeurs / OS ----
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# ---- Qodo (outil interne) ----
+.qodo/
+.qoder/
+
+# ---- Tauri (desktop app, pas prioritaire) ----
+src-tauri/target/
+
+# ---- Logs ----
+*.log
+logs/
+
+# ---- Divers ----
+.cache/
+tmp/
+temp/

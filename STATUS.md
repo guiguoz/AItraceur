@@ -9,10 +9,10 @@
 
 | Champ | Valeur |
 |-------|--------|
-| **Dernière étape complétée** | Étape 2c — Tests intégrés dans check.sh (25/25 tests passent) |
+| **Dernière étape complétée** | Étape 3a — Audit génération + 3 nouveaux bugs corrigés |
 | **Date** | 2026-03-02 |
-| **Prochaine étape** | Étape 3a — Audit génération : que propose l'IA aujourd'hui ? |
-| **État global** | 🟢 Fondations solides, 4 bugs corrigés, tests automatiques actifs |
+| **Prochaine étape** | Étape 3b — Améliorer fitness function (circuits longs + balance) |
+| **État global** | 🟢 7 bugs corrigés, sprint/classique fonctionnels, longs circuits à améliorer |
 
 ---
 
@@ -26,7 +26,7 @@
 - [x] **Étape 2a** — Créer backend/tests/test_endpoints.py (13/13 tests) ✅ 2026-02-26
 - [x] **Étape 2b** — Créer backend/tile-service/test.js (12/12 tests) ✅ 2026-03-02
 - [x] **Étape 2c** — Tests intégrés dans check.sh (18/18 vérifications) ✅ 2026-03-02
-- [ ] **Étape 3a** — Audit génération : que propose l'IA aujourd'hui ?
+- [x] **Étape 3a** — Audit génération + 3 bugs corrigés (scorer, genetic_algo) ✅ 2026-03-02
 - [ ] **Étape 3b** — Améliorer scorer (attractivité des postes)
 - [ ] **Étape 3c** — Vérifier cohérence des échelles (sprint vs classique)
 - [ ] **Étape 4** — LIDAR / WMS (décision + implémentation)
@@ -57,6 +57,9 @@
 | 4 | OSM fetcher : seulement les routes récupérées | `backend/src/services/terrain/osm_fetcher.py` | 🟡 Moyen | ✅ commit 3112574 |
 | 5 | LIDAR = simulation uniquement | `backend/src/services/terrain/lidar_manager.py` | 🔵 Long terme | ❌ |
 | 6 | Dataset RAG manquant | `Lora/mondial_tracage_QR_v4.jsonl` | 🟡 Moyen | ❌ |
+| 7 | scorer.py — Euclidien en degrés au lieu de Haversine en mètres | `backend/src/services/generation/scorer.py` | 🔴 Critique | ✅ commit 1214e84 |
+| 8 | genetic_algo.py — mutations ±50° au lieu de ±50m | `backend/src/services/generation/genetic_algo.py` | 🔴 Critique | ✅ commit 1214e84 |
+| 9 | genetic_algo.py — OX crossover IndexError (départ==arrivée) | `backend/src/services/generation/genetic_algo.py` | 🟠 Important | ✅ commit 1214e84 |
 
 ---
 
@@ -197,6 +200,23 @@ Ouvrir le navigateur : http://localhost:5173
 ### Étape 2c — Tests dans check.sh ✅ (2026-03-02)
 - `check.sh` section [4/5] lance automatiquement pytest et node test.js
 - 18/18 vérifications passent (services hors ligne = info, pas erreur)
+
+### Étape 3a — Audit génération + 3 bugs corrigés ✅ (2026-03-02)
+- Script `backend/tests/audit_generation.py` créé (lancer : `cd backend && python tests/audit_generation.py`)
+- 3 bugs critiques découverts et corrigés (commit 1214e84) :
+  - **Bug #7** : `scorer.py` — 4 endroits utilisaient Euclidien en degrés → Haversine en mètres. Résultat : TD était toujours TD1, PD5 systématique, tous les postes "trop proches"
+  - **Bug #8** : `genetic_algo.py` mutations — ±50 degrés (= 3600km !) → converti en degrés WGS84 (÷ 72600 lng, ÷ 111000 lat)
+  - **Bug #9** : OX crossover IndexError pour circuits où départ==arrivée → garde copie si None détecté
+
+- **Résultats après corrections** (zone 49.19°N 5.50°E) :
+
+  | Circuit | Longueur | Cible | Écart | Score | TD | IOF |
+  |---------|----------|-------|-------|-------|-----|-----|
+  | Sprint TD2 (D21, 8 postes) | 1753m | 2000m | -12% | 79/100 [C] | TD3 | ✅ |
+  | Classique TD3 (H21, 12 postes) | 4317m | 4000m | +8% | 82/100 [B] | TD3 | ⚠️ 1 dog-leg |
+  | Long TD4 (H21E, 15 postes) | 14243m | 7000m | +103% | 72/100 [C] | TD5 | ✅ |
+
+- **Problème restant** : Circuits longs (>5km) convergent mal (50 générations insuffisantes, placement initial trop écarté) → Étape 3b
 
 ---
 

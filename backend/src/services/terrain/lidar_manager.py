@@ -13,6 +13,119 @@ from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime
 
+try:
+    import requests as _requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
+
+
+# =============================================
+# API altimétrie IGN (gratuite, sans auth)
+# RGE Alti — résolution 1m sur France métropolitaine
+# =============================================
+IGN_ELEVATION_URL = "https://data.geopf.fr/altimetrie/1.0/calcul/alti/rest/elevation.json"
+
+
+def get_elevation_for_points(
+    coords: List[Tuple[float, float]],
+    resource: str = "ign_rge_alti_wld",
+    timeout: int = 15,
+) -> List[Optional[float]]:
+    """
+    Récupère les élévations IGN pour une liste de points WGS84.
+
+    Utilise l'API gratuite IGN altimétrie (data.geopf.fr).
+    Résolution : 1m (RGE Alti) pour la France, sinon SRTM 90m mondial.
+
+    Args:
+        coords: Liste de tuples (lng, lat) en WGS84
+        resource: "ign_rge_alti_wld" (France, 1m) ou "ign_rge_alti" (France seulement)
+        timeout: Timeout HTTP en secondes
+
+    Returns:
+        Liste d'élévations en mètres (None si indisponible)
+
+    Example:
+        elevs = get_elevation_for_points([(5.50, 49.19), (5.51, 49.20)])
+        # → [312.4, 318.7]
+    """
+    if not coords:
+        return []
+
+    if not REQUESTS_AVAILABLE:
+        return [None] * len(coords)
+
+    # L'API IGN accepte les points séparés par "|"
+    # Max ~200 points recommandé par requête
+    lons = "|".join(str(round(c[0], 6)) for c in coords)
+    lats = "|".join(str(round(c[1], 6)) for c in coords)
+
+    try:
+        resp = _requests.get(
+            IGN_ELEVATION_URL,
+            params={
+                "lon": lons,
+                "lat": lats,
+                "resource": resource,
+                "delimiter": "|",
+                "indent": "false",
+            },
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        elevations = data.get("elevations", [])
+        return [e.get("z") for e in elevations]
+
+    except Exception as e:
+        print(f"[WARNING] IGN altimétrie indisponible : {e}")
+        return [None] * len(coords)
+
+
+def get_elevation_profile(
+    coords: List[Tuple[float, float]],
+    chunk_size: int = 100,
+) -> List[Optional[float]]:
+    """
+    Récupère le profil d'élévation pour un tracé (liste de points WGS84).
+
+    Découpe automatiquement en batches de chunk_size pour l'API IGN.
+
+    Args:
+        coords: Liste de tuples (lng, lat)
+        chunk_size: Taille de chaque batch (max recommandé : 200)
+
+    Returns:
+        Liste d'élévations en mètres (None si point hors couverture)
+    """
+    result = []
+    for i in range(0, len(coords), chunk_size):
+        chunk = coords[i:i + chunk_size]
+        result.extend(get_elevation_for_points(chunk))
+    return result
+
+
+def calculate_climb(elevations: List[Optional[float]]) -> float:
+    """
+    Calcule le dénivelé positif total à partir d'une liste d'élévations.
+
+    Args:
+        elevations: Liste d'élévations en mètres (None ignoré)
+
+    Returns:
+        D+ total en mètres
+    """
+    d_plus = 0.0
+    prev = None
+    for e in elevations:
+        if e is None:
+            continue
+        if prev is not None and e > prev:
+            d_plus += e - prev
+        prev = e
+    return d_plus
+
 
 # =============================================
 # URLs officielles IGN pour LIDAR HD

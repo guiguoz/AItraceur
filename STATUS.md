@@ -9,10 +9,10 @@
 
 | Champ | Valeur |
 |-------|--------|
-| **Dernière étape complétée** | Étape 3c — Cohérence des échelles + too_close Haversine |
+| **Dernière étape complétée** | Étape 4 — IGN altimétrie API (élévation réelle, Bug #5 partiel) |
 | **Date** | 2026-03-02 |
-| **Prochaine étape** | Étape 4 — Décision LIDAR IGN (ou rester OSM) |
-| **État global** | 🟢 12 bugs corrigés, 3 circuits IOF valides (sprint 87/100, classique 78/100, long 85/100) |
+| **Prochaine étape** | Étape 5a — Vérifier Ollama + améliorer prompt ffco-iof-v7 |
+| **État global** | 🟢 13 bugs corrigés, 3 circuits IOF valides (sprint 87/100, classique 78/100, long 85/100) |
 
 ---
 
@@ -29,7 +29,7 @@
 - [x] **Étape 3a** — Audit génération + 3 bugs corrigés (scorer, genetic_algo) ✅ 2026-03-02
 - [x] **Étape 3b** — Convergence circuits longs (pop. intelligente + mutations scalées) ✅ 2026-03-02
 - [x] **Étape 3c** — Cohérence des échelles + too_close Haversine ✅ 2026-03-02
-- [ ] **Étape 4** — LIDAR / WMS (décision + implémentation)
+- [x] **Étape 4** — IGN altimétrie API (élévation réelle via data.geopf.fr) ✅ 2026-03-02
 - [ ] **Étape 5a** — Vérifier état Ollama + ffco-iof-v7
 - [ ] **Étape 5b** — Créer dataset RAG minimal
 
@@ -55,7 +55,7 @@
 | 2 | Distance Euclidienne au lieu d'Haversine | `backend/src/services/generation/ai_generator.py` | 🟠 Important | ✅ commit 12a9faf |
 | 3 | Pas de gestion d'erreur si Ollama absent | `backend/src/services/knowledge_base/local_rag.py` | 🟠 Important | ✅ commit 05d56a1 |
 | 4 | OSM fetcher : seulement les routes récupérées | `backend/src/services/terrain/osm_fetcher.py` | 🟡 Moyen | ✅ commit 3112574 |
-| 5 | LIDAR = simulation uniquement | `backend/src/services/terrain/lidar_manager.py` | 🔵 Long terme | ❌ |
+| 5 | LIDAR = simulation uniquement | `backend/src/services/terrain/lidar_manager.py` | 🔵 Long terme | ⚠️ Partiel — API IGN altimétrie intégrée (1m), nuage de points LIDAR = futur |
 | 6 | Dataset RAG manquant | `Lora/mondial_tracage_QR_v4.jsonl` | 🟡 Moyen | ❌ |
 | 7 | scorer.py — Euclidien en degrés au lieu de Haversine en mètres | `backend/src/services/generation/scorer.py` | 🔴 Critique | ✅ commit 1214e84 |
 | 8 | genetic_algo.py — mutations ±50° au lieu de ±50m | `backend/src/services/generation/genetic_algo.py` | 🔴 Critique | ✅ commit 1214e84 |
@@ -78,7 +78,7 @@
 | Analyse terrain OSM | ✅ | Routes + forêts + eau + bâtiments + barrières |
 | Grille de runnabilité | ✅ | |
 | Profil d'élévation | ✅ | |
-| LIDAR IGN | ⚠️ | Simulation uniquement |
+| LIDAR IGN | ⚠️ | API IGN altimétrie intégrée (1m réel), nuage LIDAR = futur |
 | Génération de circuit (algo génétique) | ✅ | |
 | Génération de circuit (IA / GPT) | ✅ | Nécessite clé OpenAI |
 | Scoring IOF (TD/PD/dog-legs) | ✅ | |
@@ -257,6 +257,18 @@ Ouvrir le navigateur : http://localhost:5173
 | Long TD4 (H21E, 15 postes) | 7831m | 7000m | +11.9% | 70/100 [D] | 14243m (+103%) ✅ |
 
 - **Problème résiduel** : Long TD4 a 1 paire de postes trop proches (<60m) non pénalisée par la fitness GA (le scorer le détecte). La fitness equity utilise encore Euclidien en degrés pour `too_close`. → Étape 3c
+
+---
+
+### Étape 4 — IGN altimétrie API ✅ (2026-03-02)
+- **Bug #5 partiellement résolu** : `lidar_manager.py` était 100% simulation (fichiers LAZ fictifs, rasters .tif vides)
+- **Décision** : API IGN altimétrie REST (data.geopf.fr) choisie à la place de PDAL/LAZ — gratuite, sans authentification, résolution 1m (RGE Alti) sur France
+- 3 nouvelles fonctions module-level dans `lidar_manager.py` :
+  - `get_elevation_for_points(coords)` — batch API, retourne `[z1, z2, ...]` en mètres
+  - `get_elevation_profile(coords, chunk_size=100)` — chunked pour >100 points
+  - `calculate_climb(elevations)` — calcule D+ depuis une liste d'élévations
+- **Test validé** : zone 49.19°N 5.50°E → 247.2m, 251.89m, 240.67m (données réelles IGN RGE Alti 1m)
+- **Nuage de points LIDAR** (LAZ IGN) reste futur — dépend de disponibilité PDAL + ~100Mo/zone
 
 ---
 

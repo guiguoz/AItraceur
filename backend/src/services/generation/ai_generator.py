@@ -362,15 +362,19 @@ class AIGenerator:
             return []
 
     def _calculate_length(self, controls: List[Tuple[float, float]]) -> float:
-        """Calcule la longueur totale."""
+        """Calcule la longueur totale en mètres (formule Haversine, coordonnées WGS84)."""
         import math
 
-        total = 0
+        R = 6371000.0
+        total = 0.0
         for i in range(len(controls) - 1):
-            total += math.sqrt(
-                (controls[i + 1][0] - controls[i][0]) ** 2
-                + (controls[i + 1][1] - controls[i][1]) ** 2
-            )
+            p1, p2 = controls[i], controls[i + 1]
+            # p = (x=lng, y=lat)
+            lat1, lat2 = math.radians(p1[1]), math.radians(p2[1])
+            dlat = math.radians(p2[1] - p1[1])
+            dlng = math.radians(p2[0] - p1[0])
+            a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlng / 2) ** 2
+            total += R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
         return total
 
 

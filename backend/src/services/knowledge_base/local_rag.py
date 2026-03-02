@@ -62,14 +62,27 @@ QUESTION : {question}
 
 Réponds en français, de façon courte et précise. Si tu ne sais pas, dis-le."""
 
-    # Utiliser le modèle fine-tuné Lora
-    result = subprocess.run(
-        ["ollama", "run", "ffco-iof-v7", prompt],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
-    return result.stdout.strip()
+    try:
+        result = subprocess.run(
+            ["ollama", "run", "ffco-iof-v7", prompt],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=60,
+        )
+        if result.returncode != 0:
+            print(f"[WARNING] Ollama retour non-zero ({result.returncode}): {result.stderr.strip()}")
+            return None
+        return result.stdout.strip() or None
+    except FileNotFoundError:
+        print("[WARNING] Ollama non installe ou non trouve dans le PATH.")
+        return None
+    except subprocess.TimeoutExpired:
+        print("[WARNING] Ollama timeout apres 60s.")
+        return None
+    except Exception as e:
+        print(f"[WARNING] Erreur Ollama inattendue : {e}")
+        return None
 
 
 class LocalRAG:
@@ -111,8 +124,11 @@ class LocalRAG:
             self.embeddings = None
 
     def query(self, question: str):
+        FALLBACK = "Ollama non disponible. Assurez-vous qu'Ollama est lance et que le modele ffco-iof-v7 est installe."
+
         if not self.qr_list or self.embeddings is None:
-            return demander_ollama(question, []), []
+            reponse = demander_ollama(question, [])
+            return reponse or FALLBACK, []
 
         resultats = trouver_meilleures_reponses(
             question, self.qr_list, self.model, self.embeddings
@@ -130,7 +146,7 @@ class LocalRAG:
                 for r in resultats
             ]
             reponse = demander_ollama(question, contextes)
-            return reponse, sources
+            return reponse or FALLBACK, sources
         else:
             reponse = demander_ollama(question, [])
-            return reponse, []
+            return reponse or FALLBACK, []

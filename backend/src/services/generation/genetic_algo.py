@@ -189,11 +189,20 @@ class GeneticAlgorithm:
         end: Tuple[float, float],
         forbidden_zones: List[Dict],
     ) -> List[Circuit]:
-        """Initialise une population aléatoire."""
+        """Initialise une population.
+
+        Pour les circuits longs (>3km) : 80% smart (jambes calibrées) + 20% aléatoire.
+        Pour les circuits courts (sprint) : 100% aléatoire (comportement inchangé).
+        """
         population = []
+        use_smart = self.config.target_length_m > 3000
+        smart_count = int(self.config.population_size * 0.8) if use_smart else 0
 
         for i in range(self.config.population_size):
-            circuit = self._create_random_circuit(start, end, forbidden_zones)
+            if i < smart_count:
+                circuit = self._create_smart_circuit(start, end, forbidden_zones)
+            else:
+                circuit = self._create_random_circuit(start, end, forbidden_zones)
             circuit.id = f"circuit_{i}"
             population.append(circuit)
 
@@ -219,6 +228,50 @@ class GeneticAlgorithm:
 
         controls.append(end)
 
+        return Circuit(controls=controls)
+
+    def _create_smart_circuit(
+        self,
+        start: Tuple[float, float],
+        end: Tuple[float, float],
+        forbidden_zones: List[Dict],
+    ) -> Circuit:
+        """Crée un circuit avec des jambes proches de la longueur cible.
+
+        Place chaque poste à ~target_leg_m du précédent (±40%) dans une direction
+        aléatoire, au lieu de placer uniformément dans toute la bbox.
+        Garantit une longueur initiale proche de la cible → gradient de fitness actif.
+        """
+        n_intermediate = self.config.target_controls - 2
+        if n_intermediate <= 0:
+            return Circuit(controls=[start, end])
+
+        target_leg_m = self.config.target_length_m / self.config.target_controls
+        lat_deg = target_leg_m / 111000.0
+        lng_deg = target_leg_m / 72600.0
+
+        bb = self.config.bounding_box
+        controls = [start]
+        current = start
+
+        for _ in range(n_intermediate):
+            angle = random.uniform(0, 2 * math.pi)
+            factor = random.uniform(0.6, 1.4)
+            nx = current[0] + math.cos(angle) * lng_deg * factor
+            ny = current[1] + math.sin(angle) * lat_deg * factor
+            if bb:
+                nx = max(bb["min_x"], min(bb["max_x"], nx))
+                ny = max(bb["min_y"], min(bb["max_y"], ny))
+            if not self._is_in_forbidden_zone(nx, ny, forbidden_zones):
+                controls.append((nx, ny))
+                current = (nx, ny)
+            else:
+                pos = self._generate_random_position(start, end, forbidden_zones)
+                if pos:
+                    controls.append(pos)
+                    current = pos
+
+        controls.append(end)
         return Circuit(controls=controls)
 
     def _generate_random_position(
@@ -349,6 +402,8 @@ class GeneticAlgorithm:
         p2_idx = 0
         for i in range(n):
             if child1_controls[i] is None:
+                if p2_idx >= n:
+                    break
                 while p2.controls[p2_idx] in child1_controls:
                     p2_idx += 1
                     if p2_idx >= n:
@@ -364,6 +419,8 @@ class GeneticAlgorithm:
         p1_idx = 0
         for i in range(n):
             if child2_controls[i] is None:
+                if p1_idx >= n:
+                    break
                 while p1.controls[p1_idx] in child2_controls:
                     p1_idx += 1
                     if p1_idx >= n:
@@ -422,11 +479,15 @@ class GeneticAlgorithm:
         controls: List[Tuple[float, float]],
         forbidden_zones: List[Dict],
     ) -> List[Tuple[float, float]]:
-        """Déplacement ±50m d'un poste aléatoire (coordonnées WGS84 en degrés)."""
+        """Déplacement ±12% d'une jambe cible d'un poste aléatoire (WGS84 en degrés).
+
+        Proportionnel à la longueur cible : ±30m pour sprint, ±56m pour circuit long.
+        """
         idx = random.randint(1, len(controls) - 2)
-        # Conversion mètres → degrés (~49°N) : 1° lat ≈ 111000m, 1° lng ≈ 72600m
-        x = controls[idx][0] + random.uniform(-50, 50) / 72600
-        y = controls[idx][1] + random.uniform(-50, 50) / 111000
+        leg_m = self.config.target_length_m / max(self.config.target_controls, 1)
+        delta_m = random.uniform(-leg_m * 0.12, leg_m * 0.12)
+        x = controls[idx][0] + delta_m / 72600
+        y = controls[idx][1] + delta_m / 111000
         if not self._is_in_forbidden_zone(x, y, forbidden_zones):
             controls[idx] = (x, y)
         return controls
@@ -487,10 +548,15 @@ class GeneticAlgorithm:
         controls: List[Tuple[float, float]],
         forbidden_zones: List[Dict],
     ) -> List[Tuple[float, float]]:
-        """Déplacement fort ±100m pour sortir des minima locaux (WGS84 en degrés)."""
+        """Déplacement fort ±25% d'une jambe cible pour sortir des minima locaux.
+
+        Proportionnel à la longueur cible : ±62m pour sprint, ±117m pour circuit long.
+        """
         idx = random.randint(1, len(controls) - 2)
-        x = controls[idx][0] + random.uniform(-100, 100) / 72600
-        y = controls[idx][1] + random.uniform(-100, 100) / 111000
+        leg_m = self.config.target_length_m / max(self.config.target_controls, 1)
+        delta_m = random.uniform(-leg_m * 0.25, leg_m * 0.25)
+        x = controls[idx][0] + delta_m / 72600
+        y = controls[idx][1] + delta_m / 111000
         if not self._is_in_forbidden_zone(x, y, forbidden_zones):
             controls[idx] = (x, y)
         return controls

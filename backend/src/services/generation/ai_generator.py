@@ -205,8 +205,8 @@ class AIGenerator:
             target_climb_m=request.target_climb_m,
             target_controls=request.target_controls,
             winning_time_min=request.winning_time_minutes,
-            population_size=30,
-            generations=50,
+            population_size=max(30, request.target_controls * 3),
+            generations=max(50, request.target_controls * 7),
             bounding_box=request.bounding_box,
         )
 

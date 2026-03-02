@@ -9,10 +9,10 @@
 
 | Champ | Valeur |
 |-------|--------|
-| **Dernière étape complétée** | Étape 3a — Audit génération + 3 nouveaux bugs corrigés |
+| **Dernière étape complétée** | Étape 3b — Convergence circuits longs résolue |
 | **Date** | 2026-03-02 |
-| **Prochaine étape** | Étape 3b — Améliorer fitness function (circuits longs + balance) |
-| **État global** | 🟢 7 bugs corrigés, sprint/classique fonctionnels, longs circuits à améliorer |
+| **Prochaine étape** | Étape 3c — Vérifier cohérence des échelles (sprint vs classique) |
+| **État global** | 🟢 10 bugs corrigés, sprint/classique/long fonctionnels, scores B-A sur les 3 |
 
 ---
 
@@ -27,7 +27,7 @@
 - [x] **Étape 2b** — Créer backend/tile-service/test.js (12/12 tests) ✅ 2026-03-02
 - [x] **Étape 2c** — Tests intégrés dans check.sh (18/18 vérifications) ✅ 2026-03-02
 - [x] **Étape 3a** — Audit génération + 3 bugs corrigés (scorer, genetic_algo) ✅ 2026-03-02
-- [ ] **Étape 3b** — Améliorer scorer (attractivité des postes)
+- [x] **Étape 3b** — Convergence circuits longs (pop. intelligente + mutations scalées) ✅ 2026-03-02
 - [ ] **Étape 3c** — Vérifier cohérence des échelles (sprint vs classique)
 - [ ] **Étape 4** — LIDAR / WMS (décision + implémentation)
 - [ ] **Étape 5a** — Vérifier état Ollama + ffco-iof-v7
@@ -60,6 +60,8 @@
 | 7 | scorer.py — Euclidien en degrés au lieu de Haversine en mètres | `backend/src/services/generation/scorer.py` | 🔴 Critique | ✅ commit 1214e84 |
 | 8 | genetic_algo.py — mutations ±50° au lieu de ±50m | `backend/src/services/generation/genetic_algo.py` | 🔴 Critique | ✅ commit 1214e84 |
 | 9 | genetic_algo.py — OX crossover IndexError (départ==arrivée) | `backend/src/services/generation/genetic_algo.py` | 🟠 Important | ✅ commit 1214e84 |
+| 10 | genetic_algo.py — OX crossover IndexError (p2_idx ≥ n avant break) | `backend/src/services/generation/genetic_algo.py` | 🟠 Important | ✅ Étape 3b |
+| 11 | genetic_algo.py — pop. initiale trop étalée → circuits longs 2× trop longs | `backend/src/services/generation/genetic_algo.py` | 🔴 Critique | ✅ Étape 3b |
 
 ---
 
@@ -216,7 +218,26 @@ Ouvrir le navigateur : http://localhost:5173
   | Classique TD3 (H21, 12 postes) | 4317m | 4000m | +8% | 82/100 [B] | TD3 | ⚠️ 1 dog-leg |
   | Long TD4 (H21E, 15 postes) | 14243m | 7000m | +103% | 72/100 [C] | TD5 | ✅ |
 
-- **Problème restant** : Circuits longs (>5km) convergent mal (50 générations insuffisantes, placement initial trop écarté) → Étape 3b
+- **Problème restant** : Circuits longs (>5km) convergent mal (50 générations insuffisantes, placement initial trop écarté) → **résolu en Étape 3b**
+
+---
+
+### Étape 3b — Convergence circuits longs ✅ (2026-03-02)
+- **Bug #10** corrigé : OX crossover IndexError quand `p2_idx ≥ n` avant le `break` (affectait les circuits longs avec pop. smart)
+- **Bug #11** corrigé : Population initiale 100% aléatoire dans la bbox → circuits longs 2× trop longs (length_score=0 dès génération 0, pas de gradient)
+- **Fix 1** : `_create_smart_circuit()` dans `genetic_algo.py` — place les postes à ~target_leg_m du précédent (±40%), crée des circuits initiaux proches de la cible
+- **Fix 2** : Générations et population scalées dans `ai_generator.py` — `pop = max(30, n×3)`, `gens = max(50, n×7)` (8 postes → 56 gens, 15 postes → 105 gens)
+- **Fix 3** : Mutations proportionnelles à la jambe cible — ±12% walk, ±25% perturbation (vs ±50m/±100m fixe)
+
+**Résultats après Étape 3b** (zone 49.19°N 5.50°E) :
+
+| Circuit | Longueur | Cible | Écart | Score | Avant |
+|---------|----------|-------|-------|-------|-------|
+| Sprint TD2 (D21, 8 postes) | 2115m | 2000m | +5.8% | 82/100 [B] | 1753m (-12%) |
+| Classique TD3 (H21, 12 postes) | 3861m | 4000m | -3.5% | 90/100 [A] | 4317m (+8%) |
+| Long TD4 (H21E, 15 postes) | 7831m | 7000m | +11.9% | 70/100 [D] | 14243m (+103%) ✅ |
+
+- **Problème résiduel** : Long TD4 a 1 paire de postes trop proches (<60m) non pénalisée par la fitness GA (le scorer le détecte). La fitness equity utilise encore Euclidien en degrés pour `too_close`. → Étape 3c
 
 ---
 

@@ -333,6 +333,9 @@ class GeneticAlgorithm:
     def _ox_crossover(self, p1: Circuit, p2: Circuit) -> Tuple[Circuit, Circuit]:
         """Order Crossover pour les circuits."""
         n = len(p1.controls)
+        # Sécurité : tailles différentes ou trop court → copie sans croisement
+        if n != len(p2.controls) or n < 4:
+            return Circuit(controls=list(p1.controls)), Circuit(controls=list(p2.controls))
 
         # Choisir deux points de croisement
         start_idx = random.randint(0, n - 2)
@@ -369,8 +372,9 @@ class GeneticAlgorithm:
                     child2_controls[i] = p1.controls[p1_idx]
                     p1_idx += 1
 
-        child1_controls = [c for c in child1_controls if c is not None]
-        child2_controls = [c for c in child2_controls if c is not None]
+        # Si None restants (positions dupliquées p.ex. départ==arrivée), copie sans croisement
+        if None in child1_controls or None in child2_controls:
+            return Circuit(controls=list(p1.controls)), Circuit(controls=list(p2.controls))
         return Circuit(controls=child1_controls), Circuit(controls=child2_controls)
 
     def _mutate(
@@ -418,10 +422,11 @@ class GeneticAlgorithm:
         controls: List[Tuple[float, float]],
         forbidden_zones: List[Dict],
     ) -> List[Tuple[float, float]]:
-        """Déplacement ±50m d'un poste aléatoire."""
+        """Déplacement ±50m d'un poste aléatoire (coordonnées WGS84 en degrés)."""
         idx = random.randint(1, len(controls) - 2)
-        x = controls[idx][0] + random.uniform(-50, 50)
-        y = controls[idx][1] + random.uniform(-50, 50)
+        # Conversion mètres → degrés (~49°N) : 1° lat ≈ 111000m, 1° lng ≈ 72600m
+        x = controls[idx][0] + random.uniform(-50, 50) / 72600
+        y = controls[idx][1] + random.uniform(-50, 50) / 111000
         if not self._is_in_forbidden_zone(x, y, forbidden_zones):
             controls[idx] = (x, y)
         return controls
@@ -467,10 +472,11 @@ class GeneticAlgorithm:
 
         perp_x = -dy / length
         perp_y =  dx / length
-        offset = random.uniform(60, 150)
+        # offset en mètres converti en degrés WGS84
+        offset_m = random.uniform(60, 150)
         sign = random.choice([-1, 1])
-        new_x = mid_x + perp_x * offset * sign
-        new_y = mid_y + perp_y * offset * sign
+        new_x = mid_x + perp_x * (offset_m / 72600) * sign
+        new_y = mid_y + perp_y * (offset_m / 111000) * sign
 
         if not self._is_in_forbidden_zone(new_x, new_y, forbidden_zones):
             controls[worst_idx] = (new_x, new_y)
@@ -481,10 +487,10 @@ class GeneticAlgorithm:
         controls: List[Tuple[float, float]],
         forbidden_zones: List[Dict],
     ) -> List[Tuple[float, float]]:
-        """Déplacement fort ±100m pour sortir des minima locaux."""
+        """Déplacement fort ±100m pour sortir des minima locaux (WGS84 en degrés)."""
         idx = random.randint(1, len(controls) - 2)
-        x = controls[idx][0] + random.uniform(-100, 100)
-        y = controls[idx][1] + random.uniform(-100, 100)
+        x = controls[idx][0] + random.uniform(-100, 100) / 72600
+        y = controls[idx][1] + random.uniform(-100, 100) / 111000
         if not self._is_in_forbidden_zone(x, y, forbidden_zones):
             controls[idx] = (x, y)
         return controls

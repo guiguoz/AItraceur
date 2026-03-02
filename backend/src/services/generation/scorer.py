@@ -83,6 +83,16 @@ class CircuitScorer:
         self.osm_data = None
         self.lidar_data = None
 
+    @staticmethod
+    def _haversine_m(p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
+        """Distance haversine en mètres entre deux points WGS84 (x=lng, y=lat)."""
+        R = 6_371_000.0
+        lat1, lat2 = math.radians(p1[1]), math.radians(p2[1])
+        dlat = math.radians(p2[1] - p1[1])
+        dlng = math.radians(p2[0] - p1[0])
+        a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlng / 2) ** 2
+        return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
     def load_osm_data(self, osm_data: Dict):
         """Charge les données OSM."""
         self.osm_data = osm_data
@@ -198,13 +208,10 @@ class CircuitScorer:
         )
 
     def _calculate_total_length(self, positions: List[Tuple[float, float]]) -> float:
-        """Calcule la longueur totale."""
-        total = 0
+        """Calcule la longueur totale en mètres (haversine WGS84)."""
+        total = 0.0
         for i in range(len(positions) - 1):
-            total += math.sqrt(
-                (positions[i + 1][0] - positions[i][0]) ** 2
-                + (positions[i + 1][1] - positions[i][1]) ** 2
-            )
+            total += self._haversine_m(positions[i], positions[i + 1])
         return total
 
     def _score_length(self, actual: float, target: float) -> float:
@@ -249,10 +256,7 @@ class CircuitScorer:
 
         for i in range(len(positions)):
             for j in range(i + 1, len(positions)):
-                dist = math.sqrt(
-                    (positions[j][0] - positions[i][0]) ** 2
-                    + (positions[j][1] - positions[i][1]) ** 2
-                )
+                dist = self._haversine_m(positions[i], positions[j])
                 min_distances.append(dist)
 
         if not min_distances:
@@ -261,10 +265,7 @@ class CircuitScorer:
         # Calculer la distance minimale entre postes consécutifs
         consecutive_dists = []
         for i in range(len(positions) - 1):
-            dist = math.sqrt(
-                (positions[i + 1][0] - positions[i][0]) ** 2
-                + (positions[i + 1][1] - positions[i][1]) ** 2
-            )
+            dist = self._haversine_m(positions[i], positions[i + 1])
             consecutive_dists.append(dist)
 
         # Score basé sur les distances minimales
@@ -411,10 +412,7 @@ class CircuitScorer:
         # --- Séparation minimale entre postes (≥ 60m) ---
         too_close = 0
         for i in range(len(positions) - 1):
-            dist = math.sqrt(
-                (positions[i + 1][0] - positions[i][0]) ** 2
-                + (positions[i + 1][1] - positions[i][1]) ** 2
-            )
+            dist = self._haversine_m(positions[i], positions[i + 1])
             if dist < 60:
                 too_close += 1
         iof.too_close_controls = too_close
@@ -453,10 +451,7 @@ class CircuitScorer:
 
         leg_lengths = []
         for i in range(len(positions) - 1):
-            d = math.sqrt(
-                (positions[i + 1][0] - positions[i][0]) ** 2
-                + (positions[i + 1][1] - positions[i][1]) ** 2
-            )
+            d = self._haversine_m(positions[i], positions[i + 1])
             leg_lengths.append(d)
 
         max_leg = max(leg_lengths)

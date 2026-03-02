@@ -185,13 +185,17 @@ def test_osm_query_valid_overpass_syntax():
 # ============================================================
 
 def test_ollama_fallback_on_missing():
-    """demander_ollama doit retourner None si Ollama absent, sans crasher."""
+    """demander_ollama doit retourner None si Ollama absent (REST + subprocess), sans crasher."""
     import sys, os
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from unittest.mock import patch
+    from unittest.mock import patch, MagicMock
+    import src.services.knowledge_base.local_rag as rag_module
     from src.services.knowledge_base.local_rag import demander_ollama
 
-    # Simuler Ollama absent (FileNotFoundError)
-    with patch("subprocess.run", side_effect=FileNotFoundError("ollama not found")):
+    # Simuler Ollama absent : REST API lève une exception ET subprocess FileNotFoundError
+    mock_requests = MagicMock()
+    mock_requests.post.side_effect = Exception("Connection refused")
+    with patch.object(rag_module, "_requests", mock_requests), \
+         patch("subprocess.run", side_effect=FileNotFoundError("ollama not found")):
         result = demander_ollama("Quelle est la longueur d'un TD3 ?", [])
         assert result is None, f"Devrait retourner None si Ollama absent, obtenu: {result}"

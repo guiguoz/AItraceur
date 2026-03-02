@@ -9,9 +9,9 @@
 
 | Champ | Valeur |
 |-------|--------|
-| **Dernière étape complétée** | Étape 4 — IGN altimétrie API (élévation réelle, Bug #5 partiel) |
+| **Dernière étape complétée** | Étape 5a — System prompt CO/IOF + API REST Ollama |
 | **Date** | 2026-03-02 |
-| **Prochaine étape** | Étape 5a — Vérifier Ollama + améliorer prompt ffco-iof-v7 |
+| **Prochaine étape** | Étape 5b — Créer dataset RAG minimal (40-50 Q/A) |
 | **État global** | 🟢 13 bugs corrigés, 3 circuits IOF valides (sprint 87/100, classique 78/100, long 85/100) |
 
 ---
@@ -30,7 +30,7 @@
 - [x] **Étape 3b** — Convergence circuits longs (pop. intelligente + mutations scalées) ✅ 2026-03-02
 - [x] **Étape 3c** — Cohérence des échelles + too_close Haversine ✅ 2026-03-02
 - [x] **Étape 4** — IGN altimétrie API (élévation réelle via data.geopf.fr) ✅ 2026-03-02
-- [ ] **Étape 5a** — Vérifier état Ollama + ffco-iof-v7
+- [x] **Étape 5a** — System prompt CO/IOF injecté, API REST Ollama, 13/13 tests ✅ 2026-03-02
 - [ ] **Étape 5b** — Créer dataset RAG minimal
 
 ---
@@ -269,6 +269,20 @@ Ouvrir le navigateur : http://localhost:5173
   - `calculate_climb(elevations)` — calcule D+ depuis une liste d'élévations
 - **Test validé** : zone 49.19°N 5.50°E → 247.2m, 251.89m, 240.67m (données réelles IGN RGE Alti 1m)
 - **Nuage de points LIDAR** (LAZ IGN) reste futur — dépend de disponibilité PDAL + ~100Mo/zone
+
+---
+
+### Étape 5a — System prompt CO/IOF + API REST Ollama ✅ (2026-03-02)
+- **Diagnostic** : `ffco-iof-v7` répondait "Temps Disparu" pour TD3 (complètement faux) — le subprocess `ollama run` n'injectait aucun contexte CO/IOF
+- **Fix 1** : `demander_ollama()` passe maintenant par l'API REST `/api/chat` (requests) avec `role: "system"` → system prompt CO/IOF complet injecté à chaque requête
+- **Fix 2** : Fallback subprocess conservé si REST échoue (Ollama absent = None retourné)
+- **System prompt** (`_SYSTEM_PROMPT_CO`) contient :
+  - Tableau TD1-TD5 (terrain, public, postes)
+  - Tableau PD1-PD5 (D+/km, catégories)
+  - Règles IOF clés (60m min, dog-leg, temps victoire)
+  - 3 exemples few-shot (TD3, distance min, dog-leg)
+- **Résultats après fix** : TD3 → "niveau technique moyen, postes sur formes de terrain" ✅, 60m IOF AA3.5.5 ✅, H21E 45-60min ✅
+- Test `test_ollama_fallback_on_missing` mis à jour (mock REST + subprocess) → 13/13 ✅
 
 ---
 

@@ -193,13 +193,40 @@ class OSMFetcher:
             element_types = ["highways", "buildings", "landuse", "water", "green_areas"]
 
         # Format bbox pour Overpass: (sud, ouest, nord, est)
-        bbox_str = f"({bbox.min_y}, {bbox.min_x}, {bbox.max_y}, {bbox.max_x})"
+        b = f"{bbox.min_y},{bbox.min_x},{bbox.max_y},{bbox.max_x}"
 
-        # Requête Overpass plus simple et valide
-        # Récupérer uniquement les highways pour commencer
-        full_query = f"[out:json][timeout:60];way{bbox_str}[highway];out body;"
+        # Construire les filtres par type demandé
+        filters = []
 
-        print(f"  DEBUG query: {full_query}")  # Debug
+        if "highways" in element_types:
+            filters.append(f'way["highway"]({b})')
+
+        if "buildings" in element_types:
+            filters.append(f'way["building"]({b})')
+
+        if "landuse" in element_types:
+            filters.append(f'way["landuse"]({b})')
+            filters.append(f'relation["landuse"]({b})')
+
+        if "water" in element_types:
+            filters.append(f'way["natural"~"water|wetland|riverbank"]({b})')
+            filters.append(f'way["water"]({b})')
+            filters.append(f'relation["natural"~"water|wetland"]({b})')
+
+        if "green_areas" in element_types:
+            filters.append(f'way["natural"~"wood|forest|scrub|heath|grassland|fell"]({b})')
+            filters.append(f'way["leisure"~"park|garden|pitch|golf_course"]({b})')
+
+        if "barriers" in element_types:
+            filters.append(f'way["barrier"~"wall|fence|hedge|ditch|retaining_wall"]({b})')
+
+        if not filters:
+            filters.append(f'way["highway"]({b})')
+
+        # Chaque filtre doit se terminer par ";" dans le bloc union Overpass
+        union = "\n  ".join(f + ";" for f in filters)
+        # "out body geom" retourne les coordonnées des ways (indispensable)
+        full_query = f"[out:json][timeout:90];\n(\n  {union}\n);\nout body geom;"
 
         return full_query
 

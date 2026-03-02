@@ -9,10 +9,10 @@
 
 | Champ | Valeur |
 |-------|--------|
-| **Dernière étape complétée** | Étape 3b — Convergence circuits longs résolue |
+| **Dernière étape complétée** | Étape 3c — Cohérence des échelles + too_close Haversine |
 | **Date** | 2026-03-02 |
-| **Prochaine étape** | Étape 3c — Vérifier cohérence des échelles (sprint vs classique) |
-| **État global** | 🟢 10 bugs corrigés, sprint/classique/long fonctionnels, scores B-A sur les 3 |
+| **Prochaine étape** | Étape 4 — Décision LIDAR IGN (ou rester OSM) |
+| **État global** | 🟢 12 bugs corrigés, 3 circuits IOF valides (sprint 87/100, classique 78/100, long 85/100) |
 
 ---
 
@@ -28,7 +28,7 @@
 - [x] **Étape 2c** — Tests intégrés dans check.sh (18/18 vérifications) ✅ 2026-03-02
 - [x] **Étape 3a** — Audit génération + 3 bugs corrigés (scorer, genetic_algo) ✅ 2026-03-02
 - [x] **Étape 3b** — Convergence circuits longs (pop. intelligente + mutations scalées) ✅ 2026-03-02
-- [ ] **Étape 3c** — Vérifier cohérence des échelles (sprint vs classique)
+- [x] **Étape 3c** — Cohérence des échelles + too_close Haversine ✅ 2026-03-02
 - [ ] **Étape 4** — LIDAR / WMS (décision + implémentation)
 - [ ] **Étape 5a** — Vérifier état Ollama + ffco-iof-v7
 - [ ] **Étape 5b** — Créer dataset RAG minimal
@@ -62,6 +62,8 @@
 | 9 | genetic_algo.py — OX crossover IndexError (départ==arrivée) | `backend/src/services/generation/genetic_algo.py` | 🟠 Important | ✅ commit 1214e84 |
 | 10 | genetic_algo.py — OX crossover IndexError (p2_idx ≥ n avant break) | `backend/src/services/generation/genetic_algo.py` | 🟠 Important | ✅ Étape 3b |
 | 11 | genetic_algo.py — pop. initiale trop étalée → circuits longs 2× trop longs | `backend/src/services/generation/genetic_algo.py` | 🔴 Critique | ✅ Étape 3b |
+| 12 | genetic_algo.py — too_close en degrés Euclidiens (jamais actif) → Haversine 60m | `backend/src/services/generation/genetic_algo.py` | 🟠 Important | ✅ Étape 3c |
+| 13 | ai_generator.py — min_control_distance fixe (60m) sans différencier sprint/classique | `backend/src/services/generation/ai_generator.py` | 🟡 Moyen | ✅ Étape 3c |
 
 ---
 
@@ -219,6 +221,23 @@ Ouvrir le navigateur : http://localhost:5173
   | Long TD4 (H21E, 15 postes) | 14243m | 7000m | +103% | 72/100 [C] | TD5 | ✅ |
 
 - **Problème restant** : Circuits longs (>5km) convergent mal (50 générations insuffisantes, placement initial trop écarté) → **résolu en Étape 3b**
+
+---
+
+### Étape 3c — Cohérence des échelles ✅ (2026-03-02)
+- **Bug #12** corrigé : `too_close` dans la fitness GA utilisait Euclidien en degrés → jamais actif (100° ≈ 11 000km). Remplacé par Haversine mètres.
+- **Bug #13** corrigé : `min_control_distance` passé de 100 (degrés, inutilisable) à 60m (IOF AA3.5.5). Sprint (TD1/TD2) → 30m ; forêt (TD3-TD5) → 60m.
+- Résultat : plus de "trop proches" dans la fitness → l'algo les pénalise activement dès la génération
+
+**Résultats après Étape 3c** :
+
+| Circuit | Longueur | Cible | Écart | Score | Dog-legs | Trop proches | IOF |
+|---------|----------|-------|-------|-------|----------|-------------|-----|
+| Sprint TD2 | 2016m | 2000m | +0.8% | 86.5/100 [B] | 0 | 0 | ✅ |
+| Classique TD3 | 3754m | 4000m | -6.2% | 78.1/100 [C] | 0 | 0 | ✅ |
+| Long TD4 | 7991m | 7000m | +14.2% | 84.8/100 [B] | 0 | 0 | ✅ |
+
+- **Problème résiduel** : `balance_score` moyen à 45/100 (déséquilibre des distances entre interpostes). À adresser si nécessaire dans une future étape.
 
 ---
 

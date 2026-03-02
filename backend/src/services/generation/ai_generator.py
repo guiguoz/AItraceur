@@ -200,6 +200,9 @@ class AIGenerator:
     ) -> List[GeneratedCircuit]:
         """Génère avec l'algorithme génétique."""
         # Configuration
+        # Distance minimale selon l'échelle : sprint 1:4000 → 30m, forêt 1:10000 → 60m
+        min_dist = 30 if request.technical_level in ("TD1", "TD2") else 60
+
         config = GenerationConfig(
             target_length_m=request.target_length_m,
             target_climb_m=request.target_climb_m,
@@ -208,6 +211,7 @@ class AIGenerator:
             population_size=max(30, request.target_controls * 3),
             generations=max(50, request.target_controls * 7),
             bounding_box=request.bounding_box,
+            min_control_distance=min_dist,
         )
 
         # Initialiser le GA

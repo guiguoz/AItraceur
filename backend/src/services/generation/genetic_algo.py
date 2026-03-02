@@ -49,7 +49,7 @@ class GenerationConfig:
     elite_count: int = 5
 
     # Contraintes
-    min_control_distance: float = 100  # Distance minimale entre postes
+    min_control_distance: float = 60  # Distance minimale entre postes en mètres (IOF AA3.5.5)
     max_attempts: int = 10
 
 
@@ -652,7 +652,7 @@ class GeneticAlgorithm:
                     dog_legs += 1
         for i in range(len(controls)):
             for j in range(i + 1, len(controls)):
-                d = math.sqrt((controls[j][0]-controls[i][0])**2 + (controls[j][1]-controls[i][1])**2)
+                d = self._haversine_m(controls[i], controls[j])
                 if d < config.min_control_distance:
                     too_close += 1
         equity_score = max(0.0, 100.0 - dog_legs * 15 - too_close * 20)

@@ -33,7 +33,13 @@ backend/tile-service/tiles/
 *.tiff
 *.tif
 *.geotiff
-Lora/
+# Lora model weights (heavy binaries) — but track text datasets (.jsonl)
+Lora/*.safetensors
+Lora/*.bin
+Lora/*.gguf
+Lora/*.pt
+Lora/*.ckpt
+Lora/*.model
 
 # ---- Node.js / Tile service & Frontend ----
 node_modules/

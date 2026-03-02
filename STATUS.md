@@ -9,10 +9,10 @@
 
 | Champ | Valeur |
 |-------|--------|
-| **Dernière étape complétée** | Étape 5a — System prompt CO/IOF + API REST Ollama |
+| **Dernière étape complétée** | Étape 5b — Dataset RAG 54 Q/R (mondial_tracage_QR_v4.jsonl) |
 | **Date** | 2026-03-02 |
-| **Prochaine étape** | Étape 5b — Créer dataset RAG minimal (40-50 Q/A) |
-| **État global** | 🟢 13 bugs corrigés, 3 circuits IOF valides (sprint 87/100, classique 78/100, long 85/100) |
+| **Prochaine étape** | Étape 5d — Analyse multi-GPX consensus |
+| **État global** | 🟢 13 bugs corrigés, RAG actif (54 Q/R, scores 0.70-0.78), 3 circuits IOF valides |
 
 ---
 
@@ -31,7 +31,7 @@
 - [x] **Étape 3c** — Cohérence des échelles + too_close Haversine ✅ 2026-03-02
 - [x] **Étape 4** — IGN altimétrie API (élévation réelle via data.geopf.fr) ✅ 2026-03-02
 - [x] **Étape 5a** — System prompt CO/IOF injecté, API REST Ollama, 13/13 tests ✅ 2026-03-02
-- [ ] **Étape 5b** — Créer dataset RAG minimal
+- [x] **Étape 5b** — Dataset RAG 54 Q/R créé (mondial_tracage_QR_v4.jsonl) ✅ 2026-03-02
 
 ---
 
@@ -56,7 +56,7 @@
 | 3 | Pas de gestion d'erreur si Ollama absent | `backend/src/services/knowledge_base/local_rag.py` | 🟠 Important | ✅ commit 05d56a1 |
 | 4 | OSM fetcher : seulement les routes récupérées | `backend/src/services/terrain/osm_fetcher.py` | 🟡 Moyen | ✅ commit 3112574 |
 | 5 | LIDAR = simulation uniquement | `backend/src/services/terrain/lidar_manager.py` | 🔵 Long terme | ⚠️ Partiel — API IGN altimétrie intégrée (1m), nuage de points LIDAR = futur |
-| 6 | Dataset RAG manquant | `Lora/mondial_tracage_QR_v4.jsonl` | 🟡 Moyen | ❌ |
+| 6 | Dataset RAG manquant | `Lora/mondial_tracage_QR_v4.jsonl` | 🟡 Moyen | ✅ 54 Q/R (TD1-5, PD1-5, IOF, symboles ISOM, circuits, formats) |
 | 7 | scorer.py — Euclidien en degrés au lieu de Haversine en mètres | `backend/src/services/generation/scorer.py` | 🔴 Critique | ✅ commit 1214e84 |
 | 8 | genetic_algo.py — mutations ±50° au lieu de ±50m | `backend/src/services/generation/genetic_algo.py` | 🔴 Critique | ✅ commit 1214e84 |
 | 9 | genetic_algo.py — OX crossover IndexError (départ==arrivée) | `backend/src/services/generation/genetic_algo.py` | 🟠 Important | ✅ commit 1214e84 |
@@ -283,6 +283,17 @@ Ouvrir le navigateur : http://localhost:5173
   - 3 exemples few-shot (TD3, distance min, dog-leg)
 - **Résultats après fix** : TD3 → "niveau technique moyen, postes sur formes de terrain" ✅, 60m IOF AA3.5.5 ✅, H21E 45-60min ✅
 - Test `test_ollama_fallback_on_missing` mis à jour (mock REST + subprocess) → 13/13 ✅
+
+---
+
+### Étape 5b — Dataset RAG 54 Q/R ✅ (2026-03-02)
+- **Bug #6 résolu** : `Lora/mondial_tracage_QR_v4.jsonl` créé de zéro avec 54 paires Q/R
+- 8 thèmes couverts : TD1-5, PD1-5, règles IOF (distance min, dog-leg, départ, arrivée), temps de victoire, symboles ISOM (101/109/118/201/210/301/401/404), circuits par couleur (Blanc→Noir), formats d'export (IOF XML, GPX, KML), navigation CO (runnabilité, Tobler, equity)
+- **Résultats RAG** :
+  - "distance minimale postes" → score 0.78 (exact_match direct, ≥0.65) ✅
+  - "TD3" → score 0.70 (exact_match direct) ✅
+  - "dog-leg" → score 0.59 (Ollama + contexte RAG, entre 0.35-0.65) ✅
+- `local_rag.py` charge 54 Q/R, modèle SentenceTransformer indexé
 
 ---
 

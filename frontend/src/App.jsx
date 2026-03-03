@@ -130,6 +130,8 @@ const tools = [
   { id: 'forbidden', icon: '🛑', label: 'Zone Interdite' },
 ]
 
+const STEPS = ['Carte', 'Circuit', 'Traçage', 'Export']
+
 function App() {
   const [ocadData, setOcadData] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -400,6 +402,7 @@ function App() {
   const controls = activeCircuit?.controls ?? []
   const courseDistance = computeCourseDistance(controls)
   const controlCount = controls.filter(c => c.type === 'control').length
+  const currentStep = !ocadData ? 0 : circuits.length === 0 ? 1 : activeCircuit?.status === 'complete' ? 3 : 2
   const currentSuggestion =
     activeCircuit?.status === 'ai_suggesting'
       ? activeCircuit.aiSuggestions[activeCircuit.suggestionIdx] ?? null
@@ -441,6 +444,29 @@ function App() {
 
         {/* Scrollable content */}
         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+
+          {/* Stepper */}
+          <div className="flex items-start mb-4">
+            {STEPS.map((label, i) => (
+              <div key={i} className="flex items-center flex-1 min-w-0">
+                <div className="flex flex-col items-center">
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                    i < currentStep ? 'bg-green-500 text-white' :
+                    i === currentStep ? 'bg-blue-500 text-white shadow-md shadow-blue-500/40' :
+                    'bg-gray-700 text-gray-600'
+                  }`}>
+                    {i < currentStep ? '✓' : i + 1}
+                  </div>
+                  <span className={`text-[9px] mt-1 font-medium text-center leading-tight ${
+                    i === currentStep ? 'text-blue-300' : i < currentStep ? 'text-green-400' : 'text-gray-600'
+                  }`}>{label}</span>
+                </div>
+                {i < STEPS.length - 1 && (
+                  <div className={`flex-1 h-px mx-1 mb-3 ${i < currentStep ? 'bg-green-500/60' : 'bg-gray-700'}`} />
+                )}
+              </div>
+            ))}
+          </div>
 
           {error && (
             <div className="mb-4 p-3 bg-red-900/50 border border-red-500/50 rounded-lg text-sm text-red-200">
@@ -513,7 +539,7 @@ function App() {
                 <>
                   {/* Circuit info */}
                   <div className="bg-blue-900/20 border border-blue-700/30 rounded-xl p-3">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between mb-2">
                       <div>
                         <p className="text-xs text-blue-400 uppercase tracking-wider font-medium">Circuit actif</p>
                         <p className="text-lg font-bold text-white">{activeCircuit.name}</p>
@@ -524,6 +550,24 @@ function App() {
                         {activeCircuit.status === 'setup' && <span className="text-gray-500">En cours</span>}
                       </div>
                     </div>
+                    {/* Paramètres IOF du circuit */}
+                    {(() => {
+                      const p = getCircuitParams(activeCircuit)
+                      return (
+                        <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] pt-2 border-t border-blue-700/20">
+                          <span className="text-gray-500">Distance cible</span>
+                          <span className="text-gray-200 font-medium text-right">
+                            {p.target_length_m >= 1000 ? `${(p.target_length_m / 1000).toFixed(1)} km` : `${p.target_length_m} m`}
+                          </span>
+                          <span className="text-gray-500">Temps vainqueur</span>
+                          <span className="text-gray-200 font-medium text-right">~{p.winning_time_minutes} min</span>
+                          <span className="text-gray-500">Niveau tech.</span>
+                          <span className="text-yellow-400 font-medium text-right">{p.technical_level}</span>
+                          <span className="text-gray-500">Postes cibles</span>
+                          <span className="text-gray-200 font-medium text-right">{p.target_controls}</span>
+                        </div>
+                      )
+                    })()}
                   </div>
 
                   {/* Tools */}
@@ -572,6 +616,39 @@ function App() {
                       controlCount={controlCount}
                     />
                   )}
+
+                  {/* Badge conformité IOF (visible quand circuit complet) */}
+                  {activeCircuit.status === 'complete' && controls.length > 0 && (() => {
+                    const p = getCircuitParams(activeCircuit)
+                    const distRatio = courseDistance / p.target_length_m
+                    const distOk = distRatio >= 0.75 && distRatio <= 1.25
+                    const ctrlOk = Math.abs(controlCount - p.target_controls) <= 3
+                    const allOk = distOk && ctrlOk
+                    return (
+                      <div className={`rounded-xl border p-3 text-xs ${
+                        allOk ? 'bg-green-900/20 border-green-700/30' : 'bg-yellow-900/20 border-yellow-700/30'
+                      }`}>
+                        <p className={`font-semibold mb-2 ${allOk ? 'text-green-400' : 'text-yellow-400'}`}>
+                          {allOk ? '✓ Conforme IOF' : '⚠ Hors normes IOF'}
+                        </p>
+                        <div className="space-y-1 text-gray-400">
+                          <div className="flex justify-between">
+                            <span>Distance</span>
+                            <span className={`font-medium ${distOk ? 'text-green-400' : 'text-yellow-400'}`}>
+                              {courseDistance >= 1000 ? `${(courseDistance / 1000).toFixed(1)} km` : `${courseDistance} m`}
+                              {' '}/ cible {p.target_length_m >= 1000 ? `${(p.target_length_m / 1000).toFixed(1)} km` : `${p.target_length_m} m`}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Postes</span>
+                            <span className={`font-medium ${ctrlOk ? 'text-green-400' : 'text-yellow-400'}`}>
+                              {controlCount} / cible {p.target_controls}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })()}
 
                   {/* Terrain */}
                   <TerrainPanel

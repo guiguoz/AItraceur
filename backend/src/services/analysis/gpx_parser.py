@@ -106,6 +106,32 @@ def parse_gpx(content: str) -> List[TrackPoint]:
     return points
 
 
+def extract_waypoints(content: str) -> List[TrackPoint]:
+    """
+    Extrait les waypoints <wpt> d'un fichier GPX (typiquement les postes de contrôle).
+
+    Livelox et la plupart des apps CO exportent les postes comme <wpt>.
+    Retourne une liste triée par ordre d'apparition dans le fichier.
+    """
+    if not content or not content.strip():
+        return []
+    try:
+        root = ET.fromstring(content)
+    except ET.ParseError:
+        return []
+
+    waypoints = []
+    for wpt in _findall(root, "wpt"):
+        pt = _parse_trkpt(wpt)
+        if pt is not None:
+            # Récupérer le nom du waypoint (ex: "S1", "32", "Finish")
+            name_elem = _find(wpt, "name")
+            name = name_elem.text.strip() if name_elem is not None and name_elem.text else ""
+            pt_dict = {"lat": pt.lat, "lon": pt.lon, "name": name}
+            waypoints.append(pt_dict)
+    return waypoints
+
+
 def _parse_trkpt(elem) -> Optional[TrackPoint]:
     """Parse un élément <trkpt> ou <wpt>."""
     try:

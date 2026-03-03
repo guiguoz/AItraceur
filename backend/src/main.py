@@ -1605,14 +1605,18 @@ def index_routegadget_routes(
 )
 async def multi_gpx_consensus(
     gpx_files: List[UploadFile] = File(..., description="Fichiers GPX (2-30)"),
-    controls_json: str = Form(..., description="JSON [{x: lng, y: lat, order: int}, ...]"),
+    controls_json: Optional[str] = Form(None, description="JSON [{x: lng, y: lat, order: int}, ...]. Si omis, extrait des waypoints <wpt> du premier GPX."),
     ocad_geojson: Optional[str] = Form(None, description="GeoJSON OCAD optionnel (calibration terrain)"),
     snap_radius_m: float = Form(50.0, description="Rayon de snap GPS→poste en mètres"),
     save_calibration: bool = Form(False, description="Persister la calibration dans terrain_calibration.json"),
 ):
-    """Analyse consensus de tracés GPX pour calibration terrain et scoring difficulté."""
+    """Analyse consensus de tracés GPX pour calibration terrain et scoring difficulté.
+
+    Si controls_json est omis, les postes sont extraits automatiquement des waypoints <wpt>
+    présents dans le premier fichier GPX (format standard Livelox/OCAD/Garmin).
+    """
     import json as _json
-    from src.services.analysis.gpx_parser import parse_gpx
+    from src.services.analysis.gpx_parser import parse_gpx, extract_waypoints
     from src.services.analysis.multi_gpx_analyzer import analyze_multi_gpx, save_terrain_calibration
 
     if len(gpx_files) < 2:
@@ -1626,35 +1630,49 @@ async def multi_gpx_consensus(
             detail="Maximum 30 fichiers GPX acceptés",
         )
 
-    # Parser les contrôles
-    try:
-        controls = _json.loads(controls_json)
-        if not isinstance(controls, list) or len(controls) < 2:
-            raise ValueError("controls_json doit être une liste d'au moins 2 postes")
-    except (ValueError, _json.JSONDecodeError) as e:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"controls_json invalide : {e}",
-        )
-
     # Parser le GeoJSON OCAD optionnel
     geojson_data = None
     if ocad_geojson:
         try:
             geojson_data = _json.loads(ocad_geojson)
         except _json.JSONDecodeError:
-            pass  # on ignore un GeoJSON invalide, pas bloquant
+            pass
 
-    # Lire et parser chaque GPX
+    # Lire et parser chaque GPX (conserver les contenus bruts pour extraction waypoints)
     gpx_tracks = []
+    raw_contents = []
     for gpx_file in gpx_files:
         try:
             content = (await gpx_file.read()).decode("utf-8", errors="replace")
+            raw_contents.append(content)
             track = parse_gpx(content)
             if track:
                 gpx_tracks.append(track)
         except Exception:
-            pass  # ignorer les fichiers illisibles
+            pass
+
+    # Résoudre les contrôles
+    controls = []
+    if controls_json:
+        try:
+            controls = _json.loads(controls_json)
+            if not isinstance(controls, list) or len(controls) < 2:
+                raise ValueError()
+        except (ValueError, _json.JSONDecodeError):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="controls_json invalide : liste d'au moins 2 postes [{x, y, order}] requise",
+            )
+    else:
+        # Auto-extraction depuis les waypoints du premier GPX
+        for raw in raw_contents:
+            wpts = extract_waypoints(raw)
+            if len(wpts) >= 2:
+                controls = [
+                    {"x": w["lon"], "y": w["lat"], "order": i}
+                    for i, w in enumerate(wpts)
+                ]
+                break
 
     if len(gpx_tracks) < 2:
         raise HTTPException(
@@ -1668,6 +1686,8 @@ async def multi_gpx_consensus(
         ocad_geojson=geojson_data,
         snap_radius_m=snap_radius_m,
     )
+    result["controls_source"] = "manual" if controls_json else ("waypoints" if controls else "none")
+    result["controls_count"] = len(controls)
 
     if save_calibration and result.get("terrain_calibration"):
         saved = save_terrain_calibration(

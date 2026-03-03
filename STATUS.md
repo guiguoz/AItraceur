@@ -9,10 +9,10 @@
 
 | Champ | Valeur |
 |-------|--------|
-| **Dernière étape complétée** | Étape 7a — UX stepper + paramètres IOF + badge conformité (frontend) |
+| **Dernière étape complétée** | Étape 8bis — Fix régressions GA + zones OOB OCAD + description terrain postes |
 | **Date** | 2026-03-03 |
-| **Prochaine étape** | Étape 7b — RouteGadget fetcher (URL → traces → analyse) |
-| **État global** | 🟢 13 bugs corrigés, RAG actif, 15/15 tests, UX guidée (stepper + IOF + conformité) |
+| **Prochaine étape** | Test terrain + Étape 7b — RouteGadget fetcher |
+| **État global** | 🟢 20 bugs corrigés, génération calibrée, postes ancrés terrain OCAD avec description |
 
 ---
 
@@ -37,6 +37,7 @@
 - [x] **Étape 6b** — CLI `tools/analyze_gpx.py` + controls auto-extraits des `<wpt>` GPX ✅ 2026-03-03
 - [x] **Étape 6c** — Analyse globale sans postes (fix 0 coureurs) + KMZ multi-coureurs Livelox ✅ 2026-03-03
 - [x] **Étape 7a** — UX stepper 4 étapes + paramètres IOF visibles + badge conformité ✅ 2026-03-03
+- [x] **Étape 8bis** — Fix régressions GA (snap + use_smart) + zones OOB OCAD + description terrain ✅ 2026-03-03
 
 ---
 
@@ -69,6 +70,23 @@
 | 11 | genetic_algo.py — pop. initiale trop étalée → circuits longs 2× trop longs | `backend/src/services/generation/genetic_algo.py` | 🔴 Critique | ✅ Étape 3b |
 | 12 | genetic_algo.py — too_close en degrés Euclidiens (jamais actif) → Haversine 60m | `backend/src/services/generation/genetic_algo.py` | 🟠 Important | ✅ Étape 3c |
 | 13 | ai_generator.py — min_control_distance fixe (60m) sans différencier sprint/classique | `backend/src/services/generation/ai_generator.py` | 🟡 Moyen | ✅ Étape 3c |
+| 14 | **Postes générés complètement hors carte** — bbox extraite du GeoJSON peut être en Lambert-93 si reprojection CRS échoue ; tile service a des bounds WGS84 fiables | `frontend/src/App.jsx` | 🔴 Critique | ✅ Étape 8 — bbox depuis `imageData.bounds` (tile service) en priorité + validation WGS84 |
+| 15 | **candidate_points ignorés** — les 400 features OCAD (buttes, dépressions, lisières…) ne sont pas passées au GA ; postes placés aléatoirement sans ancrage terrain | `ai_generator.py` (GenerationConfig) + `genetic_algo.py` | 🔴 Critique | ✅ Étape 8 — `candidate_points` dans `GenerationConfig` + `_find_nearest_cp()` + snap dans smart_circuit + snap 40% perturbation |
+| 16 | **Coordonnées départ/arrivée** — `start_position: [lng, lat]` correctement transmis si départ placé sur carte ; pas de problème identifié | `frontend/src/App.jsx` → endpoint `/generate` | 🟡 Moyen | ✅ Étape 8 — confirmé correct après audit |
+| 17 | **Pertinence terrain non utilisée** — postes placés sans considérer les éléments remarquables ISOM (butte, limite végétation, clôture, dépression…) | `genetic_algo.py` | 🟠 Important | ✅ Étape 8 — résolu par fix #15 (snap vers features attractives ISOM) |
+| 18 | **Snap dans `_create_smart_circuit` causait circuits 26km** — rayon 800m sur carte dense (400 CPs / 50km²) → chaque pas = 1200m au lieu de 400m → population initiale trop longue, GA sans gradient | `genetic_algo.py` | 🔴 Critique | ✅ Étape 8bis — snap supprimé de l'init ; conservé à 40% dans `_mutate_perturbation` uniquement |
+| 19 | **Seuil `use_smart > 3000m` laissait circuits courts en init 100% aléatoire** — sur bbox 9km×5.5km → circuits ~26km pour cible 2500m | `genetic_algo.py` | 🔴 Critique | ✅ Étape 8bis — toujours 80% smart init quelle que soit la longueur cible |
+| 20 | **Postes placés en zones OOB OCAD** (propriété privée, zone interdite — ISOM 520/527/528) sans aucune contrainte | `frontend/src/App.jsx` | 🟠 Important | ✅ Étape 8bis — `extractOobZones()` extrait les polygones OOB du GeoJSON OCAD et les ajoute aux `forbidden_zones` |
+
+---
+
+### 🚨 Note prioritaire (2026-03-03) — Test terrain révèle que la génération est non fonctionnelle
+Test utilisateur révèle 3 problèmes critiques bloquants :
+1. **Postes hors carte** : les controls suggérés apparaissent en dehors de la zone cartographiée
+2. **Pas d'ancrage terrain** : aucune feature ISOM (butte, dépression, lisière) n'est utilisée comme poste
+3. **Pipeline à auditer** : vérifier que bounding_box, start_pos, end_pos et candidate_points sont bien transmis du frontend → backend → GA
+
+**Plan d'action Étape 8** : audit complet du flux de données frontend→GA, correction bounding_box, intégration candidate_points.
 
 ---
 
@@ -330,6 +348,53 @@ Ouvrir le navigateur : http://localhost:5173
 - **Endpoint `POST /api/v1/analysis/routegadget-consensus`** : pipeline direct RouteGadget → analyse consensus (fetch GPS via `get_all_routes()` + analyse + calibration optionnelle)
 - **Flux Livelox** : export GPX manuel depuis interface Livelox → charger via `/multi-gpx-consensus`
 - 15/15 tests ✅
+
+---
+
+### Étape 8 — Audit + fix pipeline génération ✅ (2026-03-03)
+**Contexte** : test terrain révèle postes hors carte + aucun ancrage sur éléments OCAD.
+
+**Bug #14 résolu** : `handleAiGenerate` utilisait `extractBoundingBox(geojson)` qui peut retourner des coordonnées Lambert-93 si la reprojection CRS échoue. Fix : utiliser `imageData.bounds` (retourné par le tile service, toujours WGS84 fiable) en priorité. Fallback GeoJSON avec validation : si `|min_x| > 180` ou `|min_y| > 90` → erreur explicite "La carte n'est pas géoréférencée".
+
+**Bug #15 résolu** (+ #17) : `candidate_points` (400 features OCAD attractives) était envoyé par le frontend mais perdu en chemin — `GenerationConfig` n'avait pas le champ, le GA ne l'utilisait jamais.
+- `GenerationConfig` : nouveau champ `candidate_points: List[Dict]`
+- `GeneticAlgorithm._find_nearest_cp(x, y, max_dist_m)` : helper qui retourne le CP OCAD le plus proche dans le rayon
+- `_create_smart_circuit()` : snap au CP voisin (rayon = 2× jambe cible) après placement de chaque poste
+- `_mutate_perturbation()` : 40% de probabilité de snap après déplacement (exploration terrain-aware)
+- `ai_generator.py` : `candidate_points=request.candidate_points` passé à `GenerationConfig`
+
+**Bug #16 vérifié** : `start_position` est correctement transmis en `[lng, lat]` (WGS84) si l'utilisateur a placé un départ.
+
+**Fichiers modifiés** :
+- `frontend/src/App.jsx` — bbox depuis tile service bounds + validation WGS84
+- `backend/src/services/generation/genetic_algo.py` — GenerationConfig + _find_nearest_cp + snap ×2
+- `backend/src/services/generation/ai_generator.py` — candidate_points passé à GenerationConfig
+
+---
+
+### Étape 8bis — Fix régressions GA + zones OOB + description terrain ✅ (2026-03-03)
+
+**Contexte** : tests terrain sur Port-en-Bessin (28907 features OCAD, Lambert-93 → WGS84) révèlent 3 nouveaux problèmes.
+
+**Bug #18 résolu** : snap dans `_create_smart_circuit` causait circuits 26km (cible 4km).
+- Cause : rayon snap = 2× jambe cible = 800m sur carte dense (400 CPs / 50km²) → snap se déclenche à chaque pas → déplacement ~1200m par poste → circuit initial ~9km → tout la population initiale a `length_score = 0` → GA sans gradient, mutations (±48m) incapables de réduire 26km à 4km.
+- Fix : snap supprimé de `_create_smart_circuit` ; snap 40% conservé dans `_mutate_perturbation` (terrain-aware après calibration).
+
+**Bug #19 résolu** : seuil `use_smart = target_length_m > 3000` laissait les circuits courts (Vert/Orange, 2000-2500m) en initialisation 100% aléatoire sur bbox 9km×5.5km → circuits initiaux ~26km.
+- Fix : `smart_count = int(population_size × 0.8)` toujours, sans condition sur la longueur cible.
+
+**Bug #20 résolu** : postes pouvaient tomber sur des zones interdites OCAD (propriété privée ISOM 520, zone interdite ISOM 527/528) car le GA ne connaissait pas ces polygones.
+- Fix : `extractOobZones(geojson)` dans `App.jsx` extrait les polygones (Polygon + MultiPolygon) des features ISOM 520/527/528 et les ajoute à `forbidden_zones_polygons` envoyées au backend.
+
+**Feature : description terrain pour chaque poste**
+- `_describe_control(x, y, candidate_points, radius_m=80)` dans `ai_generator.py` : cherche le CP OCAD le plus proche dans 80m, retourne sa description française (ex. "angle de clôture / haie", "lisière de forêt", "fond de dépression") depuis `ISOM_DESCRIPTIONS`.
+- `AISuggestionPanel.jsx` : affiche la description terrain en violet sous le type de poste.
+
+**Fichiers modifiés** :
+- `backend/src/services/generation/genetic_algo.py` — suppression snap init, suppression seuil use_smart
+- `backend/src/services/generation/ai_generator.py` — ISOM_DESCRIPTIONS + _describe_control() + boucle postes
+- `frontend/src/App.jsx` — extractOobZones + description dans suggestions
+- `frontend/src/components/AISuggestionPanel.jsx` — affichage description terrain
 
 ---
 

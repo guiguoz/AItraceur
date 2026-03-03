@@ -114,6 +114,62 @@ FEATURE_GUIDANCE_PROMPT = (
     'Réponds en JSON uniquement : {{"isom_types": ["depression", "rocher", "talus", ...]}}'
 )
 
+# French descriptions for ISOM 2017 codes — displayed to the traceur for each suggested control
+ISOM_DESCRIPTIONS: Dict[int, str] = {
+    # Terrain forms
+    101: "sommet de butte",
+    102: "extrémité d'épaulement",
+    103: "selle / col",
+    104: "crête",
+    105: "sommet de colline",
+    106: "pied de talus / remblai",
+    107: "tertre",
+    108: "butte rocheuse",
+    109: "fond de dépression",
+    110: "petite dépression",
+    111: "trou / fosse",
+    112: "creux allongé",
+    113: "terrasse / plateforme",
+    114: "ravin",
+    115: "petite fosse",
+    116: "sol creusé / excavation",
+    118: "rocher isolé",
+    119: "groupe de rochers",
+    120: "falaise / paroi",
+    # Hydrography
+    201: "bord de lac / étang",
+    202: "bord de marécage",
+    203: "bord de marécage traversable",
+    204: "zone humide",
+    209: "fontaine / source",
+    210: "coude de cours d'eau",
+    211: "coude de petit cours d'eau",
+    212: "extrémité de fossé",
+    215: "bord de rivière",
+    # Vegetation
+    301: "angle de limite de végétation",
+    302: "limite de végétation",
+    303: "angle de clairière",
+    304: "lisière de forêt",
+    305: "angle de végétation ouverte",
+    306: "extrémité de broussaille",
+    308: "arbre remarquable",
+    # Path network
+    401: "carrefour de chemins",
+    402: "croisement de chemins",
+    403: "embranchement de piste",
+    404: "coude de sentier",
+    405: "extrémité de chemin",
+    406: "extrémité d'ancien chemin",
+    # Man-made features
+    501: "angle de bâtiment",
+    502: "ruine",
+    516: "angle de clôture / haie",
+    521: "angle de zone construite",
+    522: "angle de zone pavée",
+    529: "carrefour de chemins pavés",
+}
+
 ISOM_TERM_MAP = {
     "depression": [109, 110, 111, 112], "dépression": [109, 110, 111, 112],
     "fosse": [111], "trou": [111], "cuvette": [110],
@@ -212,6 +268,7 @@ class AIGenerator:
             generations=max(50, request.target_controls * 7),
             bounding_box=request.bounding_box,
             min_control_distance=min_dist,
+            candidate_points=request.candidate_points,
         )
 
         # Initialiser le GA
@@ -238,17 +295,21 @@ class AIGenerator:
         for i, circuit in enumerate(result.circuits[:num_variants]):
             controls = []
             for j, pos in enumerate(circuit.controls):
+                ctrl_type = (
+                    "start" if j == 0
+                    else "finish" if j == len(circuit.controls) - 1
+                    else "control"
+                )
+                desc = self._describe_control(
+                    pos[0], pos[1], request.candidate_points
+                )
                 controls.append(
                     {
                         "order": j + 1,
                         "x": pos[0],
                         "y": pos[1],
-                        "type": "start"
-                        if j == 0
-                        else "finish"
-                        if j == len(circuit.controls) - 1
-                        else "control",
-                        "description": f"Poste {j + 1}",
+                        "type": ctrl_type,
+                        "description": desc,
                     }
                 )
 
@@ -364,6 +425,34 @@ class AIGenerator:
         except Exception as e:
             print(f"Erreur génération IA: {e}")
             return []
+
+    def _describe_control(
+        self,
+        x: float,
+        y: float,
+        candidate_points: List[Dict],
+        radius_m: float = 80.0,
+    ) -> str:
+        """Retourne la description ISOM du CP le plus proche, ou 'Position libre'."""
+        import math
+
+        R = 6371000.0
+        best_desc = None
+        best_d = radius_m
+
+        for cp in candidate_points:
+            lat1 = math.radians(y)
+            lat2 = math.radians(cp["y"])
+            dlat = math.radians(cp["y"] - y)
+            dlng = math.radians(cp["x"] - x)
+            a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlng / 2) ** 2
+            d = R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+            if d < best_d:
+                best_d = d
+                isom = cp.get("isom")
+                best_desc = ISOM_DESCRIPTIONS.get(isom, f"ISOM {isom}") if isom else None
+
+        return best_desc or "Position libre"
 
     def _calculate_length(self, controls: List[Tuple[float, float]]) -> float:
         """Calcule la longueur totale en mètres (formule Haversine, coordonnées WGS84)."""

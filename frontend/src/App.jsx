@@ -88,8 +88,12 @@ const ATTRACTIVE_ISOM = new Set([
   201,202,203,204,205,206,209,210,211,212,215,
   301,302,303,304,305,306,308,
   401,402,403,404,405,406,
-  501,502,516,521,522,529,
+  501,502,516,521,522,
 ])
+
+// ISOM codes representing out-of-bounds / forbidden areas (olive green, cross-hatched…)
+// These polygons are automatically extracted and passed as forbidden_zones to the GA.
+const OOB_ISOM = new Set([520, 527, 528, 709, 714])
 
 function computeGeoCentroid(geometry) {
   if (!geometry) return null
@@ -102,6 +106,27 @@ function computeGeoCentroid(geometry) {
     coords.reduce((s, c) => s + c[0], 0) / coords.length,
     coords.reduce((s, c) => s + c[1], 0) / coords.length,
   ]
+}
+
+// Extract out-of-bounds polygon areas from OCAD GeoJSON.
+// Returns list of coordinate rings [[lng, lat], ...] matching the backend's
+// forbidden_zones format (GeoJSON WGS84, x=lng / y=lat).
+function extractOobZones(geojson) {
+  const zones = []
+  for (const f of geojson.features) {
+    const sym = f.properties?.sym
+    if (!sym) continue
+    const isom = Math.floor(sym / 1000)
+    if (!OOB_ISOM.has(isom)) continue
+    const geom = f.geometry
+    if (!geom) continue
+    if (geom.type === 'Polygon') {
+      zones.push(geom.coordinates[0])
+    } else if (geom.type === 'MultiPolygon') {
+      for (const poly of geom.coordinates) zones.push(poly[0])
+    }
+  }
+  return zones
 }
 
 function extractCandidatePoints(geojson, max = 400) {
@@ -267,7 +292,25 @@ function App() {
     setIsGenerating(true)
     setGenerationError(null)
     try {
-      const bbox = extractBoundingBox(ocadData.geojson)
+      // Use tile service bounds (reliable WGS84 from CRS pipeline) if available.
+      // Falls back to GeoJSON extraction — validated to be WGS84 range.
+      let bbox
+      if (imageData?.bounds) {
+        // imageData.bounds = [[southLat, westLng], [northLat, eastLng]] (Leaflet format)
+        const [[southLat, westLng], [northLat, eastLng]] = imageData.bounds
+        bbox = { min_x: westLng, min_y: southLat, max_x: eastLng, max_y: northLat }
+      } else {
+        bbox = extractBoundingBox(ocadData.geojson)
+        // Sanity check: WGS84 coordinates must be in ±180° / ±90°
+        if (Math.abs(bbox.min_x) > 180 || Math.abs(bbox.max_x) > 180 ||
+            Math.abs(bbox.min_y) > 90  || Math.abs(bbox.max_y) > 90) {
+          throw new Error(
+            'La carte n\'est pas géoréférencée en WGS84. ' +
+            'Démarrez le service de tuiles (port 8089) et rechargez la carte.'
+          )
+        }
+      }
+      console.log('[AI Generate] bbox WGS84:', bbox)
       const circuitParams = getCircuitParams(activeCircuit)
       const startControl = activeCircuit.controls.find(c => c.type === 'start')
       const mapContext = buildMapContext(ocadData.geojson)
@@ -279,8 +322,11 @@ function App() {
         ...circuitParams,
         ...(mapContext && { map_context: mapContext }),
         ...(startControl && { start_position: [startControl.lng, startControl.lat] }),
-        // Pass forbidden zones in polygon format
-        forbidden_zones_polygons: activeCircuit.forbiddenZones,
+        // Forbidden zones: user-drawn + OCAD out-of-bounds areas (ISOM 520, 527…)
+        forbidden_zones_polygons: [
+          ...activeCircuit.forbiddenZones,
+          ...extractOobZones(ocadData.geojson),
+        ],
         // Pass already-placed mandatory controls
         required_controls: activeCircuit.controls
           .filter(c => c.type === 'control')
@@ -305,6 +351,7 @@ function App() {
           lat: c.y,
           lng: c.x,
           order: c.order ?? idx + 1,
+          description: c.description || '',
         }))
         .filter(s => !(s.type === 'start' && hasStart) && !(s.type === 'finish' && hasFinish))
 

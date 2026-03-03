@@ -41,6 +41,9 @@ class GenerationConfig:
     # Bounding box WGS84 {min_x, min_y, max_x, max_y} — pour contraindre les positions
     bounding_box: dict = None
 
+    # Features OCAD attractives (buttes, dépressions, lisières…) — ancrage terrain
+    candidate_points: List[Dict] = field(default_factory=list)  # [{x, y, isom}, ...]
+
     # Paramètres génétiques
     population_size: int = 50
     generations: int = 100
@@ -105,6 +108,29 @@ class GeneticAlgorithm:
     def set_graph(self, graph):
         """Définit le graphe de navigation."""
         self.graph = graph
+
+    def _find_nearest_cp(
+        self,
+        x: float,
+        y: float,
+        max_dist_m: float,
+    ) -> Optional[Tuple[float, float]]:
+        """Retourne le candidate_point OCAD le plus proche dans un rayon max_dist_m.
+
+        Permet d'ancrer les postes sur des features terrain réelles (butte, dépression,
+        lisière, clôture…) plutôt que sur des positions purement aléatoires.
+        Retourne None si aucun point dans le rayon.
+        """
+        if not self.config.candidate_points:
+            return None
+        best = None
+        best_d = max_dist_m
+        for cp in self.config.candidate_points:
+            d = self._haversine_m((x, y), (cp["x"], cp["y"]))
+            if d < best_d:
+                best_d = d
+                best = (cp["x"], cp["y"])
+        return best
 
     def generate(
         self,
@@ -191,12 +217,12 @@ class GeneticAlgorithm:
     ) -> List[Circuit]:
         """Initialise une population.
 
-        Pour les circuits longs (>3km) : 80% smart (jambes calibrées) + 20% aléatoire.
-        Pour les circuits courts (sprint) : 100% aléatoire (comportement inchangé).
+        80% smart (jambes calibrées à target_leg_m) + 20% aléatoire pour la diversité.
+        L'initialisation smart est indispensable sur les grandes cartes (bbox > 2× target) :
+        les circuits aléatoires seraient trop longs pour que le GA converge.
         """
         population = []
-        use_smart = self.config.target_length_m > 3000
-        smart_count = int(self.config.population_size * 0.8) if use_smart else 0
+        smart_count = int(self.config.population_size * 0.8)
 
         for i in range(self.config.population_size):
             if i < smart_count:
@@ -550,6 +576,7 @@ class GeneticAlgorithm:
     ) -> List[Tuple[float, float]]:
         """Déplacement fort ±25% d'une jambe cible pour sortir des minima locaux.
 
+        40% de probabilité de snapper sur un feature OCAD attractif voisin.
         Proportionnel à la longueur cible : ±62m pour sprint, ±117m pour circuit long.
         """
         idx = random.randint(1, len(controls) - 2)
@@ -557,6 +584,11 @@ class GeneticAlgorithm:
         delta_m = random.uniform(-leg_m * 0.25, leg_m * 0.25)
         x = controls[idx][0] + delta_m / 72600
         y = controls[idx][1] + delta_m / 111000
+        # 40% snap vers feature OCAD attractif le plus proche
+        if random.random() < 0.40:
+            cp = self._find_nearest_cp(x, y, leg_m * 2.0)
+            if cp:
+                x, y = cp
         if not self._is_in_forbidden_zone(x, y, forbidden_zones):
             controls[idx] = (x, y)
         return controls

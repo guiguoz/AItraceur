@@ -30,6 +30,15 @@ export default function AISuggestionPanel({ activeCircuit, onValidate, onSkip })
       </div>
 
       <p className="text-sm text-white font-medium mb-0.5">{typeLabel}</p>
+      {suggestion.description && suggestion.description !== 'Position libre' && (
+        <p className="text-xs text-purple-300 font-medium mb-1 flex items-center gap-1">
+          <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+          {suggestion.description}
+        </p>
+      )}
       <p className="text-xs text-gray-400 mb-3">
         {suggestion.lat.toFixed(5)}°N, {suggestion.lng.toFixed(5)}°E
         <span className="block text-gray-500 mt-0.5">Faites glisser le marqueur violet pour ajuster la position</span>

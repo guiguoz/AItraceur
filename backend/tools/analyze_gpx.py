@@ -112,15 +112,30 @@ def main():
     print(f"{'='*60}")
 
     if result["speed_per_leg"]:
-        print("\nVitesse par jambe (m/min) :")
-        for leg, stats in sorted(result["speed_per_leg"].items(), key=lambda x: int(x[0])):
-            cv = result["difficulty_per_leg"].get(leg, 0)
-            difficulty = "⚡ DIFFICILE" if cv > 0.3 else ("~ moyen" if cv > 0.15 else "✓ facile")
-            print(f"  Jambe {leg}: moy={stats['mean']:.0f}, médiane={stats['median']:.0f}, "
-                  f"σ={stats['std']:.0f} m/min — {difficulty} (CV={cv:.2f})")
+        has_global = "global" in result["speed_per_leg"]
+        if has_global:
+            stats = result["speed_per_leg"]["global"]
+            print(f"\nVitesse globale (course entière, {stats['runners']} coureurs) :")
+            print(f"  moy={stats['mean']:.0f}, médiane={stats['median']:.0f}, σ={stats['std']:.0f} m/min")
+            print("  (Sans postes — pas de découpage par jambe)")
+        else:
+            print("\nVitesse par jambe (m/min) :")
+            def _leg_sort(x):
+                try:
+                    return int(x[0])
+                except ValueError:
+                    return 9999
+            for leg, stats in sorted(result["speed_per_leg"].items(), key=_leg_sort):
+                cv = result["difficulty_per_leg"].get(leg, 0)
+                difficulty = "⚡ DIFFICILE" if cv > 0.3 else ("~ moyen" if cv > 0.15 else "✓ facile")
+                print(f"  Jambe {leg}: moy={stats['mean']:.0f}, médiane={stats['median']:.0f}, "
+                      f"σ={stats['std']:.0f} m/min — {difficulty} (CV={cv:.2f})")
     else:
-        print("\n[INFO] Pas d'analyse par jambe (postes non disponibles ou snap échoué)")
-        print("       Augmente --radius si les postes sont dans le fichier mais non détectés")
+        print("\n[INFO] Pas d'analyse (aucune trace valide avec timestamps)")
+
+    if result.get("consensus_path", {}).get("global"):
+        n_cells = len(result["consensus_path"]["global"])
+        print(f"\nConsensus de tracé : {n_cells} cellules 20m×20m fréquentées (≥10% des coureurs)")
 
     if result.get("avoided_zones"):
         print(f"\nZones évitées : {len(result['avoided_zones'])} cellules 20m×20m")

@@ -170,7 +170,7 @@ def analyze_multi_gpx(
     controls_sorted = sorted(controls, key=lambda c: c.get("order", 0))
     n_legs = len(controls_sorted) - 1
 
-    if n_legs < 1 or not gpx_tracks:
+    if not gpx_tracks:
         return {
             "runners_analyzed": 0,
             "legs_analyzed": 0,
@@ -181,6 +181,10 @@ def analyze_multi_gpx(
             "terrain_calibration": {},
             "training_examples": [],
         }
+
+    # Sans postes → analyse globale (vitesse totale + consensus de tracé)
+    if n_legs < 1:
+        return _analyze_without_controls(gpx_tracks, ocad_geojson)
 
     # ── Snap chaque track aux postes ─────────────────────────────────────────
     valid_snaps: List[Tuple[List[TrackPoint], List[int]]] = []
@@ -315,6 +319,79 @@ def analyze_multi_gpx(
         "avoided_zones": avoided_zones[:20],  # limiter la taille de la réponse
         "terrain_calibration": terrain_calibration,
         "training_examples": training_examples,
+    }
+
+
+# ── Analyse globale (sans postes) ─────────────────────────────────────────────
+
+def _analyze_without_controls(
+    gpx_tracks: List[List[TrackPoint]],
+    ocad_geojson: Optional[Dict] = None,
+) -> Dict:
+    """
+    Analyse globale quand aucun poste n'est disponible.
+    Calcule vitesse totale de chaque coureur + heatmap de tous les points.
+    """
+    valid_tracks = [t for t in gpx_tracks if len(t) >= 2]
+    speeds: List[float] = []
+    all_points: List[Tuple[float, float]] = []
+
+    for track in valid_tracks:
+        t_start = track[0].time
+        t_end = track[-1].time
+        if t_start is not None and t_end is not None:
+            delta_s = (t_end - t_start).total_seconds()
+            dist_m = sum(
+                _haversine_m((track[i].lon, track[i].lat), (track[i + 1].lon, track[i + 1].lat))
+                for i in range(len(track) - 1)
+            )
+            if delta_s > 0 and dist_m >= 100:
+                speed_mpm = dist_m / (delta_s / 60.0)
+                if 50 <= speed_mpm <= 400:
+                    speeds.append(speed_mpm)
+        all_points.extend((pt.lat, pt.lon) for pt in track)
+
+    speed_global: Dict = {}
+    if speeds:
+        mean_s = sum(speeds) / len(speeds)
+        sorted_s = sorted(speeds)
+        mid = len(sorted_s) // 2
+        median_s = sorted_s[mid] if len(sorted_s) % 2 else (sorted_s[mid - 1] + sorted_s[mid]) / 2
+        variance = sum((s - mean_s) ** 2 for s in speeds) / len(speeds)
+        std_s = math.sqrt(variance)
+        speed_global = {
+            "mean": round(mean_s, 1),
+            "median": round(median_s, 1),
+            "std": round(std_s, 1),
+            "runners": len(speeds),
+        }
+
+    # Heatmap globale 20m×20m
+    cell_m = 20.0
+    lat_step = cell_m / 111_000.0
+    lng_step = cell_m / 72_600.0
+    cell_counts: Dict[Tuple, int] = defaultdict(int)
+    n_runners = len(valid_tracks)
+    for lat, lng in all_points:
+        key = (round(lat / lat_step) * lat_step, round(lng / lng_step) * lng_step)
+        cell_counts[key] += 1
+
+    top_cells = sorted(cell_counts.items(), key=lambda x: -x[1])[:100]
+    consensus_all = [
+        {"lat": round(k[0], 6), "lon": round(k[1], 6), "frequency": round(v / n_runners, 2)}
+        for k, v in top_cells
+        if v / n_runners >= 0.1
+    ]
+
+    return {
+        "runners_analyzed": n_runners,
+        "legs_analyzed": 0,
+        "speed_per_leg": {"global": speed_global} if speed_global else {},
+        "difficulty_per_leg": {},
+        "consensus_path": {"global": consensus_all},
+        "avoided_zones": [],
+        "terrain_calibration": {},
+        "training_examples": [],
     }
 
 

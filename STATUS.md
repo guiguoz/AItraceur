@@ -9,10 +9,10 @@
 
 | Champ | Valeur |
 |-------|--------|
-| **Dernière étape complétée** | Étape 6a — Persistance calibration terrain + pipeline RouteGadget |
+| **Dernière étape complétée** | Étape 6b — CLI analyze_gpx.py + controls auto-extraits des waypoints GPX |
 | **Date** | 2026-03-03 |
-| **Prochaine étape** | À définir (frontend GPX, LoRA, ou autre) |
-| **État global** | 🟢 13 bugs corrigés, RAG actif (54 Q/R), 15/15 tests, calibration terrain persistée |
+| **Prochaine étape** | Test avec GPX Livelox réels, puis frontend ou fine-tuning LoRA |
+| **État global** | 🟢 13 bugs corrigés, RAG actif (54 Q/R), 15/15 tests, calibration terrain persistée, CLI GPX |
 
 ---
 
@@ -34,6 +34,7 @@
 - [x] **Étape 5b** — Dataset RAG 54 Q/R créé (mondial_tracage_QR_v4.jsonl) ✅ 2026-03-02
 - [x] **Étape 5d** — Analyse multi-GPX consensus (gpx_parser + multi_gpx_analyzer + endpoint) ✅ 2026-03-03
 - [x] **Étape 6a** — Persistance calibration terrain + pipeline RouteGadget ✅ 2026-03-03
+- [x] **Étape 6b** — CLI `tools/analyze_gpx.py` + controls auto-extraits des `<wpt>` GPX ✅ 2026-03-03
 
 ---
 

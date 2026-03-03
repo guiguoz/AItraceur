@@ -9,10 +9,10 @@
 
 | Champ | Valeur |
 |-------|--------|
-| **Dernière étape complétée** | Étape 6b — CLI analyze_gpx.py + controls auto-extraits des waypoints GPX |
+| **Dernière étape complétée** | Étape 7a — UX stepper + paramètres IOF + badge conformité (frontend) |
 | **Date** | 2026-03-03 |
-| **Prochaine étape** | Test avec GPX Livelox réels, puis frontend ou fine-tuning LoRA |
-| **État global** | 🟢 13 bugs corrigés, RAG actif (54 Q/R), 15/15 tests, calibration terrain persistée, CLI GPX |
+| **Prochaine étape** | Étape 7b — RouteGadget fetcher (URL → traces → analyse) |
+| **État global** | 🟢 13 bugs corrigés, RAG actif, 15/15 tests, UX guidée (stepper + IOF + conformité) |
 
 ---
 
@@ -35,6 +35,8 @@
 - [x] **Étape 5d** — Analyse multi-GPX consensus (gpx_parser + multi_gpx_analyzer + endpoint) ✅ 2026-03-03
 - [x] **Étape 6a** — Persistance calibration terrain + pipeline RouteGadget ✅ 2026-03-03
 - [x] **Étape 6b** — CLI `tools/analyze_gpx.py` + controls auto-extraits des `<wpt>` GPX ✅ 2026-03-03
+- [x] **Étape 6c** — Analyse globale sans postes (fix 0 coureurs) + KMZ multi-coureurs Livelox ✅ 2026-03-03
+- [x] **Étape 7a** — UX stepper 4 étapes + paramètres IOF visibles + badge conformité ✅ 2026-03-03
 
 ---
 

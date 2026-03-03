@@ -3,7 +3,9 @@
 # Sprint 5: Optimisation des positions de postes
 # =============================================
 
+import json
 import math
+import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
@@ -15,6 +17,7 @@ from datetime import datetime
 
 # Multiplicateurs de vitesse OCAD/ISOM 2017 (relatif à terrain plat idéal = 1.0)
 # Basés sur passability de ocad_semantics.json + pratique CO
+# Ces valeurs théoriques sont surchargées par terrain_calibration.json si disponible.
 OCAD_TERRAIN_MULTIPLIERS = {
     "open":           1.00,   # Terrain ouvert (vert clair ISOM 401)
     "rough_open":     0.85,   # Terrain ouvert accidenté
@@ -30,6 +33,28 @@ OCAD_TERRAIN_MULTIPLIERS = {
     "wet":            0.55,   # Terrain humide
     "fight":          0.30,   # Taillis dense
 }
+
+
+def _load_calibrated_multipliers() -> Dict[str, float]:
+    """Charge terrain_calibration.json et retourne les multiplicateurs calibrés."""
+    cal_path = os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "data", "terrain_calibration.json")
+    )
+    try:
+        with open(cal_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if data.get("calibrated") and data.get("multipliers"):
+                return data["multipliers"]
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    return {}
+
+
+# Surcharger les valeurs théoriques avec les données calibrées (si disponibles)
+_calibrated = _load_calibrated_multipliers()
+if _calibrated:
+    OCAD_TERRAIN_MULTIPLIERS = {**OCAD_TERRAIN_MULTIPLIERS, **_calibrated}
+    print(f"[OK] Calibration terrain chargée : {len(_calibrated)} type(s) — {list(_calibrated.keys())}")
 
 
 def tobler_speed_multiplier(slope: float) -> float:

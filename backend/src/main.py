@@ -1604,15 +1604,16 @@ def index_routegadget_routes(
     ),
 )
 async def multi_gpx_consensus(
-    gpx_files: List[UploadFile] = File(..., description="Fichiers GPX (2-20)"),
+    gpx_files: List[UploadFile] = File(..., description="Fichiers GPX (2-30)"),
     controls_json: str = Form(..., description="JSON [{x: lng, y: lat, order: int}, ...]"),
     ocad_geojson: Optional[str] = Form(None, description="GeoJSON OCAD optionnel (calibration terrain)"),
     snap_radius_m: float = Form(50.0, description="Rayon de snap GPS→poste en mètres"),
+    save_calibration: bool = Form(False, description="Persister la calibration dans terrain_calibration.json"),
 ):
     """Analyse consensus de tracés GPX pour calibration terrain et scoring difficulté."""
     import json as _json
     from src.services.analysis.gpx_parser import parse_gpx
-    from src.services.analysis.multi_gpx_analyzer import analyze_multi_gpx
+    from src.services.analysis.multi_gpx_analyzer import analyze_multi_gpx, save_terrain_calibration
 
     if len(gpx_files) < 2:
         raise HTTPException(
@@ -1667,6 +1668,88 @@ async def multi_gpx_consensus(
         ocad_geojson=geojson_data,
         snap_radius_m=snap_radius_m,
     )
+
+    if save_calibration and result.get("terrain_calibration"):
+        saved = save_terrain_calibration(
+            result["terrain_calibration"],
+            result["runners_analyzed"],
+            source="multi-gpx",
+        )
+        result["calibration_saved"] = saved
+
+    return result
+
+
+@app.post(
+    "/api/v1/analysis/routegadget-consensus",
+    summary="Analyse consensus depuis RouteGadget",
+    description=(
+        "Récupère les traces GPS d'un événement RouteGadget et lance l'analyse consensus. "
+        "Équivalent de multi-gpx-consensus mais les GPX viennent directement de RouteGadget."
+    ),
+)
+async def routegadget_consensus(
+    event_id: str = Form(..., description="ID de l'événement RouteGadget"),
+    course_name: str = Form(..., description="Nom du circuit (ex: H21E)"),
+    controls_json: str = Form(..., description="JSON [{x: lng, y: lat, order: int}, ...]"),
+    snap_radius_m: float = Form(50.0, description="Rayon de snap GPS→poste en mètres"),
+    save_calibration: bool = Form(False, description="Persister la calibration terrain"),
+):
+    """Analyse consensus depuis les traces RouteGadget (GPS inclus)."""
+    import json as _json
+    from src.services.knowledge_base.scrapers.routegadget import RouteGadgetScraper
+    from src.services.analysis.multi_gpx_analyzer import (
+        analyze_multi_gpx,
+        routegadget_to_trackpoints,
+        save_terrain_calibration,
+    )
+
+    try:
+        controls = _json.loads(controls_json)
+        if not isinstance(controls, list) or len(controls) < 2:
+            raise ValueError()
+    except (ValueError, _json.JSONDecodeError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="controls_json invalide : liste d'au moins 2 postes requise",
+        )
+
+    scraper = RouteGadgetScraper()
+    try:
+        rg_tracks = scraper.get_all_routes(event_id, course_name)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Impossible de récupérer les traces RouteGadget : {e}",
+        )
+
+    if len(rg_tracks) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Seulement {len(rg_tracks)} trace(s) récupérée(s) — minimum 2 requis",
+        )
+
+    gpx_tracks = [routegadget_to_trackpoints(t.route) for t in rg_tracks]
+    gpx_tracks = [t for t in gpx_tracks if len(t) >= 2]
+
+    result = analyze_multi_gpx(
+        gpx_tracks=gpx_tracks,
+        controls=controls,
+        snap_radius_m=snap_radius_m,
+    )
+    result["source"] = "routegadget"
+    result["event_id"] = event_id
+    result["course"] = course_name
+    result["total_tracks_fetched"] = len(rg_tracks)
+
+    if save_calibration and result.get("terrain_calibration"):
+        saved = save_terrain_calibration(
+            result["terrain_calibration"],
+            result["runners_analyzed"],
+            source=f"routegadget:{event_id}/{course_name}",
+        )
+        result["calibration_saved"] = saved
+
     return result
 
 

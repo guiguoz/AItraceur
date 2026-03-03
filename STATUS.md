@@ -9,10 +9,10 @@
 
 | Champ | Valeur |
 |-------|--------|
-| **Dernière étape complétée** | Étape 5d — Analyse multi-GPX consensus (gpx_parser + multi_gpx_analyzer) |
+| **Dernière étape complétée** | Étape 6a — Persistance calibration terrain + pipeline RouteGadget |
 | **Date** | 2026-03-03 |
-| **Prochaine étape** | À définir (Étape 6 LoRA, ou intégration frontend GPX) |
-| **État global** | 🟢 13 bugs corrigés, RAG actif (54 Q/R), 15/15 tests, endpoint multi-GPX opérationnel |
+| **Prochaine étape** | À définir (frontend GPX, LoRA, ou autre) |
+| **État global** | 🟢 13 bugs corrigés, RAG actif (54 Q/R), 15/15 tests, calibration terrain persistée |
 
 ---
 
@@ -32,6 +32,8 @@
 - [x] **Étape 4** — IGN altimétrie API (élévation réelle via data.geopf.fr) ✅ 2026-03-02
 - [x] **Étape 5a** — System prompt CO/IOF injecté, API REST Ollama, 13/13 tests ✅ 2026-03-02
 - [x] **Étape 5b** — Dataset RAG 54 Q/R créé (mondial_tracage_QR_v4.jsonl) ✅ 2026-03-02
+- [x] **Étape 5d** — Analyse multi-GPX consensus (gpx_parser + multi_gpx_analyzer + endpoint) ✅ 2026-03-03
+- [x] **Étape 6a** — Persistance calibration terrain + pipeline RouteGadget ✅ 2026-03-03
 
 ---
 
@@ -312,6 +314,19 @@ Ouvrir le navigateur : http://localhost:5173
   - Calibration terrain (ray-cast GeoJSON → symbole ISOM → terrain_type → multiplier)
 - **Tests** : 15/15 ✅ (2 nouveaux : `test_gpx_parser_invalid`, `test_multi_gpx_synthetic`)
 - **La carte est-elle nécessaire ?** Non — la calibration terrain est optionnelle ; pour forêt TD3-TD4 et catégorie H21, forêt classique 1:10000 idéale
+
+---
+
+### Étape 6a — Persistance calibration terrain + pipeline RouteGadget ✅ (2026-03-03)
+- **terrain_calibration.json** : créé dans `backend/src/data/` (vide par défaut)
+- **`save_terrain_calibration()`** : merge avec calibration existante, horodatage UTC
+- **`load_terrain_calibration()`** : lecture sans crash si absent/invalide
+- **`route_calculator.py`** : charge la calibration au démarrage et l'applique en surcharge sur `OCAD_TERRAIN_MULTIPLIERS` (ex: `forest 0.70 → 0.68` mesuré sur vrais coureurs)
+- **Endpoint multi-gpx** : paramètre `save_calibration=true` → sauvegarde automatique
+- **`routegadget_to_trackpoints()`** : convertit `RouteGadgetTrack.route` en `List[TrackPoint]`
+- **Endpoint `POST /api/v1/analysis/routegadget-consensus`** : pipeline direct RouteGadget → analyse consensus (fetch GPS via `get_all_routes()` + analyse + calibration optionnelle)
+- **Flux Livelox** : export GPX manuel depuis interface Livelox → charger via `/multi-gpx-consensus`
+- 15/15 tests ✅
 
 ---
 

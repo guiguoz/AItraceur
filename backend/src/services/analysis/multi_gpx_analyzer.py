@@ -7,11 +7,19 @@ Usage :
     result = analyze_multi_gpx(tracks, controls)
 """
 
+import json
 import math
+import os
 from collections import defaultdict
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 from .gpx_parser import TrackPoint
+
+# Chemin vers terrain_calibration.json (relatif à ce fichier)
+_CALIBRATION_PATH = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "data", "terrain_calibration.json")
+)
 
 
 # ── Haversine (pas de dépendance externe) ───────────────────────────────────
@@ -24,6 +32,35 @@ def _haversine_m(p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
     dlng = math.radians(p2[0] - p1[0])
     a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlng / 2) ** 2
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+# ── Conversion RouteGadget → TrackPoint ─────────────────────────────────────
+
+def routegadget_to_trackpoints(rg_route: List[Dict]) -> List[TrackPoint]:
+    """
+    Convertit une liste de points RouteGadget en TrackPoint.
+
+    RouteGadget format : [{"lat": float, "lon": float, "time": int|None}, ...]
+    Le champ "time" est un timestamp Unix en secondes (ou None).
+    """
+    from datetime import timezone as _tz
+
+    points = []
+    for pt in rg_route:
+        lat = pt.get("lat")
+        lon = pt.get("lon")
+        if lat is None or lon is None:
+            continue
+        time = None
+        raw_time = pt.get("time")
+        if raw_time is not None:
+            try:
+                from datetime import datetime as _dt
+                time = _dt.fromtimestamp(float(raw_time), tz=_tz.utc)
+            except (ValueError, OSError):
+                pass
+        points.append(TrackPoint(lat=float(lat), lon=float(lon), time=time, ele=None))
+    return points
 
 
 # ── Snap GPX → jambes ────────────────────────────────────────────────────────
@@ -62,6 +99,48 @@ def _snap_to_controls(
         search_from = best_idx  # on avance dans le track
 
     return snap_indices
+
+
+# ── Persistance calibration ───────────────────────────────────────────────────
+
+def load_terrain_calibration() -> Dict[str, float]:
+    """Charge les multiplicateurs depuis terrain_calibration.json. Retourne {} si vide."""
+    try:
+        with open(_CALIBRATION_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if data.get("calibrated"):
+                return data.get("multipliers", {})
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    return {}
+
+
+def save_terrain_calibration(
+    calibration: Dict[str, float],
+    runners_analyzed: int,
+    source: str = "multi-gpx",
+) -> bool:
+    """
+    Sauvegarde les multiplicateurs dans terrain_calibration.json.
+    Merge avec les valeurs existantes (les nouvelles priment).
+    Retourne True si succès.
+    """
+    try:
+        existing = load_terrain_calibration()
+        merged = {**existing, **calibration}
+        payload = {
+            "calibrated": True,
+            "source": source,
+            "runners_analyzed": runners_analyzed,
+            "date": datetime.now(timezone.utc).isoformat(),
+            "multipliers": merged,
+        }
+        with open(_CALIBRATION_PATH, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+        return True
+    except OSError as e:
+        print(f"[WARNING] Impossible de sauvegarder la calibration terrain : {e}")
+        return False
 
 
 # ── Analyse principale ────────────────────────────────────────────────────────

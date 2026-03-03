@@ -199,3 +199,52 @@ def test_ollama_fallback_on_missing():
          patch("subprocess.run", side_effect=FileNotFoundError("ollama not found")):
         result = demander_ollama("Quelle est la longueur d'un TD3 ?", [])
         assert result is None, f"Devrait retourner None si Ollama absent, obtenu: {result}"
+
+
+# ============================================================
+# Tests Étape 5d — Analyse multi-GPX consensus
+# ============================================================
+
+def test_gpx_parser_invalid():
+    """parse_gpx doit retourner [] sur du contenu invalide, sans crasher."""
+    import sys, os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from src.services.analysis.gpx_parser import parse_gpx
+
+    assert parse_gpx("") == [], "Chaîne vide → []"
+    assert parse_gpx("not xml at all") == [], "Texte non-XML → []"
+    assert parse_gpx("<gpx></gpx>") == [], "GPX sans trkpt → []"
+
+
+def test_multi_gpx_synthetic():
+    """analyze_multi_gpx avec 3 tracks synthétiques doit retourner les stats attendues."""
+    import sys, os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from src.services.analysis.gpx_parser import build_synthetic_gpx, parse_gpx
+    from src.services.analysis.multi_gpx_analyzer import analyze_multi_gpx
+    from datetime import datetime, timezone
+
+    # Circuit test : 4 postes, zone 49.19°N 5.50°E
+    controls = [
+        {"x": 5.490, "y": 49.185, "order": 0},  # départ
+        {"x": 5.500, "y": 49.190, "order": 1},  # poste 1
+        {"x": 5.510, "y": 49.195, "order": 2},  # poste 2
+        {"x": 5.500, "y": 49.200, "order": 3},  # arrivée
+    ]
+    ctrl_pts = [(c["x"], c["y"]) for c in controls]
+    start = datetime(2024, 3, 1, 9, 0, 0, tzinfo=timezone.utc)
+
+    # 3 coureurs avec vitesses différentes
+    tracks = []
+    for speed in (170.0, 130.0, 100.0):
+        gpx_str = build_synthetic_gpx(ctrl_pts, speed_mpm=speed, start_time=start, noise_m=5.0)
+        track = parse_gpx(gpx_str)
+        assert len(track) > 0, f"Le GPX synthétique à {speed} m/min ne doit pas être vide"
+        tracks.append(track)
+
+    result = analyze_multi_gpx(tracks, controls, snap_radius_m=80.0)
+
+    assert result["runners_analyzed"] == 3, f"3 runners attendus, obtenu {result['runners_analyzed']}"
+    assert result["legs_analyzed"] >= 1, "Au moins 1 jambe analysée"
+    assert isinstance(result["speed_per_leg"], dict), "speed_per_leg doit être un dict"
+    assert isinstance(result["difficulty_per_leg"], dict), "difficulty_per_leg doit être un dict"

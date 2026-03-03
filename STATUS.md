@@ -9,10 +9,10 @@
 
 | Champ | Valeur |
 |-------|--------|
-| **Dernière étape complétée** | Étape 5b — Dataset RAG 54 Q/R (mondial_tracage_QR_v4.jsonl) |
-| **Date** | 2026-03-02 |
-| **Prochaine étape** | Étape 5d — Analyse multi-GPX consensus |
-| **État global** | 🟢 13 bugs corrigés, RAG actif (54 Q/R, scores 0.70-0.78), 3 circuits IOF valides |
+| **Dernière étape complétée** | Étape 5d — Analyse multi-GPX consensus (gpx_parser + multi_gpx_analyzer) |
+| **Date** | 2026-03-03 |
+| **Prochaine étape** | À définir (Étape 6 LoRA, ou intégration frontend GPX) |
+| **État global** | 🟢 13 bugs corrigés, RAG actif (54 Q/R), 15/15 tests, endpoint multi-GPX opérationnel |
 
 ---
 
@@ -294,6 +294,24 @@ Ouvrir le navigateur : http://localhost:5173
   - "TD3" → score 0.70 (exact_match direct) ✅
   - "dog-leg" → score 0.59 (Ollama + contexte RAG, entre 0.35-0.65) ✅
 - `local_rag.py` charge 54 Q/R, modèle SentenceTransformer indexé
+
+---
+
+### Étape 5d — Analyse multi-GPX consensus ✅ (2026-03-03)
+- **Nouveaux fichiers** :
+  - `backend/src/services/analysis/gpx_parser.py` — Parser GPX 1.0/1.1 (stdlib only, `parse_gpx()`, `build_synthetic_gpx()`)
+  - `backend/src/services/analysis/multi_gpx_analyzer.py` — Analyse consensus (`analyze_multi_gpx()`)
+- **Endpoint** : `POST /api/v1/analysis/multi-gpx-consensus` ajouté dans `main.py`
+  - Input : 2-30 fichiers GPX (multipart) + controls JSON + GeoJSON OCAD optionnel
+  - Output : `runners_analyzed`, `speed_per_leg`, `difficulty_per_leg` (CV), `consensus_path`, `avoided_zones`, `terrain_calibration` (si OCAD), `training_examples`
+- **Algorithme** :
+  - Snap GPX → postes (Haversine, rayon 50m par défaut)
+  - Vitesse par jambe (filtrage aberrants < 50 m/min ou > 400 m/min)
+  - Difficulté = CV (std/mean) — CV>0.3 = jambe à choix difficile
+  - Consensus heatmap 20m×20m → zones fréquentées et zones évitées
+  - Calibration terrain (ray-cast GeoJSON → symbole ISOM → terrain_type → multiplier)
+- **Tests** : 15/15 ✅ (2 nouveaux : `test_gpx_parser_invalid`, `test_multi_gpx_synthetic`)
+- **La carte est-elle nécessaire ?** Non — la calibration terrain est optionnelle ; pour forêt TD3-TD4 et catégorie H21, forêt classique 1:10000 idéale
 
 ---
 

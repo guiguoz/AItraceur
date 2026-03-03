@@ -9,7 +9,7 @@ import uuid
 import tempfile
 import math
 
-from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, status, Body
+from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, status, Body
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -1587,6 +1587,87 @@ def index_routegadget_routes(
         "total_tracks": len(tracks),
         "indexed": indexed_count,
     }
+
+
+# =============================================
+# Étape 5d: Analyse multi-GPX consensus
+# =============================================
+
+
+@app.post(
+    "/api/v1/analysis/multi-gpx-consensus",
+    summary="Analyse multi-GPX consensus",
+    description=(
+        "Analyse 2-20 fichiers GPX d'une même course CO. "
+        "Calcule vitesse/jambe, difficulté, consensus de tracé. "
+        "Calibre OCAD_TERRAIN_MULTIPLIERS si le GeoJSON OCAD est fourni."
+    ),
+)
+async def multi_gpx_consensus(
+    gpx_files: List[UploadFile] = File(..., description="Fichiers GPX (2-20)"),
+    controls_json: str = Form(..., description="JSON [{x: lng, y: lat, order: int}, ...]"),
+    ocad_geojson: Optional[str] = Form(None, description="GeoJSON OCAD optionnel (calibration terrain)"),
+    snap_radius_m: float = Form(50.0, description="Rayon de snap GPS→poste en mètres"),
+):
+    """Analyse consensus de tracés GPX pour calibration terrain et scoring difficulté."""
+    import json as _json
+    from src.services.analysis.gpx_parser import parse_gpx
+    from src.services.analysis.multi_gpx_analyzer import analyze_multi_gpx
+
+    if len(gpx_files) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Minimum 2 fichiers GPX requis pour l'analyse consensus",
+        )
+    if len(gpx_files) > 30:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Maximum 30 fichiers GPX acceptés",
+        )
+
+    # Parser les contrôles
+    try:
+        controls = _json.loads(controls_json)
+        if not isinstance(controls, list) or len(controls) < 2:
+            raise ValueError("controls_json doit être une liste d'au moins 2 postes")
+    except (ValueError, _json.JSONDecodeError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"controls_json invalide : {e}",
+        )
+
+    # Parser le GeoJSON OCAD optionnel
+    geojson_data = None
+    if ocad_geojson:
+        try:
+            geojson_data = _json.loads(ocad_geojson)
+        except _json.JSONDecodeError:
+            pass  # on ignore un GeoJSON invalide, pas bloquant
+
+    # Lire et parser chaque GPX
+    gpx_tracks = []
+    for gpx_file in gpx_files:
+        try:
+            content = (await gpx_file.read()).decode("utf-8", errors="replace")
+            track = parse_gpx(content)
+            if track:
+                gpx_tracks.append(track)
+        except Exception:
+            pass  # ignorer les fichiers illisibles
+
+    if len(gpx_tracks) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Moins de 2 fichiers GPX valides ont pu être parsés",
+        )
+
+    result = analyze_multi_gpx(
+        gpx_tracks=gpx_tracks,
+        controls=controls,
+        ocad_geojson=geojson_data,
+        snap_radius_m=snap_radius_m,
+    )
+    return result
 
 
 # =============================================

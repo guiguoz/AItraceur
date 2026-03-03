@@ -7,7 +7,7 @@ import TerrainPanel from './components/TerrainPanel'
 import CircuitCreationModal from './components/CircuitCreationModal'
 import CircuitSelector from './components/CircuitSelector'
 import AISuggestionPanel from './components/AISuggestionPanel'
-import { generateCircuit, uploadOcdForRender, TILE_SERVICE_URL } from './services/api'
+import { generateCircuit, getSprintCandidates, uploadOcdForRender, TILE_SERVICE_URL } from './services/api'
 import { buildMapContext } from './services/mapContext'
 
 // IOF/FFCO reference params — auto-computed per circuit type/sex/category
@@ -81,7 +81,7 @@ function extractBoundingBox(geojson) {
   return { min_x: minX, min_y: minY, max_x: maxX, max_y: maxY }
 }
 
-// ISOM codes with notable orienteering control attractiveness
+// ISOM codes with notable orienteering control attractiveness (forest maps, ISOM 2017)
 // Source: backend/src/data/ocad_semantics.json (high/medium attractiveness)
 const ATTRACTIVE_ISOM = new Set([
   101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,
@@ -89,6 +89,16 @@ const ATTRACTIVE_ISOM = new Set([
   301,302,303,304,305,306,308,
   401,402,403,404,405,406,
   501,502,516,521,522,
+])
+
+// ISSOM codes for sprint maps (urban — ISSOM 2017)
+// Postes sprint : coins de bâtiments, carrefours, passages, fontaines, clôtures
+const ATTRACTIVE_ISSOM = new Set([
+  401, 402, 403, 404, 405,  // Intersections, carrefours, embranchements, coudes, extrémités
+  501, 521, 522,             // Angle de bâtiment, angle de zone construite, angle de zone pavée
+  529,                       // Carrefour de chemins pavés / passage entre bâtiments
+  209,                       // Fontaine / source
+  516,                       // Angle de clôture / haie
 ])
 
 // ISOM codes representing out-of-bounds / forbidden areas (olive green, cross-hatched…)
@@ -129,13 +139,14 @@ function extractOobZones(geojson) {
   return zones
 }
 
-function extractCandidatePoints(geojson, max = 400) {
+function extractCandidatePoints(geojson, max = 400, sprintMode = false) {
+  const attractiveCodes = sprintMode ? ATTRACTIVE_ISSOM : ATTRACTIVE_ISOM
   const pts = []
   for (const f of geojson.features) {
     const sym = f.properties?.sym
     if (!sym) continue
     const isom = Math.floor(sym / 1000)
-    if (!ATTRACTIVE_ISOM.has(isom)) continue
+    if (!attractiveCodes.has(isom)) continue
     const c = computeGeoCentroid(f.geometry)
     if (c) pts.push({ x: c[0], y: c[1], isom })
   }
@@ -314,6 +325,28 @@ function App() {
       const circuitParams = getCircuitParams(activeCircuit)
       const startControl = activeCircuit.controls.find(c => c.type === 'start')
       const mapContext = buildMapContext(ocadData.geojson)
+      const isSprintCircuit = activeCircuit.type === 'sprint'
+
+      // Extraire les candidats OCAD (codes ISSOM pour sprint, ISOM pour forêt)
+      let candidatePoints = extractCandidatePoints(ocadData.geojson, 400, isSprintCircuit)
+      const oobZones = [...activeCircuit.forbiddenZones, ...extractOobZones(ocadData.geojson)]
+
+      // Sprint sans OCAD ou peu de candidats : enrichir depuis OSM
+      // (le backend auto-enrichit aussi si <50 candidats, mais ici on précharge pour l'UX)
+      if (isSprintCircuit && candidatePoints.length < 30) {
+        try {
+          const sprintRes = await getSprintCandidates(bbox)
+          const osmData = sprintRes.data
+          candidatePoints = [...candidatePoints, ...(osmData.candidates || [])]
+          // Les bâtiments OSM = OOB supplémentaires
+          for (const poly of (osmData.oob_polygons || [])) oobZones.push(poly)
+          console.log(`[AI Generate] Sprint OSM: ${osmData.candidates?.length} candidats OSM chargés`)
+        } catch (err) {
+          console.warn('[AI Generate] Sprint OSM candidates failed (non bloquant):', err.message)
+        }
+      }
+
+      console.log(`[AI Generate] ${isSprintCircuit ? 'SPRINT' : 'FORET'} — ${candidatePoints.length} candidats, bbox:`, bbox)
 
       const params = {
         bounding_box: bbox,
@@ -322,17 +355,14 @@ function App() {
         ...circuitParams,
         ...(mapContext && { map_context: mapContext }),
         ...(startControl && { start_position: [startControl.lng, startControl.lat] }),
-        // Forbidden zones: user-drawn + OCAD out-of-bounds areas (ISOM 520, 527…)
-        forbidden_zones_polygons: [
-          ...activeCircuit.forbiddenZones,
-          ...extractOobZones(ocadData.geojson),
-        ],
+        // Forbidden zones: user-drawn + OCAD OOB + bâtiments OSM (sprint)
+        forbidden_zones_polygons: oobZones,
         // Pass already-placed mandatory controls
         required_controls: activeCircuit.controls
           .filter(c => c.type === 'control')
           .map(c => ({ lat: c.lat, lng: c.lng })),
-        // OCAD feature centroids (attractive features) for terrain-aware placement
-        candidate_points: extractCandidatePoints(ocadData.geojson),
+        // OCAD/OSM feature candidates for terrain-aware placement
+        candidate_points: candidatePoints.slice(0, 600),
       }
 
       const res = await generateCircuit(params)

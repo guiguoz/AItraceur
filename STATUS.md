@@ -9,10 +9,10 @@
 
 | Champ | Valeur |
 |-------|--------|
-| **Dernière étape complétée** | Étape 8bis — Fix régressions GA + zones OOB OCAD + description terrain postes |
+| **Dernière étape complétée** | Étape 9 — Génération sprint urbain (inspirée Streeto) : Overpass intersections + bâtiments OOB |
 | **Date** | 2026-03-03 |
-| **Prochaine étape** | Test terrain + Étape 7b — RouteGadget fetcher |
-| **État global** | 🟢 20 bugs corrigés, génération calibrée, postes ancrés terrain OCAD avec description |
+| **Prochaine étape** | Test terrain sprint (ville) + v2 : GraphHopper/OSRM distances réelles + C-SIM choix d'itinéraires |
+| **État global** | 🟢 20 bugs corrigés, mode sprint opérationnel (OCAD + OSM), génération forêt + ville |
 
 ---
 
@@ -38,6 +38,7 @@
 - [x] **Étape 6c** — Analyse globale sans postes (fix 0 coureurs) + KMZ multi-coureurs Livelox ✅ 2026-03-03
 - [x] **Étape 7a** — UX stepper 4 étapes + paramètres IOF visibles + badge conformité ✅ 2026-03-03
 - [x] **Étape 8bis** — Fix régressions GA (snap + use_smart) + zones OOB OCAD + description terrain ✅ 2026-03-03
+- [x] **Étape 9** — Génération sprint urbain : Overpass intersections + coins bâtiments + OOB + scoring adapté ✅ 2026-03-03
 
 ---
 
@@ -395,6 +396,44 @@ Ouvrir le navigateur : http://localhost:5173
 - `backend/src/services/generation/ai_generator.py` — ISOM_DESCRIPTIONS + _describe_control() + boucle postes
 - `frontend/src/App.jsx` — extractOobZones + description dans suggestions
 - `frontend/src/components/AISuggestionPanel.jsx` — affichage description terrain
+
+---
+
+### Étape 9 — Génération sprint urbain (inspirée Streeto) ✅ (2026-03-03)
+
+**Contexte** : pivot vers la génération de circuits CO sprint en milieu urbain, inspiré de [Streeto](https://github.com/jcundill/streeto) + GraphHopper.
+
+**`extract_sprint_features(bbox)`** dans `osm_fetcher.py` :
+- Requête Overpass : voies piétonnes + bâtiments
+- Intersections = noeuds partagés par ≥ 2 voies (comptage côté client, 0 dépendance externe)
+- Coins de bâtiments (~4 coins/bâtiment via échantillonnage des polygones)
+- Fontaines et mobilier urbain (boîtes aux lettres, horloges)
+- Polygones bâtiments retournés comme zones OOB
+- Max 600 candidats, mélangés aléatoirement
+
+**Mode sprint dans le GA** (`genetic_algo.py`) :
+- Nouveau champ `sprint_mode: bool` dans `GenerationConfig`
+- Fitness dédiée : penalise les jambes > 200m, poids longueur 25% + angles 25%
+- `min_control_distance` : 30m en sprint (30m IOF ISSOM AA3.5.5)
+
+**Pipeline frontend** (`App.jsx`) :
+- `ATTRACTIVE_ISSOM` : codes ISSOM 2017 pour sprint (401-405, 501, 521, 522, 529, 209, 516)
+- `extractCandidatePoints(..., sprintMode)` : utilise les codes ISSOM si sprint
+- Si circuit sprint et < 30 candidats OCAD → appel `getSprintCandidates(bbox)` (OSM) automatique
+- Bâtiments OSM ajoutés aux `forbidden_zones`
+
+**Endpoint** `POST /api/v1/generation/sprint-candidates` dans `main.py` :
+- Enrichissement auto dans `/generate` si TD1/TD2 et < 50 candidats
+
+**v2 prévu** : GraphHopper/OSRM pour distances réelles + algorithme C-SIM (dissimilarité d'itinéraires).
+
+**Fichiers modifiés** :
+- `backend/src/services/terrain/osm_fetcher.py` — `extract_sprint_features()`
+- `backend/src/services/generation/genetic_algo.py` — `sprint_mode` + scoring sprint
+- `backend/src/services/generation/ai_generator.py` — `sprint_mode` passé à `GenerationConfig`
+- `backend/src/main.py` — endpoint `/sprint-candidates` + enrichissement auto
+- `frontend/src/App.jsx` — `ATTRACTIVE_ISSOM` + OSM fallback
+- `frontend/src/services/api.js` — `getSprintCandidates()`
 
 ---
 

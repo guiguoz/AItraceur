@@ -513,6 +513,120 @@ class OSMFetcher:
 
 
 # =============================================
+# Sprint features — extraction Overpass sans dépendance externe
+# =============================================
+def extract_sprint_features(bbox_dict: dict) -> dict:
+    """
+    Extrait les candidats sprint (intersections de rues + coins de bâtiments)
+    et les polygones OOB (bâtiments) depuis Overpass API.
+
+    Approche inspirée de Streeto : les postes sprint se placent sur les
+    intersections de rues piétonnes et les angles de bâtiments.
+
+    Args:
+        bbox_dict: {min_x, min_y, max_x, max_y} en WGS84
+
+    Returns:
+        {
+          "candidates": [{x, y, type: "intersection"|"building_corner"|"amenity"}, ...],
+          "oob_polygons": [[[lng, lat], ...], ...]  # polygones bâtiments = zones interdites
+        }
+    """
+    import random
+    from collections import defaultdict
+
+    b = f"{bbox_dict['min_y']},{bbox_dict['min_x']},{bbox_dict['max_y']},{bbox_dict['max_x']}"
+
+    # Requête Overpass : voies piétonnes + bâtiments
+    # "out body geom" retourne la géométrie de chaque way (liste lat/lon)
+    walk_tags = "residential|service|unclassified|tertiary|secondary|primary|pedestrian|path|footway|steps|living_street|alley"
+    query = f"""[out:json][timeout:90];
+(
+  way["highway"~"^({walk_tags})$"]({b});
+  way["building"]({b});
+);
+out body geom;"""
+
+    try:
+        resp = requests.post(OVERPASS_API_URL, data={"data": query}, timeout=120)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        print(f"[sprint_features] Overpass error: {e}")
+        return {"candidates": [], "oob_polygons": []}
+
+    # Séparer highways et bâtiments
+    highway_coord_lists: List[List[tuple]] = []
+    building_polygons: List[List[tuple]] = []
+
+    for elem in data.get("elements", []):
+        tags = elem.get("tags", {})
+        geom = elem.get("geometry", [])
+        coords = [(g["lon"], g["lat"]) for g in geom if "lon" in g and "lat" in g]
+        if not coords:
+            continue
+        if "highway" in tags:
+            highway_coord_lists.append(coords)
+        elif "building" in tags:
+            building_polygons.append(coords)
+
+    # ── Intersections : noeuds partagés par ≥ 2 voies ──────────────────────
+    # On arrondit à 5 décimales (~1m) pour regrouper les noeuds identiques
+    node_count: dict = defaultdict(int)
+    for way in highway_coord_lists:
+        for lng, lat in way:
+            key = (round(lng, 5), round(lat, 5))
+            node_count[key] += 1
+
+    candidates = []
+    seen_coarse: set = set()
+
+    for (lng, lat), count in node_count.items():
+        if count >= 2:  # noeud partagé = intersection
+            # Déduplication à ~100m (arrondi à 3 décimales ≈ 50-100m)
+            coarse = (round(lng, 3), round(lat, 3))
+            if coarse not in seen_coarse:
+                seen_coarse.add(coarse)
+                candidates.append({"x": lng, "y": lat, "type": "intersection"})
+
+    # ── Coins de bâtiments (~ 4 coins par bâtiment) ─────────────────────────
+    for poly in building_polygons:
+        if len(poly) < 3:
+            continue
+        step = max(1, len(poly) // 4)
+        for i in range(0, len(poly) - 1, step):
+            lng, lat = poly[i]
+            candidates.append({"x": lng, "y": lat, "type": "building_corner"})
+
+    # ── Fontaines et mobilier urbain (Streeto : "street furniture") ──────────
+    amenity_query = f"""[out:json][timeout:30];
+node["amenity"~"^(fountain|clock|post_box)$"]({b});
+out body;"""
+    try:
+        ar = requests.post(OVERPASS_API_URL, data={"data": amenity_query}, timeout=45)
+        if ar.ok:
+            for elem in ar.json().get("elements", []):
+                lng, lat = elem.get("lon"), elem.get("lat")
+                if lng and lat:
+                    candidates.append({"x": lng, "y": lat, "type": "amenity"})
+    except Exception:
+        pass  # non bloquant
+
+    # Mélanger et limiter à 600 candidats
+    random.shuffle(candidates)
+    candidates = candidates[:600]
+
+    print(
+        f"[sprint_features] {len(candidates)} candidats extraits "
+        f"({sum(1 for c in candidates if c['type']=='intersection')} intersections, "
+        f"{sum(1 for c in candidates if c['type']=='building_corner')} coins bât.), "
+        f"{len(building_polygons)} OOB polygones"
+    )
+
+    return {"candidates": candidates, "oob_polygons": building_polygons}
+
+
+# =============================================
 # Fonction utilitaire
 # =============================================
 def bbox_to_osm_bounds(bbox: BoundingBox) -> str:

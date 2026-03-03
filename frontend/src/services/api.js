@@ -51,6 +51,9 @@ export const fetchTerrainOSM = (bbox) => api.get('/api/v1/terrain/osm', { params
 export const generateCircuit = (params) =>
   api.post('/api/v1/generation/generate', params, { timeout: 120000 });
 
+export const getSprintCandidates = (bounding_box) =>
+  api.post('/api/v1/generation/sprint-candidates', { bounding_box }, { timeout: 60000 });
+
 // ── Terrain runnabilité ──────────────────────────────────────────────────────
 export const getRunnabilityGrid = (bbox, resolution_m = 100) =>
   api.post('/api/v1/terrain/runnability-grid', { bounding_box: bbox, resolution_m }, { timeout: 60000 });

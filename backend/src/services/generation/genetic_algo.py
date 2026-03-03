@@ -55,6 +55,9 @@ class GenerationConfig:
     min_control_distance: float = 60  # Distance minimale entre postes en mètres (IOF AA3.5.5)
     max_attempts: int = 10
 
+    # Mode sprint urbain (TD1/TD2) — adapte les paramètres pour la CO en ville
+    sprint_mode: bool = False  # True → min_dist 30m, jambes ≤ 200m pénalisées
+
 
 @dataclass
 class GenerationResult:
@@ -692,6 +695,21 @@ class GeneticAlgorithm:
         # --- 6. Sécurité (10%) : pénalité si nb postes incorrect ---
         control_diff = abs(len(controls) - config.target_controls)
         safety_score = max(0.0, 100.0 - control_diff * 10)
+
+        # --- 7. Sprint : pénaliser les jambes > 200m (remplace la part climb en sprint) ---
+        if config.sprint_mode and leg_lengths:
+            max_leg_m = 200.0
+            long_legs = sum(1 for l in leg_lengths if l > max_leg_m)
+            sprint_leg_score = max(0.0, 100.0 - long_legs * 25)
+            # En sprint, le dénivelé est négligeable — on le remplace par ce critère
+            return (
+                length_score  * 0.25
+                + sprint_leg_score * 0.20
+                + td_score    * 0.15
+                + angle_score * 0.25
+                + equity_score * 0.10
+                + safety_score * 0.05
+            )
 
         return (
             length_score * 0.20

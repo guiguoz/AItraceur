@@ -24,7 +24,7 @@ from src.schemas.circuit import (
 )
 from src.services.terrain.lidar_manager import LIDARManager, BoundingBox
 from src.services.terrain.terrain_analyzer import TerrainAnalyzer, calculate_runnability_score
-from src.services.terrain.osm_fetcher import OSMFetcher
+from src.services.terrain.osm_fetcher import OSMFetcher, extract_sprint_features
 from src.services.terrain.elevation_fetcher import fetch_elevations
 from src.services.terrain.overlay_builder import OverlayBuilder
 from src.services.terrain.urban_osm_processor import (
@@ -1779,6 +1779,25 @@ async def routegadget_consensus(
 
 
 @app.post(
+    "/api/v1/generation/sprint-candidates",
+    summary="Candidats sprint depuis OSM",
+    description="Extrait les intersections de rues et coins de bâtiments depuis OSM pour le mode sprint.",
+)
+def get_sprint_candidates(body: dict = Body(...)):
+    """
+    Retourne les candidats postes sprint (intersections + coins bâtiments)
+    et les zones OOB (bâtiments) depuis OSM Overpass.
+
+    Corps attendu: { bounding_box: {min_x, min_y, max_x, max_y} }
+    """
+    bbox = body.get("bounding_box", {})
+    if not bbox or not all(k in bbox for k in ("min_x", "min_y", "max_x", "max_y")):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="bounding_box requis")
+    return extract_sprint_features(bbox)
+
+
+@app.post(
     "/api/v1/generation/generate",
     summary="Génère des circuits",
     description="Génère des circuits automatiquement avec GA et/ou IA",
@@ -1815,6 +1834,22 @@ def generate_circuits(body: dict = Body(...)):
     forbidden_zones_polygons = body.get("forbidden_zones_polygons") or []
     required_controls_raw = body.get("required_controls") or []
     candidate_points = body.get("candidate_points") or []
+
+    # Mode sprint : si peu de candidats OCAD (<50), enrichir depuis OSM automatiquement
+    if technical_level in ("TD1", "TD2") and len(candidate_points) < 50 and bounding_box:
+        try:
+            sprint_data = extract_sprint_features(bounding_box)
+            osm_candidates = sprint_data.get("candidates", [])
+            # Merger OCAD + OSM (OCAD en priorité, OSM en complément)
+            candidate_points = candidate_points + osm_candidates
+            candidate_points = candidate_points[:600]
+            # Ajouter les bâtiments OSM comme zones OOB supplémentaires
+            for poly in sprint_data.get("oob_polygons", []):
+                if len(poly) >= 3:
+                    forbidden_zones_polygons.append(poly)
+            print(f"[generate] Sprint mode: {len(osm_candidates)} candidats OSM ajoutés")
+        except Exception as e:
+            print(f"[generate] Sprint OSM enrichment failed (non bloquant): {e}")
 
     # Convertir les polygones en format zones interdites pour le GA
     forbidden_zones = []

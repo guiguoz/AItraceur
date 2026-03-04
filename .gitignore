@@ -72,6 +72,9 @@ Thumbs.db
 *.sublime-project
 *.sublime-workspace
 
+# ---- Claude Code (mémoire privée) ----
+.claude/
+
 # ---- Qodo (outil interne) ----
 .qodo/
 .qoder/

@@ -1,0 +1,108 @@
+{
+  "_doc": "Mapping ISOM/ISSOM symbol code → IOF Control Descriptions 2018 (FFCO standard). Column D = feature, Column G = location qualifier applicable.",
+  "_source": "IOF International Specification for Control Descriptions 2018 / FFCO Description des postes 2018",
+
+  "isom_to_description": {
+
+    "109": { "col_d": "1.10", "name_fr": "Dépression", "name_en": "Depression",           "col_g_hints": ["10=sommet", "11=pied"], "attractiveness": "high" },
+    "110": { "col_d": "1.11", "name_fr": "Petite dépression", "name_en": "Small depression", "attractiveness": "high" },
+    "111": { "col_d": "1.12", "name_fr": "Fosse",             "name_en": "Pit",              "attractiveness": "very_high" },
+    "112": { "col_d": "1.12", "name_fr": "Fosse allongée",    "name_en": "Elongated pit",    "attractiveness": "high" },
+    "113": { "col_d": "1.13", "name_fr": "Sol mauvais",       "name_en": "Broken ground",    "attractiveness": "medium" },
+    "114": { "col_d": "1.14", "name_fr": "Fourmilière",       "name_en": "Ant hill",         "attractiveness": "very_high" },
+    "115": { "col_d": "1.4",  "name_fr": "Escarpement de terre","name_en": "Earth bank",     "col_g_hints": ["10=sommet", "11=pied"], "attractiveness": "high" },
+    "116": { "col_d": "1.6",  "name_fr": "Mur de terre",      "name_en": "Earth wall",       "col_g_hints": ["7=extrémité"], "attractiveness": "high" },
+    "117": { "col_d": "1.7",  "name_fr": "Ravin",             "name_en": "Erosion gully",    "attractiveness": "high" },
+    "119": { "col_d": "1.1",  "name_fr": "Tertre",            "name_en": "Knoll",            "attractiveness": "very_high" },
+    "120": { "col_d": "1.7",  "name_fr": "Col",               "name_en": "Saddle",           "attractiveness": "high" },
+
+    "201": { "col_d": "2.8",  "name_fr": "Roche nue",          "name_en": "Bare rock",       "attractiveness": "high" },
+    "202": { "col_d": "2.4",  "name_fr": "Bloc",               "name_en": "Boulder",         "attractiveness": "very_high" },
+    "203": { "col_d": "2.6",  "name_fr": "Champ de blocs",     "name_en": "Boulder field",   "attractiveness": "high" },
+    "204": { "col_d": "2.5",  "name_fr": "Amas de blocs",      "name_en": "Boulder cluster", "attractiveness": "very_high" },
+    "205": { "col_d": "2.7",  "name_fr": "Sol pierreux",       "name_en": "Stony ground",    "attractiveness": "medium" },
+    "207": { "col_d": "2.1",  "name_fr": "Escarpement rocheux","name_en": "Cliff/Crag",      "col_g_hints": ["11=pied", "10=sommet"], "attractiveness": "high" },
+    "208": { "col_d": "2.1",  "name_fr": "Grotte rocheuse",    "name_en": "Rocky pit",       "attractiveness": "very_high" },
+    "209": { "col_d": "2.3",  "name_fr": "Grotte",             "name_en": "Cave",            "attractiveness": "very_high" },
+    "210": { "col_d": "5.8",  "name_fr": "Mur de pierre",      "name_en": "Stone wall",      "col_g_hints": ["4=coin", "7=extrémité"], "attractiveness": "high" },
+    "211": { "col_d": "5.8",  "name_fr": "Mur de pierre ruiné","name_en": "Ruined stone wall","attractiveness": "medium" },
+    "212": { "col_d": "5.9",  "name_fr": "Clôture",            "name_en": "Fence",           "col_g_hints": ["4=coin", "7=extrémité"], "attractiveness": "high" },
+    "215": { "col_d": "5.17", "name_fr": "Borne de propriété", "name_en": "Boundary stone",  "attractiveness": "medium" },
+
+    "301": { "col_d": "3.1",  "name_fr": "Lac",                "name_en": "Lake",            "col_g_hints": ["2=bord"], "attractiveness": "medium" },
+    "302": { "col_d": "3.2",  "name_fr": "Mare",               "name_en": "Pond",            "col_g_hints": ["2=bord"], "attractiveness": "high" },
+    "303": { "col_d": "3.4",  "name_fr": "Cours d'eau",        "name_en": "Watercourse",     "col_g_hints": ["11.1=coude", "10.2=jonction"], "attractiveness": "high" },
+    "304": { "col_d": "3.5",  "name_fr": "Petit canal",        "name_en": "Minor water channel","attractiveness": "medium" },
+    "305": { "col_d": "3.7",  "name_fr": "Marécage",           "name_en": "Marsh",           "col_g_hints": ["2=bord"], "attractiveness": "medium" },
+    "307": { "col_d": "3.9",  "name_fr": "Puits",              "name_en": "Well",            "attractiveness": "very_high" },
+    "308": { "col_d": "3.10", "name_fr": "Source",             "name_en": "Spring",          "attractiveness": "very_high" },
+
+    "401": { "col_d": "4.1",  "name_fr": "Terrain ouvert",        "name_en": "Open land",      "attractiveness": "low" },
+    "402": { "col_d": "4.2",  "name_fr": "Terrain semi-ouvert",   "name_en": "Semi-open land", "attractiveness": "low" },
+    "403": { "col_d": "4.2",  "name_fr": "Terrain ouvert accidenté","name_en": "Rough open land","attractiveness": "low" },
+    "405": { "col_d": "4.7",  "name_fr": "Limite de végétation",  "name_en": "Vegetation boundary","col_g_hints": ["4=coin"], "attractiveness": "medium" },
+    "406": { "col_d": "4.3",  "name_fr": "Lisière de forêt",      "name_en": "Forest edge",    "col_g_hints": ["4=coin"], "attractiveness": "medium" },
+    "409": { "col_d": "4.3",  "name_fr": "Coin de forêt",         "name_en": "Forest corner",  "attractiveness": "high" },
+    "410": { "col_d": "4.5",  "name_fr": "Fourré",                "name_en": "Thicket",        "attractiveness": "medium" },
+    "413": { "col_d": "4.7",  "name_fr": "Limite de végétation",  "name_en": "Vegetation boundary","attractiveness": "medium" },
+    "414": { "col_d": "4.4",  "name_fr": "Clairière",             "name_en": "Clearing",       "attractiveness": "high" },
+    "415": { "col_d": "4.8",  "name_fr": "Bouquet d'arbres",      "name_en": "Copse",          "attractiveness": "high" },
+    "416": { "col_d": "4.9",  "name_fr": "Arbre remarquable",     "name_en": "Prominent tree", "attractiveness": "very_high" },
+    "417": { "col_d": "4.10", "name_fr": "Souche",                "name_en": "Root stock/Stump","attractiveness": "high" },
+
+    "501": { "col_d": "5.1",  "name_fr": "Route",              "name_en": "Road",            "col_g_hints": ["10.2=jonction", "11.1=coude", "7=extrémité"], "attractiveness": "medium" },
+    "502": { "col_d": "5.1",  "name_fr": "Piste carrossable",  "name_en": "Vehicle track",   "col_g_hints": ["10.2=jonction", "11.1=coude"], "attractiveness": "medium" },
+    "503": { "col_d": "5.2",  "name_fr": "Chemin",             "name_en": "Footpath",        "col_g_hints": ["10.2=jonction", "11.1=coude", "7=extrémité"], "attractiveness": "high" },
+    "504": { "col_d": "5.2",  "name_fr": "Petit chemin",       "name_en": "Small footpath",  "col_g_hints": ["10.2=jonction", "7=extrémité"], "attractiveness": "high" },
+    "505": { "col_d": "5.2",  "name_fr": "Sentier",            "name_en": "Path",            "col_g_hints": ["10.2=jonction", "7=extrémité"], "attractiveness": "high" },
+    "506": { "col_d": "5.3",  "name_fr": "Piste forestière",   "name_en": "Ride",            "col_g_hints": ["10.1=croisement"], "attractiveness": "medium" },
+    "508": { "col_d": "5.4",  "name_fr": "Pont",               "name_en": "Bridge",          "attractiveness": "very_high" },
+    "509": { "col_d": "5.5",  "name_fr": "Ligne électrique",   "name_en": "Power line",      "attractiveness": "low" },
+    "514": { "col_d": "5.14", "name_fr": "Conduit",            "name_en": "Pipeline",        "attractiveness": "medium" },
+    "515": { "col_d": "5.15", "name_fr": "Tour / pylône",      "name_en": "Tower/Pylon",     "attractiveness": "very_high" },
+    "516": { "col_d": "5.9",  "name_fr": "Clôture / haie",     "name_en": "Fence/Hedge",     "col_g_hints": ["4=coin", "7=extrémité"], "attractiveness": "high" },
+    "519": { "col_d": "5.16", "name_fr": "Plateforme de tir",  "name_en": "Shooting platform","attractiveness": "very_high" },
+    "521": { "col_d": "5.11", "name_fr": "Bâtiment",           "name_en": "Building",        "col_g_hints": ["4=coin", "7=extrémité", "2=bord"], "attractiveness": "very_high" },
+    "522": { "col_d": "5.21", "name_fr": "Auvent / abri",      "name_en": "Canopy/Shelter",  "attractiveness": "very_high" },
+    "523": { "col_d": "5.13", "name_fr": "Ruine",              "name_en": "Ruin",            "attractiveness": "high" },
+    "524": { "col_d": "5.22", "name_fr": "Escalier",           "name_en": "Stairway",        "attractiveness": "very_high" },
+    "529": { "col_d": "5.12", "name_fr": "Surface dallée",     "name_en": "Paved area",      "col_g_hints": ["4=coin", "2=bord"], "attractiveness": "high" },
+
+    "_intersection_path": { "col_d": "10.2", "name_fr": "Jonction de chemins",  "name_en": "Path junction",  "attractiveness": "very_high" },
+    "_crossing_path":     { "col_d": "10.1", "name_fr": "Croisement de chemins","name_en": "Path crossing",  "attractiveness": "very_high" },
+    "_bend_path":         { "col_d": "11.1", "name_fr": "Coude",                "name_en": "Bend",           "attractiveness": "high" }
+  },
+
+  "attractiveness_score": {
+    "very_high": 1.0,
+    "high":      0.75,
+    "medium":    0.45,
+    "low":       0.15
+  },
+
+  "col_g_symbols": {
+    "1":  { "name_fr": "Côté nord", "name_en": "North side" },
+    "2":  { "name_fr": "Bord", "name_en": "Edge" },
+    "3":  { "name_fr": "Partie", "name_en": "Part" },
+    "4":  { "name_fr": "Coin (intérieur)", "name_en": "Corner (inside)" },
+    "5":  { "name_fr": "Coin (extérieur)", "name_en": "Corner (outside)" },
+    "6":  { "name_fr": "Pointe", "name_en": "Tip" },
+    "7":  { "name_fr": "Extrémité", "name_en": "End" },
+    "8":  { "name_fr": "Partie supérieure", "name_en": "Upper part" },
+    "9":  { "name_fr": "Partie inférieure", "name_en": "Lower part" },
+    "10": { "name_fr": "Sommet", "name_en": "Top" },
+    "11": { "name_fr": "Pied", "name_en": "Foot" },
+    "12": { "name_fr": "Dessous", "name_en": "Beneath" },
+    "13": { "name_fr": "Entre", "name_en": "Between" }
+  },
+
+  "col_d_by_category": {
+    "reliefs":         ["1.1","1.2","1.3","1.4","1.5","1.6","1.7","1.8","1.9","1.10","1.11","1.12","1.13","1.14"],
+    "rochers":         ["2.1","2.2","2.3","2.4","2.5","2.6","2.7","2.8"],
+    "eau_marecages":   ["3.1","3.2","3.3","3.4","3.5","3.6","3.7","3.8","3.9","3.10","3.11"],
+    "vegetation":      ["4.1","4.2","4.3","4.4","4.5","4.6","4.7","4.8","4.9","4.10"],
+    "elements_artificiels": ["5.1","5.2","5.3","5.4","5.5","5.6","5.7","5.8","5.9","5.10","5.11","5.12","5.13","5.14","5.15","5.16","5.17","5.18","5.19","5.20","5.21","5.22"],
+    "combinaisons":    ["10.1","10.2"],
+    "coude":           ["11.1"]
+  }
+}

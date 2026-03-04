@@ -54,6 +54,13 @@ export const generateCircuit = (params) =>
 export const getSprintCandidates = (bounding_box) =>
   api.post('/api/v1/generation/sprint-candidates', { bounding_box }, { timeout: 60000 });
 
+/**
+ * Génération sprint avec dialogue traceur↔contrôleur automatique.
+ * Retourne : { controls, controleur_report, dialogue, iterations, is_valid, score }
+ */
+export const generateSprint = (params) =>
+  api.post('/api/v1/generation/generate-sprint', params, { timeout: 180000 });
+
 // ── Terrain runnabilité ──────────────────────────────────────────────────────
 export const getRunnabilityGrid = (bbox, resolution_m = 100) =>
   api.post('/api/v1/terrain/runnability-grid', { bounding_box: bbox, resolution_m }, { timeout: 60000 });
@@ -61,6 +68,14 @@ export const getRunnabilityGrid = (bbox, resolution_m = 100) =>
 // ── Dénivelé parcours ────────────────────────────────────────────────────────
 export const getCourseElevation = (controls) =>
   api.post('/api/v1/terrain/course-elevation', { controls }, { timeout: 30000 });
+
+// ── Route Analyzer (Étape 10f) ───────────────────────────────────────────────
+export const getRoutesBetweenControls = (params) =>
+  api.post('/api/v1/terrain/routes-between', params, { timeout: 60000 });
+
+// ── OCAD Analyzer (Étape 13c) ────────────────────────────────────────────────
+export const analyzeOcadGeojson = (geojson) =>
+  api.post('/api/v1/ocad/analyze', { geojson }, { timeout: 30000 });
 
 // ── Render service (ocad2tiles — image unique géoréférencée) ─────────────────
 export const TILE_SERVICE_URL = import.meta.env.VITE_TILE_URL || 'http://localhost:8089';

@@ -58,6 +58,10 @@ class GenerationConfig:
     # Mode sprint urbain (TD1/TD2) — adapte les paramètres pour la CO en ville
     sprint_mode: bool = False  # True → min_dist 30m, jambes ≤ 200m pénalisées
 
+    # Type et niveau technique — pour charger les seuils IOF/FFCO dynamiques
+    circuit_type: str = "forest"  # "sprint", "forest", "md", "couleur"
+    technical_level: int = 3      # TD1–TD5
+
 
 @dataclass
 class GenerationResult:
@@ -107,6 +111,57 @@ class GeneticAlgorithm:
         self.graph = None
         self._stagnation_count = 0
         self._last_best_fitness = 0.0
+
+        # Seuils calibrés depuis placement_rules.json (Étape 11b)
+        self._placement_rules = self._load_placement_rules()
+
+        # Scores d'attractivité IOF par code ISOM (Étape 14 — control_descriptions.json)
+        self._isom_att_scores = self._load_isom_attractiveness()
+
+    def _load_placement_rules(self) -> dict:
+        """Charge les seuils IOF/FFCO depuis placement_rules.json selon circuit_type et technical_level."""
+        import json
+        from pathlib import Path
+        rules_path = Path(__file__).parents[2] / "services" / "knowledge_base" / "placement_rules.json"
+        defaults = {
+            "min_leg_m": 60, "max_leg_m": 400,
+            "dog_leg_angle_deg": 25, "max_climb_ratio": 0.04,
+            "min_control_separation_m": 60,
+        }
+        try:
+            data = json.loads(rules_path.read_text(encoding="utf-8"))
+            ct = self.config.circuit_type or "forest"
+            td = self.config.technical_level or 3
+            td_key = f"TD{td}"
+            category = data.get(ct, data.get("forest", {}))
+            rules = category.get(td_key, None)
+            if rules is None:
+                rules = data.get("_defaults", defaults)
+            return rules
+        except Exception:
+            return defaults
+
+    def _load_isom_attractiveness(self) -> dict:
+        """Charge les scores d'attractivité IOF depuis control_descriptions.json.
+
+        Retourne {isom_code_int: float} — ex: {202: 1.0, 401: 0.15, 503: 0.75}
+        """
+        import json
+        from pathlib import Path
+        p = Path(__file__).parents[2] / "data" / "control_descriptions.json"
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            isom_map = data.get("isom_to_description", {})
+            att_scores = data.get("attractiveness_score", {
+                "very_high": 1.0, "high": 0.75, "medium": 0.45, "low": 0.15
+            })
+            return {
+                int(k): att_scores.get(v.get("attractiveness", "medium"), 0.45)
+                for k, v in isom_map.items()
+                if k.isdigit()
+            }
+        except Exception:
+            return {}
 
     def set_graph(self, graph):
         """Définit le graphe de navigation."""
@@ -291,6 +346,12 @@ class GeneticAlgorithm:
             if bb:
                 nx = max(bb["min_x"], min(bb["max_x"], nx))
                 ny = max(bb["min_y"], min(bb["max_y"], ny))
+            # Snap vers le candidate_point OCAD le plus proche (60% des cas)
+            # → ancre les postes sur des éléments terrain dès l'initialisation
+            if random.random() < 0.60:
+                cp = self._find_nearest_cp(nx, ny, target_leg_m * 0.5)
+                if cp:
+                    nx, ny = cp
             if not self._is_in_forbidden_zone(nx, ny, forbidden_zones):
                 controls.append((nx, ny))
                 current = (nx, ny)
@@ -596,14 +657,49 @@ class GeneticAlgorithm:
             controls[idx] = (x, y)
         return controls
 
+    def _terrain_quality_score(self, controls: List[Tuple[float, float]]) -> float:
+        """
+        Critère terrain quality (Étape 14) : préférer les postes sur des features
+        IOF descriptibles (attractivité 0–1 depuis control_descriptions.json).
+
+        Pour chaque poste intermédiaire (hors départ/arrivée) :
+        - Cherche le candidat le plus proche dans 60m
+        - Récupère son score d'attractivité ISOM
+        - Moyenne → note 0–100
+        Bonus : intersection géométrique (_intersection=True) → 1.0 forcé
+        """
+        if not self.config.candidate_points or len(controls) < 3:
+            return 50.0  # Neutre si pas de candidats
+
+        ATT_RADIUS_M = 60.0
+        scores = []
+        for pos in controls[1:-1]:  # Exclure départ et arrivée
+            best_att = None
+            best_d = ATT_RADIUS_M
+            for cp in self.config.candidate_points:
+                d = self._haversine_m(pos, (cp["x"], cp["y"]))
+                if d < best_d:
+                    best_d = d
+                    # Intersection géométrique = best possible
+                    if cp.get("_intersection"):
+                        best_att = 1.0
+                    else:
+                        isom = cp.get("isom")
+                        best_att = self._isom_att_scores.get(isom, 0.45) if isom else 0.45
+            scores.append(best_att if best_att is not None else 0.15)
+
+        if not scores:
+            return 50.0
+        return (sum(scores) / len(scores)) * 100.0
+
     def _default_scoring(
         self,
         circuit: Circuit,
         config: GenerationConfig,
     ) -> float:
         """
-        Fitness multi-objectifs IOF (6 critères pondérés).
-        Remplace le scoring mono-objectif précédent.
+        Fitness multi-objectifs IOF (7 critères pondérés).
+        Critère 7 : terrain quality — postes sur features IOF descriptibles (Étape 14).
         """
         controls = circuit.controls
         if len(controls) < 2:
@@ -615,14 +711,16 @@ class GeneticAlgorithm:
             for i in range(len(controls) - 1)
         ]
 
-        # --- 1. Longueur (20%) : tolérance ±15% par rapport à la cible (IOF AA12) ---
+        # --- 1. Longueur (20%) : gradient continu — pas de clamping à 0 ---
+        # Sans clamping, le GA peut distinguer 10km vs 17km (les deux mauvais).
+        # 100 si ratio ±15%, décroît linéairement → peut être négatif pour très mauvais circuits.
         if config.target_length_m > 0 and total_length > 0:
             ratio = total_length / config.target_length_m
             if 0.85 <= ratio <= 1.15:
                 length_score = 100.0
             else:
                 deviation = abs(ratio - 1.0) - 0.15
-                length_score = max(0.0, 100.0 - deviation * 400)
+                length_score = 100.0 - deviation * 200  # Peut être négatif → gradient préservé
         else:
             length_score = 75.0
 
@@ -672,7 +770,10 @@ class GeneticAlgorithm:
         else:
             angle_score = 50.0
 
-        # --- 5. Équité (20%) : pas de dog-legs (<20°), séparation minimale (IOF AA16.8.1 + AA3.5.5) ---
+        # --- 5. Équité (20%) : pas de dog-legs, séparation minimale (seuils IOF/FFCO dynamiques) ---
+        _rules = self._placement_rules
+        _dogleg_threshold = _rules.get("dog_leg_angle_deg", 25)
+        _min_sep = _rules.get("min_control_separation_m", config.min_control_distance)
         dog_legs = 0
         too_close = 0
         if len(controls) >= 3:
@@ -683,12 +784,12 @@ class GeneticAlgorithm:
                 diff = abs(math.degrees(out_a - in_a)) % 360
                 if diff > 180:
                     diff = 360 - diff
-                if diff < 20:
+                if diff < _dogleg_threshold:
                     dog_legs += 1
         for i in range(len(controls)):
             for j in range(i + 1, len(controls)):
                 d = self._haversine_m(controls[i], controls[j])
-                if d < config.min_control_distance:
+                if d < _min_sep:
                     too_close += 1
         equity_score = max(0.0, 100.0 - dog_legs * 15 - too_close * 20)
 
@@ -696,28 +797,33 @@ class GeneticAlgorithm:
         control_diff = abs(len(controls) - config.target_controls)
         safety_score = max(0.0, 100.0 - control_diff * 10)
 
-        # --- 7. Sprint : pénaliser les jambes > 200m (remplace la part climb en sprint) ---
+        # --- 7. Terrain quality (10%) : postes sur features IOF descriptibles ---
+        terrain_score = self._terrain_quality_score(controls)
+
+        # --- 8. Sprint : pénaliser les jambes > max_leg_m (seuil dynamique) ---
         if config.sprint_mode and leg_lengths:
-            max_leg_m = 200.0
+            max_leg_m = float(_rules.get("max_leg_m", 200))
             long_legs = sum(1 for l in leg_lengths if l > max_leg_m)
             sprint_leg_score = max(0.0, 100.0 - long_legs * 25)
-            # En sprint, le dénivelé est négligeable — on le remplace par ce critère
+            # Pondération sprint : dénivelé remplacé par jambe_sprint + terrain_quality
             return (
-                length_score  * 0.25
-                + sprint_leg_score * 0.20
-                + td_score    * 0.15
-                + angle_score * 0.25
+                length_score   * 0.22
+                + sprint_leg_score * 0.18
+                + td_score     * 0.13
+                + angle_score  * 0.22
                 + equity_score * 0.10
                 + safety_score * 0.05
+                + terrain_score * 0.10
             )
 
         return (
-            length_score * 0.20
-            + climb_score * 0.15
-            + td_score   * 0.15
-            + angle_score * 0.20
-            + equity_score * 0.20
+            length_score  * 0.18
+            + climb_score * 0.13
+            + td_score    * 0.14
+            + angle_score * 0.18
+            + equity_score * 0.17
             + safety_score * 0.10
+            + terrain_score * 0.10
         )
 
     def _calculate_total_length(self, controls: List[Tuple[float, float]]) -> float:

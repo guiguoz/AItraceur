@@ -1,0 +1,152 @@
+{
+  "_comment": "Seuils de tracé IOF/FFCO par type de circuit et niveau TD. Sources : IOF Guidelines Sprint/Forest 2020, FFCO Méthode Fédérale 2016, RTS CO mai 2025.",
+  "sprint": {
+    "TD1": {
+      "min_leg_m": 20,
+      "max_leg_m": 100,
+      "dog_leg_angle_deg": 30,
+      "max_climb_ratio": 0.01,
+      "min_control_separation_m": 25,
+      "route_choice_diversity_min": 0.0,
+      "notes": "Circuits enfants/découverte, très court, aucun dog-leg toléré en pratique"
+    },
+    "TD2": {
+      "min_leg_m": 30,
+      "max_leg_m": 150,
+      "dog_leg_angle_deg": 25,
+      "max_climb_ratio": 0.02,
+      "min_control_separation_m": 30,
+      "route_choice_diversity_min": 0.0,
+      "notes": "Débutants confirmés, jambes courtes, terrain simple"
+    },
+    "TD3": {
+      "min_leg_m": 50,
+      "max_leg_m": 250,
+      "dog_leg_angle_deg": 25,
+      "max_climb_ratio": 0.03,
+      "min_control_separation_m": 35,
+      "route_choice_diversity_min": 0.15,
+      "notes": "Niveau régional sprint. Min 1 jambe avec choix d'itinéraire réel"
+    },
+    "TD4": {
+      "min_leg_m": 60,
+      "max_leg_m": 350,
+      "dog_leg_angle_deg": 22,
+      "max_climb_ratio": 0.04,
+      "min_control_separation_m": 40,
+      "route_choice_diversity_min": 0.25,
+      "notes": "Niveau national sprint. Choix d'itinéraire sur 2-3 jambes minimum"
+    },
+    "TD5": {
+      "min_leg_m": 80,
+      "max_leg_m": 400,
+      "dog_leg_angle_deg": 20,
+      "max_climb_ratio": 0.04,
+      "min_control_separation_m": 40,
+      "route_choice_diversity_min": 0.30,
+      "notes": "Elite sprint. IOF : pas de dog-leg, pas de couloir unique, choix d'itinéraire obligatoire"
+    }
+  },
+  "forest": {
+    "TD1": {
+      "min_leg_m": 50,
+      "max_leg_m": 300,
+      "dog_leg_angle_deg": 35,
+      "max_climb_ratio": 0.02,
+      "min_control_separation_m": 50,
+      "route_choice_diversity_min": 0.0,
+      "notes": "Blanc/Jaune — linéaire, postes sur éléments évidents"
+    },
+    "TD2": {
+      "min_leg_m": 100,
+      "max_leg_m": 700,
+      "dog_leg_angle_deg": 30,
+      "max_climb_ratio": 0.03,
+      "min_control_separation_m": 60,
+      "route_choice_diversity_min": 0.0,
+      "notes": "Orange — semi-linéaire, lecture de carte simple"
+    },
+    "TD3": {
+      "min_leg_m": 200,
+      "max_leg_m": 1500,
+      "dog_leg_angle_deg": 25,
+      "max_climb_ratio": 0.04,
+      "min_control_separation_m": 60,
+      "route_choice_diversity_min": 0.15,
+      "notes": "Vert/Violet — navigation terrain. Quelques jambes avec choix d'itinéraire"
+    },
+    "TD4": {
+      "min_leg_m": 300,
+      "max_leg_m": 2500,
+      "dog_leg_angle_deg": 22,
+      "max_climb_ratio": 0.05,
+      "min_control_separation_m": 60,
+      "route_choice_diversity_min": 0.25,
+      "notes": "Bleu — niveau régional/national. Choix d'itinéraire sur 30% des jambes"
+    },
+    "TD5": {
+      "min_leg_m": 400,
+      "max_leg_m": 3000,
+      "dog_leg_angle_deg": 20,
+      "max_climb_ratio": 0.06,
+      "min_control_separation_m": 60,
+      "route_choice_diversity_min": 0.30,
+      "notes": "Noir/Elite — IOF : dog-legs interdits, complexité maximale, choix d'itinéraire systématique"
+    }
+  },
+  "md": {
+    "TD3": {
+      "min_leg_m": 150,
+      "max_leg_m": 1000,
+      "dog_leg_angle_deg": 25,
+      "max_climb_ratio": 0.04,
+      "min_control_separation_m": 60,
+      "route_choice_diversity_min": 0.15
+    },
+    "TD5": {
+      "min_leg_m": 300,
+      "max_leg_m": 2000,
+      "dog_leg_angle_deg": 20,
+      "max_climb_ratio": 0.05,
+      "min_control_separation_m": 60,
+      "route_choice_diversity_min": 0.25
+    }
+  },
+  "couleur": {
+    "TD1": {
+      "min_leg_m": 30,
+      "max_leg_m": 400,
+      "dog_leg_angle_deg": 35,
+      "max_climb_ratio": 0.02,
+      "min_control_separation_m": 30,
+      "route_choice_diversity_min": 0.0,
+      "notes": "Blanc : postes reliés par chemin ou layon, pas de navigation"
+    },
+    "TD2": {
+      "min_leg_m": 60,
+      "max_leg_m": 600,
+      "dog_leg_angle_deg": 30,
+      "max_climb_ratio": 0.03,
+      "min_control_separation_m": 50,
+      "route_choice_diversity_min": 0.0,
+      "notes": "Jaune : semi-linéaire"
+    },
+    "TD3": {
+      "min_leg_m": 100,
+      "max_leg_m": 900,
+      "dog_leg_angle_deg": 25,
+      "max_climb_ratio": 0.04,
+      "min_control_separation_m": 60,
+      "route_choice_diversity_min": 0.10,
+      "notes": "Orange : lecture carte basique"
+    }
+  },
+  "_defaults": {
+    "min_leg_m": 60,
+    "max_leg_m": 400,
+    "dog_leg_angle_deg": 25,
+    "max_climb_ratio": 0.04,
+    "min_control_separation_m": 60,
+    "route_choice_diversity_min": 0.15
+  }
+}

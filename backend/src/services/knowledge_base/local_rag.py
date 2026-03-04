@@ -20,23 +20,39 @@ TOP_K = 3  # Nombre de Q/R à passer en contexte à Ollama
 
 
 def charger_dataset():
-    # Trouver le bon chemin vers le jsonl (dans Lora/)
+    """Charge le dataset Q/R principal + les chunks PDF ingérés (Étape 11a)."""
     base_dir = os.path.dirname(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
     )
-    chemin = os.path.join(base_dir, "Lora", "mondial_tracage_QR_v4.jsonl")
-
     qr = []
-    if not os.path.exists(chemin):
-        print(f"[WARNING] Dataset not found at {chemin}")
-        return qr
 
-    with open(chemin, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            qr.append(json.loads(line))
+    # Dataset Q/R principal (ffco-iof-v7)
+    chemin_qr = os.path.join(base_dir, "Lora", "mondial_tracage_QR_v4.jsonl")
+    if os.path.exists(chemin_qr):
+        with open(chemin_qr, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    qr.append(json.loads(line))
+    else:
+        print(f"[WARNING] Dataset QR not found: {chemin_qr}")
+
+    # Chunks PDF ingérés (Étape 11a) — data/pdf_knowledge.jsonl
+    chemin_pdf = os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "data", "pdf_knowledge.jsonl"
+    )
+    chemin_pdf = os.path.normpath(chemin_pdf)
+    if os.path.exists(chemin_pdf):
+        count_before = len(qr)
+        with open(chemin_pdf, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    qr.append(json.loads(line))
+        print(f"[OK] {len(qr) - count_before} chunks PDF chargés depuis {chemin_pdf}")
+    else:
+        print(f"[INFO] Pas de chunks PDF. Lancez POST /api/v1/knowledge/ingest-docs pour indexer les PDF.")
+
     return qr
 
 
@@ -211,3 +227,49 @@ class LocalRAG:
         else:
             reponse = demander_ollama(question, [])
             return reponse or FALLBACK, []
+
+    def search_chunks(
+        self,
+        query: str,
+        n: int = 5,
+        circuit_type: str = None,
+        min_score: float = 0.20,
+    ) -> list:
+        """
+        Recherche sémantique directe dans le dataset (sans passer par Ollama).
+        Retourne les n meilleurs chunks correspondants.
+
+        Chaque résultat : {"text": str, "source": str, "score": float, "circuit_type": str}
+        """
+        if not self.qr_list or self.embeddings is None:
+            return []
+
+        resultats = trouver_meilleures_reponses(
+            query, self.qr_list, self.model, self.embeddings, top_k=max(n * 3, 15)
+        )
+
+        chunks = []
+        for item, score in resultats:
+            if score < min_score:
+                continue
+            item_ct = item.get("circuit_type", "all")
+            # Filtre par circuit_type si spécifié ("all" passe toujours)
+            if circuit_type and item_ct not in ("all", circuit_type):
+                continue
+            chunks.append({
+                "text": item.get("output", item.get("instruction", "")),
+                "source": item.get("source", "Dataset"),
+                "score": round(score, 3),
+                "circuit_type": item_ct,
+            })
+            if len(chunks) >= n:
+                break
+
+        return chunks
+
+    def reload(self):
+        """Recharge le dataset (après ingestion de nouveaux PDF)."""
+        self._initialized = False
+        self.qr_list = []
+        self.embeddings = None
+        self.__init__()

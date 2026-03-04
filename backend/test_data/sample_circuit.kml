@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Sample Sprint Circuit</name>
+    <Folder>
+      <name>Controls</name>
+      <!-- Start -->
+      <Placemark>
+        <name>31 - Start</name>
+        <description>Depart</description>
+        <Point>
+          <coordinates>2.3522,48.8566,0</coordinates>
+        </Point>
+      </Placemark>
+      <!-- Control 1 -->
+      <Placemark>
+        <name>31 - Control 1</name>
+        <description>Corner of building</description>
+        <Point>
+          <coordinates>2.3525,48.8568,0</coordinates>
+        </Point>
+      </Placemark>
+      <!-- Control 2 -->
+      <Placemark>
+        <name>31 - Control 2</name>
+        <description>Tree</description>
+        <Point>
+          <coordinates>2.3530,48.8570,0</coordinates>
+        </Point>
+      </Placemark>
+      <!-- Control 3 -->
+      <Placemark>
+        <name>31 - Control 3</name>
+        <description>Fence corner</description>
+        <Point>
+          <coordinates>2.3535,48.8568,0</coordinates>
+        </Point>
+      </Placemark>
+      <!-- Finish -->
+      <Placemark>
+        <name>31 - Finish</name>
+        <description>Arrival</description>
+        <Point>
+          <coordinates>2.3522,48.8566,0</coordinates>
+        </Point>
+      </Placemark>
+    </Folder>
+    <Folder>
+      <name>Route</name>
+      <Placemark>
+        <name>Route Line</name>
+        <LineString>
+          <coordinates>
+            2.3522,48.8566,0 2.3525,48.8568,0 2.3530,48.8570,0 2.3535,48.8568,0 2.3522,48.8566,0
+          </coordinates>
+        </LineString>
+      </Placemark>
+    </Folder>
+  </Document>
+</kml>

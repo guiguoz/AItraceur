@@ -1,18 +1,19 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { MapViewer } from './components/MapViewer'
 import OcadUploader from './components/OcadUploader'
 import ControlsList from './components/ControlsList'
-import AiChatPanel from './components/AiChatPanel'
 import TerrainPanel from './components/TerrainPanel'
 import CircuitCreationModal from './components/CircuitCreationModal'
 import CircuitSelector from './components/CircuitSelector'
 import AISuggestionPanel from './components/AISuggestionPanel'
-import { generateCircuit, getSprintCandidates, uploadOcdForRender, TILE_SERVICE_URL } from './services/api'
+import { generateCircuit, getSprintCandidates, generateSprint, uploadOcdForRender, TILE_SERVICE_URL, getRoutesBetweenControls, analyzeOcadGeojson } from './services/api'
+import DialogueLog from './components/DialogueLog'
 import { buildMapContext } from './services/mapContext'
+import { OcadAnalysisPanel } from './components/OcadAnalysisPanel'
 
 // IOF/FFCO reference params — auto-computed per circuit type/sex/category
 const CIRCUIT_BASE_PARAMS = {
-  sprint: { target_length_m: 3500, winning_time_minutes: 12, technical_level: 'TD4', target_controls: 15 },
+  sprint: { target_length_m: 2200, winning_time_minutes: 12, technical_level: 'TD3', target_controls: 12 },
   md:     { target_length_m: 8000, winning_time_minutes: 30, technical_level: 'TD4', target_controls: 18 },
   ld:     { target_length_m: 14000, winning_time_minutes: 60, technical_level: 'TD4', target_controls: 25 },
 }
@@ -70,15 +71,16 @@ function computeCourseDistance(controls) {
 }
 
 function extractBoundingBox(geojson) {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  const xs = [], ys = []
   const walk = (coords) => {
-    if (typeof coords[0] === 'number') {
-      minX = Math.min(minX, coords[0]); maxX = Math.max(maxX, coords[0])
-      minY = Math.min(minY, coords[1]); maxY = Math.max(maxY, coords[1])
-    } else coords.forEach(walk)
+    if (typeof coords[0] === 'number') { xs.push(coords[0]); ys.push(coords[1]) }
+    else coords.forEach(walk)
   }
   geojson.features.forEach(f => f.geometry?.coordinates && walk(f.geometry.coordinates))
-  return { min_x: minX, min_y: minY, max_x: maxX, max_y: maxY }
+  if (xs.length === 0) return { min_x: -180, min_y: -90, max_x: 180, max_y: 90 }
+  xs.sort((a, b) => a - b); ys.sort((a, b) => a - b)
+  const p = (arr, pct) => arr[Math.max(0, Math.min(arr.length - 1, Math.floor(arr.length * pct)))]
+  return { min_x: p(xs, 0.01), min_y: p(ys, 0.01), max_x: p(xs, 0.99), max_y: p(ys, 0.99) }
 }
 
 // ISOM codes with notable orienteering control attractiveness (forest maps, ISOM 2017)
@@ -102,8 +104,23 @@ const ATTRACTIVE_ISSOM = new Set([
 ])
 
 // ISOM codes representing out-of-bounds / forbidden areas (olive green, cross-hatched…)
-// These polygons are automatically extracted and passed as forbidden_zones to the GA.
-const OOB_ISOM = new Set([520, 527, 528, 709, 714])
+// ISOM 2017: 520=OOB, 709=do-not-enter, 714=dangerous area
+// ISSOM 2007/2019: 520=OOB, 526=OOB passage, 709=do-not-enter
+// Also 521/522/527/528 = buildings — excluded from candidates separately
+const OOB_ISOM = new Set([520, 526, 709, 714, 715])
+
+// Ray-casting point-in-polygon test (WGS84 coords, [lng, lat] ring)
+function pointInPolygon(lng, lat, ring) {
+  let inside = false
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1]
+    const xj = ring[j][0], yj = ring[j][1]
+    if (((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) {
+      inside = !inside
+    }
+  }
+  return inside
+}
 
 function computeGeoCentroid(geometry) {
   if (!geometry) return null
@@ -139,23 +156,138 @@ function extractOobZones(geojson) {
   return zones
 }
 
-function extractCandidatePoints(geojson, max = 400, sprintMode = false) {
-  const attractiveCodes = sprintMode ? ATTRACTIVE_ISSOM : ATTRACTIVE_ISOM
+// Compute angle (degrees) at vertex B between segments A→B and B→C
+function computeAngleDeg(a, b, c) {
+  const v1 = [a[0] - b[0], a[1] - b[1]]
+  const v2 = [c[0] - b[0], c[1] - b[1]]
+  const dot = v1[0]*v2[0] + v1[1]*v2[1]
+  const mag = Math.sqrt((v1[0]**2+v1[1]**2) * (v2[0]**2+v2[1]**2))
+  if (mag === 0) return 180
+  return (Math.acos(Math.max(-1, Math.min(1, dot/mag))) * 180) / Math.PI
+}
+
+// Deduplicate points closer than ~threshDeg degrees (≈15m at ~0.000135°/m)
+function deduplicatePoints(pts, threshDeg = 0.000135) {
+  const out = []
+  for (const p of pts) {
+    const near = out.some(q => Math.abs(q.x - p.x) < threshDeg && Math.abs(q.y - p.y) < threshDeg)
+    if (!near) out.push(p)
+  }
+  return out
+}
+
+// Building polygon ISOM codes — extract corners instead of centroid
+const BUILDING_ISOM = new Set([521, 522, 527, 528])
+// Path/road LineString ISOM codes — extract direction-change vertices + intersections
+const PATH_ISOM = new Set([501, 502, 503, 504, 505, 506])
+// Sprint equivalents
+const BUILDING_ISSOM = new Set([521, 522, 529])
+const PATH_ISSOM = new Set([401, 402, 403, 404, 405])
+
+// Compute parametric intersection of segments P1-P2 and P3-P4.
+// Returns [lng, lat] if they cross, null otherwise.
+function segmentIntersect(p1, p2, p3, p4) {
+  const dx12 = p2[0] - p1[0], dy12 = p2[1] - p1[1]
+  const dx34 = p4[0] - p3[0], dy34 = p4[1] - p3[1]
+  const denom = dy34 * dx12 - dx34 * dy12
+  if (Math.abs(denom) < 1e-12) return null // parallel / collinear
+  const dx13 = p1[0] - p3[0], dy13 = p1[1] - p3[1]
+  const t = (dx34 * dy13 - dy34 * dx13) / denom
+  const u = (dx12 * dy13 - dy12 * dx13) / denom
+  if (t > 0 && t < 1 && u > 0 && u < 1) {
+    return [p1[0] + t * dx12, p1[1] + t * dy12]
+  }
+  return null
+}
+
+// Find geometric intersections between pairs of path LineStrings (carrefours).
+// Limited to maxFeatures to keep computation fast in the browser.
+function findPathIntersections(lines, isom, maxFeatures = 200) {
   const pts = []
+  const n = Math.min(lines.length, maxFeatures)
+  for (let i = 0; i < n; i++) {
+    const a = lines[i]
+    for (let j = i + 1; j < n; j++) {
+      const b = lines[j]
+      for (let ai = 0; ai < a.length - 1; ai++) {
+        for (let bi = 0; bi < b.length - 1; bi++) {
+          const pt = segmentIntersect(a[ai], a[ai+1], b[bi], b[bi+1])
+          if (pt) pts.push({ x: pt[0], y: pt[1], isom, _intersection: true })
+        }
+      }
+    }
+  }
+  return pts
+}
+
+function extractCandidatePoints(geojson, max = 600, sprintMode = false) {
+  const attractiveCodes = sprintMode ? ATTRACTIVE_ISSOM : ATTRACTIVE_ISOM
+  const buildingCodes = sprintMode ? BUILDING_ISSOM : BUILDING_ISOM
+  const pathCodes = sprintMode ? PATH_ISSOM : PATH_ISOM
+
+  const pts = []
+  const pathLines = [] // LineString coords collected for intersection computation
+
   for (const f of geojson.features) {
     const sym = f.properties?.sym
     if (!sym) continue
     const isom = Math.floor(sym / 1000)
     if (!attractiveCodes.has(isom)) continue
-    const c = computeGeoCentroid(f.geometry)
-    if (c) pts.push({ x: c[0], y: c[1], isom })
+    const geom = f.geometry
+    if (!geom) continue
+
+    if (geom.type === 'Point') {
+      pts.push({ x: geom.coordinates[0], y: geom.coordinates[1], isom })
+
+    } else if (geom.type === 'Polygon' && buildingCodes.has(isom)) {
+      // Building corners — all polygon vertices
+      const ring = geom.coordinates[0]
+      for (let i = 0; i < ring.length - 1; i++) {
+        pts.push({ x: ring[i][0], y: ring[i][1], isom })
+      }
+
+    } else if (geom.type === 'LineString' && pathCodes.has(isom)) {
+      const coords = geom.coordinates
+      pathLines.push({ coords, isom })
+
+      // Direction-change vertices (sharp turn)
+      for (let i = 1; i < coords.length - 1; i++) {
+        const angle = computeAngleDeg(coords[i-1], coords[i], coords[i+1])
+        if (angle < 150) {
+          pts.push({ x: coords[i][0], y: coords[i][1], isom })
+        }
+      }
+      // Endpoints (potential T-junctions, dead-ends)
+      pts.push({ x: coords[0][0], y: coords[0][1], isom })
+      pts.push({ x: coords[coords.length-1][0], y: coords[coords.length-1][1], isom })
+
+    } else {
+      const c = computeGeoCentroid(geom)
+      if (c) pts.push({ x: c[0], y: c[1], isom })
+    }
   }
-  // Shuffle then limit
-  for (let i = pts.length - 1; i > 0; i--) {
+
+  // Compute geometric intersections between path pairs (true carrefours)
+  // Intersections go first — highest-priority sprint controls
+  if (pathLines.length >= 2) {
+    const intersectionIsom = pathLines[0]?.isom || (sprintMode ? 401 : 501)
+    const lineCoords = pathLines.map(l => l.coords)
+    const crossings = findPathIntersections(lineCoords, intersectionIsom)
+    // Prepend so intersections survive the final slice(0, max)
+    pts.unshift(...crossings)
+    console.log(`[extractCandidatePoints] ${crossings.length} intersections géométriques trouvées sur ${pathLines.length} lignes`)
+  }
+
+  // Deduplicate (15m threshold) then shuffle non-intersection points
+  const intersections = pts.filter(p => p._intersection)
+  const rest = pts.filter(p => !p._intersection)
+  const dedupRest = deduplicatePoints(rest)
+  for (let i = dedupRest.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [pts[i], pts[j]] = [pts[j], pts[i]]
+    [dedupRest[i], dedupRest[j]] = [dedupRest[j], dedupRest[i]]
   }
-  return pts.slice(0, max)
+  const dedupAll = deduplicatePoints([...intersections, ...dedupRest])
+  return dedupAll.slice(0, max)
 }
 
 const tools = [
@@ -174,12 +306,21 @@ function App() {
   const [error, setError] = useState(null)
   const [activeTool, setActiveTool] = useState('view')
   const [imageData, setImageData] = useState(null)
+  const [mapMode, setMapMode] = useState('osm') // 'osm' | 'ocad'
+  const [ocadAnalysis, setOcadAnalysis] = useState(null)
   const [renderLoading, setRenderLoading] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [terrainData, setTerrainData] = useState(null)
   const [showRunnability, setShowRunnability] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [generationError, setGenerationError] = useState(null)
+  const [dialogue, setDialogue] = useState([])
+  const [controleurReport, setControleurReport] = useState(null)
+  const [progressLabel, setProgressLabel] = useState('')
+  const [routeDisplay, setRouteDisplay] = useState(null) // { legIdx, routes }
+
+  // Leaflet map ref — used for viewport bbox when no OCAD loaded
+  const mapRef = useRef(null)
 
   // Multi-circuit state
   const [circuits, setCircuits] = useState([])
@@ -206,6 +347,8 @@ function App() {
     setCircuits([])
     setActiveCircuitId(null)
     setImageData(null)
+    setMapMode('osm')
+    setOcadAnalysis(null)
 
     if (data.rawFile) {
       setRenderLoading(true)
@@ -220,10 +363,18 @@ function App() {
                 [bounds.northEast[0], bounds.northEast[1]],
               ],
             })
+            setMapMode('ocad')
           }
         })
         .catch(err => console.warn('[Render] Service unavailable:', err.message))
         .finally(() => setRenderLoading(false))
+    }
+
+    // Analyse OCAD côté backend (13c)
+    if (data.geojson) {
+      analyzeOcadGeojson(data.geojson)
+        .then(res => setOcadAnalysis(res.data))
+        .catch(err => console.warn('[OCAD analyze]', err.message))
     }
   }
 
@@ -263,7 +414,7 @@ function App() {
   // ── Controls placement ───────────────────────────────────────────────────────
 
   const handleMapClick = (latlng) => {
-    if (activeTool === 'view' || activeTool === 'forbidden' || !ocadData || !activeCircuit) return
+    if (activeTool === 'view' || activeTool === 'forbidden' || !activeCircuit) return
     if (activeCircuit.status === 'ai_suggesting') return
 
     updateActiveCircuit(c => {
@@ -299,20 +450,20 @@ function App() {
   // ── AI suggestion workflow ───────────────────────────────────────────────────
 
   const handleAiGenerate = async () => {
-    if (!ocadData?.geojson || isGenerating || !activeCircuit) return
+    if (isGenerating || !activeCircuit) return
     setIsGenerating(true)
     setGenerationError(null)
+    setDialogue([])
+    setControleurReport(null)
+    setProgressLabel('Génération initiale…')
     try {
-      // Use tile service bounds (reliable WGS84 from CRS pipeline) if available.
-      // Falls back to GeoJSON extraction — validated to be WGS84 range.
+      // Priority: tile service bounds > OCAD GeoJSON bounds > Leaflet viewport
       let bbox
       if (imageData?.bounds) {
-        // imageData.bounds = [[southLat, westLng], [northLat, eastLng]] (Leaflet format)
         const [[southLat, westLng], [northLat, eastLng]] = imageData.bounds
         bbox = { min_x: westLng, min_y: southLat, max_x: eastLng, max_y: northLat }
-      } else {
+      } else if (ocadData?.geojson) {
         bbox = extractBoundingBox(ocadData.geojson)
-        // Sanity check: WGS84 coordinates must be in ±180° / ±90°
         if (Math.abs(bbox.min_x) > 180 || Math.abs(bbox.max_x) > 180 ||
             Math.abs(bbox.min_y) > 90  || Math.abs(bbox.max_y) > 90) {
           throw new Error(
@@ -320,27 +471,53 @@ function App() {
             'Démarrez le service de tuiles (port 8089) et rechargez la carte.'
           )
         }
+      } else {
+        // No OCAD — use current Leaflet viewport
+        const bounds = mapRef.current?.getBounds()
+        if (!bounds) throw new Error('Zoomez sur la zone à tracer avant de générer.')
+        bbox = { min_x: bounds.getWest(), min_y: bounds.getSouth(),
+                 max_x: bounds.getEast(), max_y: bounds.getNorth() }
       }
       console.log('[AI Generate] bbox WGS84:', bbox)
       const circuitParams = getCircuitParams(activeCircuit)
       const startControl = activeCircuit.controls.find(c => c.type === 'start')
-      const mapContext = buildMapContext(ocadData.geojson)
+      const mapContext = ocadData?.geojson ? buildMapContext(ocadData.geojson) : null
       const isSprintCircuit = activeCircuit.type === 'sprint'
 
-      // Extraire les candidats OCAD (codes ISSOM pour sprint, ISOM pour forêt)
-      let candidatePoints = extractCandidatePoints(ocadData.geojson, 400, isSprintCircuit)
-      const oobZones = [...activeCircuit.forbiddenZones, ...extractOobZones(ocadData.geojson)]
+      // OOB zones first — needed to filter candidates
+      const ocadOobZones = ocadData?.geojson ? extractOobZones(ocadData.geojson) : []
+      const oobZones = [...activeCircuit.forbiddenZones, ...ocadOobZones]
 
-      // Sprint sans OCAD ou peu de candidats : enrichir depuis OSM
-      // (le backend auto-enrichit aussi si <50 candidats, mais ici on précharge pour l'UX)
+      // Candidats OCAD si disponibles, sinon vide (OSM auto-enrichment côté serveur)
+      let candidatePoints = ocadData?.geojson
+        ? extractCandidatePoints(ocadData.geojson, 600, isSprintCircuit)
+        : []
+      if (ocadData?.geojson) {
+        const margin = 0.02
+        const beforeFilter = candidatePoints.length
+        candidatePoints = candidatePoints.filter(cp => {
+          // Exclude candidates outside bbox
+          if (cp.x < bbox.min_x - margin || cp.x > bbox.max_x + margin ||
+              cp.y < bbox.min_y - margin || cp.y > bbox.max_y + margin) return false
+          // Exclude candidates inside OOB zones (propriété privée, hors-limites)
+          if (oobZones.some(ring => pointInPolygon(cp.x, cp.y, ring))) return false
+          return true
+        })
+        console.log(`[AI Generate] Candidats: ${beforeFilter} → ${candidatePoints.length} après filtrage OOB (${oobZones.length} zones)`)
+      }
+
+      // Sprint avec peu de candidats : pré-charger OSM (le serveur le fait aussi si <50)
       if (isSprintCircuit && candidatePoints.length < 30) {
         try {
           const sprintRes = await getSprintCandidates(bbox)
           const osmData = sprintRes.data
-          candidatePoints = [...candidatePoints, ...(osmData.candidates || [])]
+          const osmCandidates = (osmData.candidates || []).filter(
+            cp => !oobZones.some(ring => pointInPolygon(cp.x, cp.y, ring))
+          )
+          candidatePoints = [...candidatePoints, ...osmCandidates]
           // Les bâtiments OSM = OOB supplémentaires
           for (const poly of (osmData.oob_polygons || [])) oobZones.push(poly)
-          console.log(`[AI Generate] Sprint OSM: ${osmData.candidates?.length} candidats OSM chargés`)
+          console.log(`[AI Generate] Sprint OSM: ${osmData.candidates?.length} candidats OSM (${osmData.candidates?.length - osmCandidates.length} exclus OOB)`)
         } catch (err) {
           console.warn('[AI Generate] Sprint OSM candidates failed (non bloquant):', err.message)
         }
@@ -352,6 +529,7 @@ function App() {
         bounding_box: bbox,
         method: 'genetic',
         num_variants: 1,
+        circuit_type: activeCircuit.type,
         ...circuitParams,
         ...(mapContext && { map_context: mapContext }),
         ...(startControl && { start_position: [startControl.lng, startControl.lat] }),
@@ -365,16 +543,36 @@ function App() {
         candidate_points: candidatePoints.slice(0, 600),
       }
 
-      const res = await generateCircuit(params)
-      console.log('[AI Generate] response:', res.data)
-      const best = res.data?.circuits?.[0]
-      console.log('[AI Generate] best circuit:', best)
-      if (!best?.controls?.length) throw new Error('Aucun circuit généré')
+      let controls
+      if (isSprintCircuit) {
+        setProgressLabel('Dialogue traceur↔contrôleur…')
+        const sprintParams = {
+          bounding_box: bbox,
+          ...circuitParams,
+          ...(startControl && { start_position: [startControl.lng, startControl.lat] }),
+          forbidden_zones_polygons: oobZones,
+          candidate_points: candidatePoints.slice(0, 600),
+        }
+        const res = await generateSprint(sprintParams)
+        const data = res.data
+        console.log('[Generate Sprint] response:', data)
+        if (data.dialogue?.length) setDialogue(data.dialogue)
+        if (data.controleur_report) setControleurReport(data.controleur_report)
+        if (!data.controls?.length) throw new Error('Aucun circuit généré')
+        controls = data.controls
+      } else {
+        const res = await generateCircuit(params)
+        console.log('[AI Generate] response:', res.data)
+        const best = res.data?.circuits?.[0]
+        console.log('[AI Generate] best circuit:', best)
+        if (!best?.controls?.length) throw new Error('Aucun circuit généré')
+        controls = best.controls
+      }
 
       const hasStart = activeCircuit.controls.some(c => c.type === 'start')
       const hasFinish = activeCircuit.controls.some(c => c.type === 'finish')
 
-      const suggestions = best.controls
+      const suggestions = controls
         .map((c, idx) => ({
           id: `ai_${Date.now()}_${idx}`,
           type: c.type || (idx === 0 ? 'start' : idx === best.controls.length - 1 ? 'finish' : 'control'),
@@ -432,6 +630,26 @@ function App() {
     })
   }
 
+  // ── Route Analyzer (Étape 10f) ───────────────────────────────────────────────
+
+  const handleShowRoutes = async (legIdx, controlA, controlB) => {
+    // Toggle off if same leg
+    if (routeDisplay?.legIdx === legIdx) {
+      setRouteDisplay(null)
+      return
+    }
+    try {
+      const res = await getRoutesBetweenControls({
+        from: { lat: controlA.lat, lng: controlA.lng },
+        to: { lat: controlB.lat, lng: controlB.lng },
+        k: 3,
+      })
+      setRouteDisplay({ legIdx, routes: res.data.routes, diversityScore: res.data.diversity_score })
+    } catch (e) {
+      console.error('[RouteAnalyzer]', e)
+    }
+  }
+
   // ── IOF XML export ───────────────────────────────────────────────────────────
 
   const handleExportIOF = () => {
@@ -479,7 +697,7 @@ function App() {
   const controls = activeCircuit?.controls ?? []
   const courseDistance = computeCourseDistance(controls)
   const controlCount = controls.filter(c => c.type === 'control').length
-  const currentStep = !ocadData ? 0 : circuits.length === 0 ? 1 : activeCircuit?.status === 'complete' ? 3 : 2
+  const currentStep = circuits.length === 0 ? 1 : activeCircuit?.status === 'complete' ? 3 : 2
   const currentSuggestion =
     activeCircuit?.status === 'ai_suggesting'
       ? activeCircuit.aiSuggestions[activeCircuit.suggestionIdx] ?? null
@@ -508,16 +726,14 @@ function App() {
           </div>
         </div>
 
-        {/* Circuit selector (visible when map loaded) */}
-        {ocadData && (
-          <CircuitSelector
-            circuits={circuits}
-            activeCircuitId={activeCircuitId}
-            onSelect={setActiveCircuitId}
-            onDelete={handleDeleteCircuit}
-            onAddNew={() => setShowCreationForm(true)}
-          />
-        )}
+        {/* Circuit selector — always visible */}
+        <CircuitSelector
+          circuits={circuits}
+          activeCircuitId={activeCircuitId}
+          onSelect={setActiveCircuitId}
+          onDelete={handleDeleteCircuit}
+          onAddNew={() => setShowCreationForm(true)}
+        />
 
         {/* Scrollable content */}
         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
@@ -551,35 +767,46 @@ function App() {
             </div>
           )}
 
-          {/* No map loaded */}
-          {!ocadData ? (
-            <div className="space-y-4">
+          <div className="space-y-4">
+
+              {/* OCAD map uploader — optional enhancement */}
               <div className="bg-gray-700/50 p-4 rounded-xl border border-gray-700">
                 <h2 className="text-sm font-semibold text-gray-200 mb-3 flex items-center gap-2">
                   <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                   </svg>
-                  Projet
+                  Carte OCAD {!ocadData && <span className="text-gray-500 font-normal">(optionnel)</span>}
                 </h2>
                 <OcadUploader onOcadLoaded={handleOcadLoaded} onLoading={setIsLoading} onError={handleError} />
+                {!ocadData && (
+                  <p className="text-xs text-gray-500 mt-2 text-center">
+                    Sans carte : génération sprint depuis OSM
+                  </p>
+                )}
               </div>
-              <div className="text-xs text-gray-500 p-4 bg-gray-800/50 rounded-lg border border-gray-700/50 text-center">
-                Chargez un fichier .ocd pour commencer à tracer.
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-4">
 
-              {/* Map info */}
+              {/* Map info — only when OCAD loaded */}
+              {ocadData && (
               <div className="bg-gray-700/50 p-4 rounded-xl border border-gray-700">
                 <div className="flex justify-between items-start mb-2">
                   <h2 className="text-sm font-semibold text-gray-200">Carte Active</h2>
-                  <button
-                    onClick={() => { setOcadData(null); setCircuits([]); setActiveCircuitId(null); setImageData(null) }}
-                    className="text-xs text-gray-400 hover:text-red-400 transition-colors"
-                  >
-                    Fermer
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {imageData && (
+                      <button
+                        onClick={() => setMapMode(m => m === 'ocad' ? 'osm' : 'ocad')}
+                        title={mapMode === 'ocad' ? 'Afficher OSM en fond' : 'Afficher carte OCAD seule'}
+                        className={`text-xs px-1.5 py-0.5 rounded transition-colors ${mapMode === 'ocad' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-blue-400 bg-gray-600'}`}
+                      >
+                        {mapMode === 'ocad' ? 'OCAD' : 'OSM'}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => { setOcadData(null); setCircuits([]); setActiveCircuitId(null); setImageData(null); setMapMode('osm') }}
+                      className="text-xs text-gray-400 hover:text-red-400 transition-colors"
+                    >
+                      Fermer
+                    </button>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 text-sm text-blue-300 bg-blue-900/20 p-2 rounded truncate">
                   <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -610,8 +837,12 @@ function App() {
                   )}
                 </div>
               </div>
+              )}
 
-              {/* Active circuit panel */}
+              {/* OCAD Analysis Panel (13c) */}
+              {ocadAnalysis && <OcadAnalysisPanel analysis={ocadAnalysis} />}
+
+              {/* Active circuit panel — always visible */}
               {activeCircuit ? (
                 <>
                   {/* Circuit info */}
@@ -691,6 +922,8 @@ function App() {
                       onDelete={handleDeleteControl}
                       totalDistance={courseDistance}
                       controlCount={controlCount}
+                      onShowRoutes={handleShowRoutes}
+                      activeRouteLegIdx={routeDisplay?.legIdx ?? null}
                     />
                   )}
 
@@ -765,6 +998,13 @@ function App() {
                       <p className="text-xs text-red-400 mt-1 mb-2">{generationError}</p>
                     )}
 
+                    <DialogueLog
+                      dialogue={dialogue}
+                      controleurReport={controleurReport}
+                      isGenerating={isGenerating && activeCircuit?.type === 'sprint'}
+                      progressLabel={progressLabel}
+                    />
+
                     <button
                       onClick={handleExportIOF}
                       disabled={controls.length === 0}
@@ -790,7 +1030,7 @@ function App() {
               ) : (
                 /* No active circuit — prompt to create one */
                 <div className="text-center p-6 bg-gray-700/30 rounded-xl border border-dashed border-gray-600">
-                  <p className="text-gray-400 text-sm mb-3">Carte chargée. Créez votre premier circuit.</p>
+                  <p className="text-gray-400 text-sm mb-3">Créez votre premier circuit.</p>
                   <button
                     onClick={() => setShowCreationForm(true)}
                     className="py-2.5 px-5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
@@ -800,8 +1040,7 @@ function App() {
                 </div>
               )}
 
-            </div>
-          )}
+          </div>
         </div>
       </aside>
 
@@ -818,7 +1057,7 @@ function App() {
         )}
 
         {/* Top info bar */}
-        {ocadData && (
+        {activeCircuit && (
           <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-gray-800/90 backdrop-blur border border-gray-700 px-6 py-2 rounded-full shadow-lg pointer-events-none flex items-center gap-4">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
@@ -853,6 +1092,9 @@ function App() {
           imageData={imageData}
           onAddForbiddenZone={handleAddForbiddenZone}
           onUpdateSuggestion={handleUpdateSuggestion}
+          onMapReady={(map) => { mapRef.current = map }}
+          routeDisplay={routeDisplay}
+          ocadMode={mapMode === 'ocad' && !!imageData}
         />
       </main>
 

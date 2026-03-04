@@ -623,7 +623,11 @@ out body;"""
         f"{len(building_polygons)} OOB polygones"
     )
 
-    return {"candidates": candidates, "oob_polygons": building_polygons}
+    return {
+        "candidates": candidates,
+        "oob_polygons": building_polygons,
+        "highway_ways": highway_coord_lists,  # pour RouteAnalyzer (graphe NetworkX)
+    }
 
 
 # =============================================

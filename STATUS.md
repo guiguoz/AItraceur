@@ -9,10 +9,10 @@
 
 | Champ | Valeur |
 |-------|--------|
-| **Dernière étape complétée** | Étape 9 — Génération sprint urbain (inspirée Streeto) : Overpass intersections + bâtiments OOB |
-| **Date** | 2026-03-03 |
-| **Prochaine étape** | Test terrain sprint (ville) + v2 : GraphHopper/OSRM distances réelles + C-SIM choix d'itinéraires |
-| **État global** | 🟢 20 bugs corrigés, mode sprint opérationnel (OCAD + OSM), génération forêt + ville |
+| **Dernière étape complétée** | Étape 13 — OCAD-first workflow : fond OCAD seul, extraction exhaustive candidats, analyse GeoJSON, fusion OCAD+OSM |
+| **Date** | 2026-03-04 |
+| **Prochaine étape** | À définir |
+| **État global** | 🟢 OCAD-first : fond PNG OCAD (sans OSM affiché), candidats postes depuis coins/virages OCAD + fusion OSM invisible, rapport OCAD sidebar |
 
 ---
 
@@ -39,6 +39,21 @@
 - [x] **Étape 7a** — UX stepper 4 étapes + paramètres IOF visibles + badge conformité ✅ 2026-03-03
 - [x] **Étape 8bis** — Fix régressions GA (snap + use_smart) + zones OOB OCAD + description terrain ✅ 2026-03-03
 - [x] **Étape 9** — Génération sprint urbain : Overpass intersections + coins bâtiments + OOB + scoring adapté ✅ 2026-03-03
+- [x] **Étape 10a** — Bypass OCAD : OSM basemap opérationnel sans .ocd, OcadUploader optionnel, bbox depuis viewport Leaflet ✅ 2026-03-04
+- [x] **Étape 10b** — Module ControleurSprint C01–C12 (règles IOF/FFCO structurées, issues per-poste) ✅ 2026-03-04
+- [x] **Étape 10c** — Corrections automatiques traceur + endpoint generate-sprint (boucle dialogue, max 5 iter.) ✅ 2026-03-04
+- [x] **Étape 10d** — Frontend DialogueLog + barre de progression (sprint uniquement) ✅ 2026-03-04
+- [x] **Étape 10e** — Route Analyzer NetworkX A* (dog-leg réel + choix d'itinéraire C11) ✅ 2026-03-04
+- [x] **Étape 10f** — Route Analyzer visuel : bouton 🔍 par jambe → k polylines OSM colorées sur la carte ✅ 2026-03-04
+- [x] **Étapes 11a+11b** — PDFs IOF/FFCO indexés LocalRAG + seuils GA dynamiques + prompt LLM enrichi ✅ 2026-03-04
+- [x] **Étape 13a** — MapViewer mode OCAD-first : OSM TileLayer masqué, PNG OCAD = fond principal, toggle OCAD/OSM sidebar ✅ 2026-03-04
+- [x] **Étape 13b** — extractCandidatePoints() amélioré : coins bâtiments polygones, virages lignes, tous Points attractifs, déduplication 15m ✅ 2026-03-04
+- [x] **Étape 13c** — Endpoint POST /api/v1/ocad/analyze + OcadAnalysisPanel sidebar (rapport par catégorie ISOM, candidats extraits) ✅ 2026-03-04
+- [x] **Étape 13d** — Fusion OCAD+OSM candidats dans generate-sprint : toujours fusionner (déduplication 10m), RouteAnalyzer OSM toujours construit ✅ 2026-03-04
+- [x] **Étape 13e** — Intersections géométriques OCAD : calcul segment×segment entre paires de chemins OCAD → carrefours réels prioritaires en tête de liste candidats ✅ 2026-03-04
+- [x] **Étape 14** — Descriptions IOF/FFCO 2018 intégrées : control_descriptions.json (ISOM→colonne D), _describe_control() retourne code IOF, prompt LLM "poste sur feature descriptible", description affichée par poste dans ControlsList ✅ 2026-03-04
+- [x] **Étape 15a** — GA critère terrain_quality (10%) : attractivité IOF par poste (very_high=1.0 … low=0.15), intersection géom=1.0 forcé, cache isom_att_scores au init ✅ 2026-03-04
+- [x] **Étape 15b** — Contrôleur C13 : warning si poste sans feature IOF descriptible (colonne D), suggère jonction/coin bâtiment/dépression/bloc ✅ 2026-03-04
 
 ---
 
@@ -105,7 +120,10 @@ Test utilisateur révèle 3 problèmes critiques bloquants :
 | LIDAR IGN | ⚠️ | API IGN altimétrie intégrée (1m réel), nuage LIDAR = futur |
 | Génération de circuit (algo génétique) | ✅ | |
 | Génération de circuit (IA / GPT) | ✅ | Nécessite clé OpenAI |
-| Scoring IOF (TD/PD/dog-legs) | ✅ | |
+| Génération sprint avec dialogue traceur↔contrôleur | ✅ | `/generate-sprint` boucle max 5 iter. |
+| Module ControleurSprint (C01–C12 IOF/FFCO) | ✅ | Scoring 0–100, issues structurées |
+| RouteAnalyzer (A* OSM, dog-leg réel, C11 route choice) | ✅ | NetworkX, Yen's k-shortest |
+| Scoring IOF (TD/PD/dog-legs) | ✅ | Dog-leg via bearing haversine + A* OSM |
 | Analyse de problèmes | ✅ | |
 | Estimation du temps | ✅ | Tobler + multiplicateurs terrain |
 | A* pathfinding | ✅ | |
@@ -129,6 +147,7 @@ Test utilisateur révèle 3 problèmes critiques bloquants :
 | Zones interdites | ✅ | |
 | Heatmap runnabilité | ✅ | |
 | Génération AI de circuit | ✅ | |
+| Dialogue traceur↔contrôleur (DialogueLog) | ✅ | Sprint uniquement, log + rapport contrôleur |
 | Panneau AI chat | ✅ | |
 | Export IOF XML | ✅ | |
 | Multi-circuits | ✅ | |
@@ -434,6 +453,42 @@ Ouvrir le navigateur : http://localhost:5173
 - `backend/src/main.py` — endpoint `/sprint-candidates` + enrichissement auto
 - `frontend/src/App.jsx` — `ATTRACTIVE_ISSOM` + OSM fallback
 - `frontend/src/services/api.js` — `getSprintCandidates()`
+
+---
+
+### Étape 10a — Bypass OCAD ✅ (2026-03-04)
+- `MapViewer.jsx` : suppression de l'early-return `!ocadData` (bloc "Aucune carte chargée"), ajout `MapRefCapture` pour exposer l'instance Leaflet via `onMapReady`
+- `App.jsx` : retrait des 6 gates OCAD, bbox depuis `mapRef.current.getBounds()` quand pas d'OCAD, OcadUploader → widget optionnel dans la sidebar
+
+---
+
+### Étape 10b — Module ControleurSprint C01–C12 ✅ (2026-03-04)
+- **Nouveau** `backend/src/services/controleur/__init__.py`
+- **Nouveau** `backend/src/services/controleur/controleur_rules.json` : règles IOF/FFCO sprint (seuils jambes, postes, temps, sécurité) avec références docs
+- **Nouveau** `backend/src/services/controleur/controleur.py` : classe `ControleurSprint` + `ControleurReport` + `ControleurIssue`, 10 checks (C01 dog-leg, C02 trop proche, C03 trop long, C04 trop court, C05 nb postes, C06 temps Tobler, C07 montée, C08 zone interdite, C10 feature type, C12 parallèles), score 0–100
+- `backend/src/services/generation/scorer.py` : `issues` alimenté depuis `ControleurSprint.validate()`, correction bearing dog-leg (haversine)
+
+---
+
+### Étape 10c — Corrections automatiques + endpoint generate-sprint ✅ (2026-03-04)
+- **Nouveau** `backend/src/services/controleur/traceur_corrections.py` : `apply_corrections(controls, issues, candidates, oob)` — mutations ciblées C01 (déplacement perpendiculaire), C02 (éloignement), C08 (hors bâtiment), C10 (feature type acceptable)
+- `backend/src/main.py` : endpoint `POST /api/v1/generation/generate-sprint` — boucle traceur↔contrôleur max 5 itérations, retourne `{controls, controleur_report, dialogue, iterations, is_valid, score}`
+- **Bug corrigé** : `gen_result` est une `list[GeneratedCircuit]` → `.get("controls")` → `AttributeError` 500. Fix : `gen_result[0].controls`
+
+---
+
+### Étape 10d — Frontend DialogueLog + barre de progression ✅ (2026-03-04)
+- **Nouveau** `frontend/src/components/DialogueLog.jsx` : affiche échanges traceur (🗺) / contrôleur (⚖️) / system, barre de progression animée pendant génération, `ControleurSummary` avec score + conformité IOF/FFCO
+- `frontend/src/services/api.js` : `generateSprint()` → `/generate-sprint` (timeout 180s)
+- `App.jsx` : state `dialogue`, `controleurReport`, `progressLabel` ; `handleAiGenerate` branche sprint → `generateSprint()` / forêt → `generateCircuit()`
+
+---
+
+### Étape 10e — Route Analyzer NetworkX A* ✅ (2026-03-04)
+- **Nouveau** `backend/src/services/optimization/route_analyzer.py` : `RouteAnalyzer(highway_ways)` — graphe NetworkX pondéré haversine, `find_optimal_route()` A*, `detect_dogleg()` (A*(prev→next) passe à <30m de mid), `route_diversity_score()` Jaccard Yen's k-shortest
+- `backend/src/services/terrain/osm_fetcher.py` : `extract_sprint_features()` retourne aussi `highway_ways` (liste de coord-lists des ways piétons)
+- `backend/src/services/controleur/controleur.py` : C01 utilise `detect_dogleg()` si RouteAnalyzer disponible (fallback bearing haversine sinon) ; nouveau check **C11** route choice (WARNING si diversité Jaccard < 0.25 sur jambes > 80m)
+- `backend/src/main.py` : construction `RouteAnalyzer` après enrichissement OSM, passé aux appels `validate()` dans la boucle
 
 ---
 

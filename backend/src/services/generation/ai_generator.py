@@ -33,6 +33,7 @@ class GenerationRequest:
     target_climb_m: float = 200
     target_controls: int = 10
     winning_time_minutes: float = 30
+    circuit_type: str = "md"  # "sprint", "md", "ld", "couleur"
     start_position: Optional[Tuple[float, float]] = None
     end_position: Optional[Tuple[float, float]] = None
     forbidden_zones: List[Dict] = field(default_factory=list)
@@ -76,12 +77,21 @@ Génère {num_circuits} circuit(s) avec les caractéristiques suivantes:
 **Carte OCAD — éléments présents:**
 {terrain_context}
 
+{rules_context}
+
+**Règle fondamentale IOF — Description des postes (FFCO 2018):**
+Chaque poste DOIT être placé sur un élément de terrain identifiable et descriptible selon la colonne D IOF :
+- Éléments privilégiés (très attractifs) : tertre (1.1), dépression (1.10), fosse (1.12), bloc (2.4), source (3.10), bâtiment-coin (5.11), escalier (5.22), jonction de chemins (10.2), croisement (10.1), coude (11.1)
+- Éléments corrects : falaise-pied (2.1), mare-bord (3.2), clôture-coin (5.9), mur-extrémité (5.8), lisière-coin (4.3), arbre remarquable (4.9)
+- À ÉVITER comme poste : terrain ouvert (4.1), milieu de sentier sans particularité, milieu de bâtiment
+Le champ "description" de chaque poste doit indiquer l'élément IOF utilisé, ex: "jonction de chemins (10.2)", "coin NE du bâtiment (5.11)", "fond de dépression (1.10)"
+
 **Instructions de traçage:**
-1. Place les postes sur des éléments remarquables: croisements de chemins, lisières forêt/zone ouverte, confluences de cours d'eau, dépressions, rochers
+1. Place les postes UNIQUEMENT sur des éléments IOF descriptibles (voir liste ci-dessus)
 2. Exploite les chemins présents pour créer de vrais choix d'itinéraires (route directe vs chemin)
 3. Alterne zones ouvertes et forêt pour varier l'engagement physique
 4. Évite les interpostes trop linéaires et les postes dos à dos sans relief
-5. Distance minimale entre postes: 60-80m; maximale pour ce niveau: ~500m
+5. Respecte les distances min/max par jambe indiquées dans les règles IOF/FFCO ci-dessus
 6. Les coordonnées x/y doivent être dans l'emprise WGS84 fournie
 
 **Format de réponse (JSON strict):**
@@ -90,9 +100,9 @@ Génère {num_circuits} circuit(s) avec les caractéristiques suivantes:
     {{
       "id": "circuit_1",
       "controls": [
-        {{"order": 1, "x": valeur_lng, "y": valeur_lat, "type": "start", "description": "description du point remarquable"}},
-        {{"order": 2, "x": valeur_lng, "y": valeur_lat, "type": "control", "description": "..."}},
-        {{"order": N, "x": valeur_lng, "y": valeur_lat, "type": "finish", "description": "..."}}
+        {{"order": 1, "x": valeur_lng, "y": valeur_lat, "type": "start", "description": "départ — coin bâtiment (5.11)"}},
+        {{"order": 2, "x": valeur_lng, "y": valeur_lat, "type": "control", "description": "jonction de chemins (10.2)"}},
+        {{"order": N, "x": valeur_lng, "y": valeur_lat, "type": "finish", "description": "arrivée"}}
       ],
       "description": "explication des choix de traçage",
       "strengths": ["point fort 1", "point fort 2"]
@@ -255,14 +265,16 @@ class AIGenerator:
         num_variants: int,
     ) -> List[GeneratedCircuit]:
         """Génère avec l'algorithme génétique."""
-        # Mode sprint : TD1/TD2 — distance min 30m, jambes courtes ≤ 200m
-        sprint_mode = request.technical_level in ("TD1", "TD2")
+        # Mode sprint : circuit de type sprint OU TD1/TD2 (débutants)
+        sprint_mode = request.circuit_type == "sprint" or request.technical_level in ("TD1", "TD2")
         min_dist = 30 if sprint_mode else 60
 
         config = GenerationConfig(
             target_length_m=request.target_length_m,
             target_climb_m=request.target_climb_m,
             target_controls=request.target_controls,
+            circuit_type=request.circuit_type or "forest",
+            technical_level=int(str(request.technical_level).replace("TD", "")) if request.technical_level else 3,
             winning_time_min=request.winning_time_minutes,
             population_size=max(30, request.target_controls * 3),
             generations=max(50, request.target_controls * 7),
@@ -354,6 +366,17 @@ class AIGenerator:
                 f"Type: Forêt mixte (données OCAD non transmises)"
             )
 
+        # Récupérer les règles IOF/FFCO pertinentes depuis LocalRAG (PDF ingérés)
+        try:
+            from ..knowledge_base.course_rules_retriever import get_course_rules
+            rules_context = get_course_rules(
+                circuit_type=request.circuit_type or "forest",
+                td_level=request.technical_level or 3,
+                n=4,
+            )
+        except Exception:
+            rules_context = ""
+
         # Construire le prompt
         prompt = CIRCUIT_GENERATION_PROMPT.format(
             num_circuits=num_variants,
@@ -368,6 +391,7 @@ class AIGenerator:
             max_x=request.bounding_box.get("max_x", 0),
             max_y=request.bounding_box.get("max_y", 0),
             terrain_context=terrain_context,
+            rules_context=rules_context,
         )
 
         try:
@@ -427,6 +451,25 @@ class AIGenerator:
             print(f"Erreur génération IA: {e}")
             return []
 
+    # Cache du mapping IOF chargé une fois
+    _iof_desc_map: Dict = {}
+    _iof_desc_loaded: bool = False
+
+    def _load_iof_descriptions(self) -> Dict:
+        """Charge control_descriptions.json une fois et le met en cache."""
+        if self.__class__._iof_desc_loaded:
+            return self.__class__._iof_desc_map
+        try:
+            import json as _json
+            from pathlib import Path
+            p = Path(__file__).parent.parent.parent / "data" / "control_descriptions.json"
+            data = _json.loads(p.read_text(encoding="utf-8"))
+            self.__class__._iof_desc_map = data.get("isom_to_description", {})
+        except Exception:
+            self.__class__._iof_desc_map = {}
+        self.__class__._iof_desc_loaded = True
+        return self.__class__._iof_desc_map
+
     def _describe_control(
         self,
         x: float,
@@ -434,26 +477,42 @@ class AIGenerator:
         candidate_points: List[Dict],
         radius_m: float = 80.0,
     ) -> str:
-        """Retourne la description ISOM du CP le plus proche, ou 'Position libre'."""
+        """Retourne la description IOF colonne D du feature le plus proche (FFCO 2018)."""
         import math
 
+        iof_map = self._load_iof_descriptions()
         R = 6371000.0
-        best_desc = None
+        best: Optional[Dict] = None
         best_d = radius_m
 
         for cp in candidate_points:
-            lat1 = math.radians(y)
-            lat2 = math.radians(cp["y"])
             dlat = math.radians(cp["y"] - y)
             dlng = math.radians(cp["x"] - x)
-            a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlng / 2) ** 2
+            lat1, lat2 = math.radians(y), math.radians(cp["y"])
+            a = math.sin(dlat/2)**2 + math.cos(lat1)*math.cos(lat2)*math.sin(dlng/2)**2
             d = R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
             if d < best_d:
                 best_d = d
-                isom = cp.get("isom")
-                best_desc = ISOM_DESCRIPTIONS.get(isom, f"ISOM {isom}") if isom else None
+                best = cp
 
-        return best_desc or "Position libre"
+        if best is None:
+            return "Position libre"
+
+        isom = best.get("isom")
+        # Feature spéciale intersection (marquée dans extractCandidatePoints)
+        if best.get("_intersection"):
+            return "jonction de chemins (10.2)"
+
+        desc_info = iof_map.get(str(isom), {}) if isom else {}
+        if not desc_info:
+            # Fallback legacy
+            return ISOM_DESCRIPTIONS.get(isom, f"ISOM {isom}") if isom else "Position libre"
+
+        col_d = desc_info.get("col_d", "")
+        name_fr = desc_info.get("name_fr", "")
+        col_g = desc_info.get("col_g_hints", [])
+        g_hint = f" — {col_g[0]}" if col_g else ""
+        return f"{name_fr} ({col_d}){g_hint}"
 
     def _calculate_length(self, controls: List[Tuple[float, float]]) -> float:
         """Calcule la longueur totale en mètres (formule Haversine, coordonnées WGS84)."""

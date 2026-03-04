@@ -93,6 +93,8 @@ from src.services.ocad.terrain_descriptor import (
     describe_terrain_around_control,
 )
 from src.services.knowledge_base.local_rag import LocalRAG
+from src.services.controleur.controleur import ControleurSprint
+from src.services.controleur.traceur_corrections import apply_corrections
 
 
 # =============================================
@@ -1268,6 +1270,157 @@ def search_knowledge(
 
 
 @app.post(
+    "/api/v1/knowledge/ingest-docs",
+    summary="Ingère les PDF IOF/FFCO dans LocalRAG (Étape 11a)",
+    description="Extrait le texte des PDF dans docs/ et docs controleur/, les chunke et les indexe dans LocalRAG. À lancer une fois après chaque ajout de PDF.",
+)
+def ingest_docs_endpoint():
+    """Ingestion des PDF vers pdf_knowledge.jsonl + rechargement LocalRAG."""
+    from src.services.knowledge_base.ingest_docs import ingest_all
+    result = ingest_all()
+    if "error" in result:
+        return {"status": "error", **result}
+    # Recharger LocalRAG (Singleton) pour prendre en compte les nouveaux chunks
+    try:
+        rag = LocalRAG()
+        rag.reload()
+        result["localrag_reloaded"] = True
+        result["localrag_total_entries"] = len(rag.qr_list)
+    except Exception as e:
+        result["localrag_reloaded"] = False
+        result["localrag_error"] = str(e)
+    return {"status": "ok", **result}
+
+
+@app.post(
+    "/api/v1/ocad/analyze",
+    summary="Analyse un GeoJSON OCAD (Étape 13c)",
+    description="Reçoit le GeoJSON WGS84 parsé côté client, retourne un rapport structuré par catégorie ISOM.",
+)
+def analyze_ocad_geojson(payload: dict = Body(...)):
+    """Rapport d'analyse OCAD : features par catégorie, candidats postes + description IOF colonne D."""
+    import json as _json
+    from pathlib import Path
+
+    geojson = payload.get("geojson")
+    if not geojson or not geojson.get("features"):
+        raise HTTPException(status_code=400, detail="geojson manquant ou vide")
+
+    # Charger l'ontologie ISOM + mapping descriptions IOF
+    _data_dir = Path(__file__).parent / "data"
+    try:
+        semantics = _json.loads((_data_dir / "ocad_semantics.json").read_text(encoding="utf-8")).get("symbols", {})
+    except Exception:
+        semantics = {}
+    try:
+        ctrl_desc = _json.loads((_data_dir / "control_descriptions.json").read_text(encoding="utf-8"))
+        isom_to_desc = ctrl_desc.get("isom_to_description", {})
+        att_scores = ctrl_desc.get("attractiveness_score", {"very_high": 1.0, "high": 0.75, "medium": 0.45, "low": 0.15})
+    except Exception:
+        isom_to_desc = {}
+        att_scores = {}
+
+    # Catégories de haut niveau (préfixe code ISOM)
+    CATEGORIES = {
+        "courbes_niveau": (100, 199, "Courbes de niveau"),
+        "rochers_reliefs": (200, 299, "Rochers / reliefs"),
+        "eau_marecages": (300, 399, "Eau / marécages"),
+        "vegetation": (400, 499, "Végétation"),
+        "chemins_sentiers": (500, 519, "Chemins / sentiers"),
+        "batiments_urbain": (520, 599, "Bâtiments / urbain"),
+        "zones_oob": (700, 799, "Zones hors-limites"),
+    }
+
+    by_category = {k: {"count": 0, "isom_codes": set()} for k in CATEGORIES}
+    candidate_pts = []
+
+    # Codes avec description IOF définie = bons candidats
+    describable_isom = set(int(k) for k in isom_to_desc if k.isdigit())
+
+    for feat in geojson["features"]:
+        sym = feat.get("properties", {}).get("sym")
+        if not sym:
+            continue
+        isom = int(sym) // 1000
+        geom = feat.get("geometry") or {}
+
+        # Classer par catégorie
+        for cat_key, (lo, hi, _) in CATEGORIES.items():
+            if lo <= isom <= hi:
+                by_category[cat_key]["count"] += 1
+                by_category[cat_key]["isom_codes"].add(isom)
+                break
+
+        # Candidats postes : tout code ISOM avec une description IOF
+        if isom in describable_isom:
+            coords = None
+            if geom.get("type") == "Point":
+                coords = geom["coordinates"]
+            elif geom.get("type") == "LineString" and geom.get("coordinates"):
+                c = geom["coordinates"]
+                coords = c[len(c) // 2]
+            elif geom.get("type") == "Polygon" and geom.get("coordinates"):
+                c = geom["coordinates"][0]
+                coords = c[0] if c else None
+            if coords and len(coords) >= 2:
+                desc_info = isom_to_desc.get(str(isom), {})
+                att_key = desc_info.get("attractiveness", "medium")
+                att_score = att_scores.get(att_key, 0.45)
+                # Bonus pour jonctions/croisements géométriques
+                col_d = desc_info.get("col_d", "")
+                if col_d in ("10.1", "10.2"):
+                    att_score = min(1.0, att_score + 0.1)
+                candidate_pts.append({
+                    "lat": round(coords[1], 6),
+                    "lng": round(coords[0], 6),
+                    "isom": isom,
+                    "description": desc_info.get("name_fr", f"ISOM {isom}"),
+                    "iof_col_d": col_d,
+                    "iof_col_d_name": desc_info.get("name_fr", ""),
+                    "col_g_hints": desc_info.get("col_g_hints", []),
+                    "attractiveness": round(att_score, 2),
+                })
+
+    # Trier par attractivité, garder top 20
+    candidate_pts.sort(key=lambda p: -p["attractiveness"])
+    top_candidates = candidate_pts[:20]
+
+    # Sérialiser les sets
+    by_cat_out = {}
+    for k, v in by_category.items():
+        by_cat_out[k] = {"count": v["count"], "isom_codes": sorted(v["isom_codes"])}
+
+    total = len(geojson["features"])
+    chemins = by_cat_out["chemins_sentiers"]["count"]
+    bats = by_cat_out["batiments_urbain"]["count"]
+    rochers = by_cat_out["rochers_reliefs"]["count"]
+    eau = by_cat_out["eau_marecages"]["count"]
+    veg = by_cat_out["vegetation"]["count"]
+
+    # Recommandation type de circuit
+    is_sprint = bats > 10 or (bats + chemins) > 40
+    terrain_summary = (
+        f"{'Terrain urbain' if is_sprint else 'Terrain forêt'} : "
+        f"{chemins} chemins/sentiers, {bats} bâtiments/structures, "
+        f"{rochers} rochers/reliefs, {eau} eau/marécages, {veg} végétation"
+    )
+    n_controls = 15 if is_sprint else 12
+    circuit_rec = (
+        f"Circuit {'sprint' if is_sprint else 'forêt'} recommandé : ~{n_controls} postes, "
+        f"jambes {'60-200m' if is_sprint else '150-500m'}"
+    )
+
+    return {
+        "total_features": total,
+        "by_category": by_cat_out,
+        "candidate_points_extracted": len(candidate_pts),
+        "top_candidates": top_candidates,
+        "terrain_summary": terrain_summary,
+        "recommendations": circuit_rec,
+    }
+
+
+@app.post(
     "/api/v1/knowledge/ask",
     summary="Pose une question à l'assistant",
     description="Pose une question à l'assistant IA sur le traçage",
@@ -1823,6 +1976,7 @@ def generate_circuits(body: dict = Body(...)):
     bounding_box = body.get("bounding_box", {})
     category = body.get("category", "H21E")
     technical_level = body.get("technical_level", "TD3")
+    circuit_type = body.get("circuit_type", "md")
     target_length_m = float(body.get("target_length_m", 4000))
     target_climb_m = float(body.get("target_climb_m", 200))
     target_controls = int(body.get("target_controls", 10))
@@ -1836,7 +1990,7 @@ def generate_circuits(body: dict = Body(...)):
     candidate_points = body.get("candidate_points") or []
 
     # Mode sprint : si peu de candidats OCAD (<50), enrichir depuis OSM automatiquement
-    if technical_level in ("TD1", "TD2") and len(candidate_points) < 50 and bounding_box:
+    if (circuit_type == "sprint" or technical_level in ("TD1", "TD2")) and len(candidate_points) < 50 and bounding_box:
         try:
             sprint_data = extract_sprint_features(bounding_box)
             osm_candidates = sprint_data.get("candidates", [])
@@ -1862,6 +2016,7 @@ def generate_circuits(body: dict = Body(...)):
         bounding_box=bounding_box,
         category=category,
         technical_level=technical_level,
+        circuit_type=circuit_type,
         target_length_m=target_length_m,
         target_climb_m=target_climb_m,
         target_controls=target_controls,
@@ -3279,4 +3434,310 @@ def export_circuit_kmz(
         "color": color,
         "kmz_base64": kmz_b64,
         "note": "Contenu encodé en base64 - télécharger et décompresser pour utiliser dans Google Earth",
+    }
+
+
+# =============================================
+# ÉTAPE 10c — Dialogue Traceur ↔ Contrôleur
+# =============================================
+
+@app.post(
+    "/api/v1/generation/generate-sprint",
+    summary="Génération sprint avec validation contrôleur automatique",
+    description=(
+        "Pipeline complet traceur↔contrôleur : génère un circuit sprint, "
+        "le valide selon les normes IOF/FFCO (C01–C12), applique des corrections "
+        "automatiques si nécessaire, et retourne le log du dialogue."
+    ),
+)
+def generate_sprint_with_validation(body: dict = Body(...)):
+    """
+    Boucle traceur ↔ contrôleur (max 5 itérations).
+
+    Corps attendu :
+        bounding_box: {min_x, min_y, max_x, max_y}
+        category: catégorie (ex: "elite", "junior", "training")
+        target_length_m, target_controls, winning_time_minutes
+        technical_level: "TD1"–"TD5"
+        candidate_points: [{x, y, type}, ...] (optionnel, OSM auto si absent)
+        forbidden_zones_polygons: [[[lon, lat], ...]] (optionnel)
+        start_position: [lng, lat] (optionnel)
+        max_iterations: int (défaut 5)
+    """
+    from src.services.generation.ai_generator import AIGenerator, GenerationRequest
+    from src.services.terrain.osm_fetcher import extract_sprint_features
+
+    bounding_box = body.get("bounding_box", {})
+    category = body.get("category", "elite")
+    target_length_m = float(body.get("target_length_m", 2200))
+    target_controls = int(body.get("target_controls", 15))
+    winning_time_minutes = int(body.get("winning_time_minutes", 12))
+    technical_level = body.get("technical_level", "TD2")
+    max_iterations = min(int(body.get("max_iterations", 5)), 8)
+    candidate_points = body.get("candidate_points", [])
+    forbidden_zones = body.get("forbidden_zones_polygons", [])
+    start_position = body.get("start_position", None)
+
+    dialogue = []
+    oob_polygons = list(forbidden_zones)
+    route_analyzer = None  # construit après OSM si highway_ways disponibles
+
+    # ── Étape 1 : Enrichissement OSM — toujours (fusion OCAD + OSM) ───────────
+    # Les candidats OCAD arrivent via body["candidate_points"] ; on fusionne
+    # avec les candidats OSM (intersections piétonnes Overpass) quel que soit
+    # leur nombre, pour combiner les deux sources de connaissance terrain.
+    ocad_candidates_count = len(candidate_points)
+    if bounding_box:
+        try:
+            osm_result = extract_sprint_features(bounding_box)
+            osm_candidates = osm_result.get("candidates") or []
+            oob_polygons = oob_polygons + (osm_result.get("oob_polygons") or [])
+
+            # Fusion OCAD + OSM : dédupliquer les points trop proches (~10m ≈ 0.00009°)
+            DEDUP_THRESH = 0.00009
+            merged = list(candidate_points)
+            for ocp in osm_candidates:
+                ox, oy = ocp.get("x", 0), ocp.get("y", 0)
+                if not any(abs(p.get("x",0)-ox) < DEDUP_THRESH and abs(p.get("y",0)-oy) < DEDUP_THRESH
+                           for p in merged):
+                    merged.append(ocp)
+            candidate_points = merged[:800]
+
+            # ── Construire RouteAnalyzer depuis les ways piétons OSM ──────────
+            highway_ways = osm_result.get("highway_ways") or []
+            if highway_ways:
+                try:
+                    from src.services.optimization.route_analyzer import RouteAnalyzer
+                    route_analyzer = RouteAnalyzer(highway_ways)
+                    dialogue.append({
+                        "role": "system", "step": 0,
+                        "message": (
+                            f"RouteAnalyzer : graphe {route_analyzer.node_count} nœuds / "
+                            f"{route_analyzer.edge_count} tronçons OSM"
+                        )
+                    })
+                except Exception as re:
+                    dialogue.append({"role": "system", "step": 0, "message": f"RouteAnalyzer indisponible : {re}"})
+
+            dialogue.append({
+                "role": "system",
+                "step": 0,
+                "message": (
+                    f"Candidats fusionnés : {ocad_candidates_count} OCAD + {len(osm_candidates)} OSM "
+                    f"→ {len(candidate_points)} total (déduplication 10m)"
+                )
+            })
+        except Exception as e:
+            dialogue.append({"role": "system", "step": 0, "message": f"OSM indisponible : {e}"})
+    elif not candidate_points:
+        dialogue.append({"role": "system", "step": 0, "message": "Aucun candidat ni bounding_box — génération aléatoire"})
+
+    # ── Étape 2 : Génération initiale ──────────────────────────────────────────
+    generator = AIGenerator()
+    gen_request = GenerationRequest(
+        bounding_box=bounding_box,
+        category=category,
+        technical_level=technical_level,
+        circuit_type="sprint",
+        target_length_m=target_length_m,
+        target_controls=target_controls,
+        winning_time_minutes=winning_time_minutes,
+        candidate_points=candidate_points,
+        forbidden_zones=oob_polygons,
+        start_position=start_position,
+    )
+
+    try:
+        gen_result = generator.generate(gen_request)
+    except Exception as e:
+        return {"error": f"Génération initiale échouée : {e}", "dialogue": dialogue}
+
+    # Convertir les postes générés (x/y → lat/lng pour le contrôleur)
+    def _to_latlng(controls_raw):
+        out = []
+        for i, c in enumerate(controls_raw):
+            out.append({
+                "lat": c.get("y", c.get("lat", 0)),
+                "lng": c.get("x", c.get("lng", 0)),
+                "type": c.get("type", "control"),
+                "order": c.get("order", i + 1),
+                "feature_type": c.get("feature_type", c.get("type_feature", "")),
+                **{k: v for k, v in c.items() if k not in ("x", "y", "lat", "lng")},
+            })
+        return out
+
+    def _to_xy(controls_latlng):
+        out = []
+        for c in controls_latlng:
+            out.append({
+                "x": c.get("lng", c.get("x", 0)),
+                "y": c.get("lat", c.get("y", 0)),
+                **{k: v for k, v in c.items() if k not in ("lat", "lng")},
+            })
+        return out
+
+    if not gen_result:
+        return {"error": "Génération initiale : aucun circuit produit", "dialogue": dialogue}
+    best_circuit = gen_result[0]
+    best_controls = best_circuit.controls if hasattr(best_circuit, "controls") else (best_circuit.get("controls", []) if isinstance(best_circuit, dict) else [])
+    best_latlng = _to_latlng(best_controls)
+
+    total_dist_m = sum(
+        __import__("math").hypot(
+            (best_latlng[i + 1]["lng"] - best_latlng[i]["lng"]) * 111320 * math.cos(math.radians(best_latlng[i]["lat"])),
+            (best_latlng[i + 1]["lat"] - best_latlng[i]["lat"]) * 110540
+        )
+        for i in range(len(best_latlng) - 1)
+    ) if len(best_latlng) > 1 else 0
+
+    dialogue.append({
+        "role": "traceur",
+        "step": 1,
+        "message": f"Circuit initial généré : {len(best_latlng)} postes, ~{total_dist_m:.0f}m"
+    })
+
+    # ── Boucle traceur ↔ contrôleur ───────────────────────────────────────────
+    controleur = ControleurSprint()
+    current_controls = best_latlng
+    final_report = None
+
+    for iteration in range(1, max_iterations + 1):
+        report = controleur.validate(
+            current_controls,
+            oob_polygons=oob_polygons,
+            circuit_config={"category": category},
+            route_analyzer=route_analyzer,
+        )
+        final_report = report
+
+        # Message contrôleur
+        if report.error_count == 0 and report.warning_count == 0:
+            dialogue.append({
+                "role": "controleur",
+                "step": iteration,
+                "message": f"✅ Aucune issue — Score {report.global_score:.0f}/100. Circuit conforme IOF + FFCO."
+            })
+            break
+        else:
+            error_codes = " | ".join(
+                f"❌ {i.code} P{i.control_index + 1}" for i in report.issues if i.severity == "ERROR"
+            )
+            warn_codes = " | ".join(
+                f"⚠️ {i.code} P{i.control_index + 1}" for i in report.issues if i.severity == "WARNING"
+            )
+            msg_parts = []
+            if error_codes:
+                msg_parts.append(error_codes)
+            if warn_codes:
+                msg_parts.append(warn_codes)
+            dialogue.append({
+                "role": "controleur",
+                "step": iteration,
+                "message": f"Score {report.global_score:.0f}/100 — {' | '.join(msg_parts)}"
+            })
+
+        # Arrêter si plus d'erreurs (warnings tolérés)
+        if report.error_count == 0:
+            break
+
+        # Appliquer les corrections
+        corrected, corr_messages = apply_corrections(
+            current_controls,
+            report.issues,
+            candidate_points,
+            oob_polygons=oob_polygons
+        )
+
+        if corr_messages:
+            dialogue.append({
+                "role": "traceur",
+                "step": iteration,
+                "message": " | ".join(corr_messages)
+            })
+        else:
+            # Aucune correction possible — arrêter pour éviter une boucle infinie
+            dialogue.append({
+                "role": "traceur",
+                "step": iteration,
+                "message": "Aucune correction automatique disponible — circuit retourné en l'état."
+            })
+            break
+
+        current_controls = corrected
+
+    # ── Résultat ───────────────────────────────────────────────────────────────
+    final_report_dict = controleur.to_dict(final_report) if final_report else {}
+    final_report_dict["iterations_used"] = len([d for d in dialogue if d["role"] == "traceur"])
+
+    return {
+        "controls": _to_xy(current_controls),
+        "controleur_report": final_report_dict,
+        "dialogue": dialogue,
+        "iterations": final_report_dict.get("iterations_used", 0),
+        "is_valid": final_report.is_valid if final_report else False,
+        "score": final_report.global_score if final_report else 0,
+    }
+
+
+# ── Étape 10f — Itinéraires entre deux postes ──────────────────────────────
+
+@app.post(
+    "/api/v1/terrain/routes-between",
+    summary="Itinéraires OSM entre deux postes (Yen's k-shortest)",
+    description="Retourne les k meilleures routes OSM entre deux postes, avec distances et score de diversité.",
+)
+def routes_between_controls(body: dict = Body(...)):
+    """
+    Body: { from: {lat, lng}, to: {lat, lng}, bbox: {min_x, min_y, max_x, max_y}, k: 3 }
+    Retourne: { routes: [{rank, distance_m, waypoints}], diversity_score, is_dogleg }
+    """
+    from src.services.optimization.route_analyzer import RouteAnalyzer as _RouteAnalyzer
+
+    pt_from = body.get("from", {})
+    pt_to = body.get("to", {})
+    bbox = body.get("bbox", {})
+    k = int(body.get("k", 3))
+
+    lat_f, lng_f = float(pt_from["lat"]), float(pt_from["lng"])
+    lat_t, lng_t = float(pt_to["lat"]), float(pt_to["lng"])
+
+    # Construire la bbox autour des 2 postes avec marge 500m (~0.0045°)
+    margin = 0.006
+    computed_bbox = {
+        "min_x": min(lng_f, lng_t) - margin,
+        "min_y": min(lat_f, lat_t) - margin,
+        "max_x": max(lng_f, lng_t) + margin,
+        "max_y": max(lat_f, lat_t) + margin,
+    }
+    effective_bbox = bbox if bbox else computed_bbox
+
+    # Fetch OSM
+    sprint_data = extract_sprint_features(effective_bbox)
+    highway_ways = sprint_data.get("highway_ways", [])
+
+    if not highway_ways:
+        return {"routes": [], "diversity_score": 0.0, "is_dogleg": False, "error": "Aucune rue OSM dans la bbox"}
+
+    ra = _RouteAnalyzer(highway_ways)
+
+    # k meilleures routes
+    raw_routes = ra.get_k_routes(lng_f, lat_f, lng_t, lat_t, k=k)
+    routes = []
+    for i, path in enumerate(raw_routes):
+        dist = ra.route_length_m(path)
+        routes.append({
+            "rank": i + 1,
+            "distance_m": round(dist, 1),
+            "waypoints": [[node[0], node[1]] for node in path],  # [lng, lat]
+        })
+
+    # Diversity + dogleg
+    diversity = ra.route_diversity_score(lng_f, lat_f, lng_t, lat_t, k=k)
+    c_from = {"lat": lat_f, "lng": lng_f}
+    c_to = {"lat": lat_t, "lng": lng_t}
+
+    return {
+        "routes": routes,
+        "diversity_score": round(diversity, 3),
+        "is_dogleg": False,  # dogleg only meaningful for 3 consecutive controls
     }

@@ -7,6 +7,12 @@ import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+try:
+    from ..controleur.controleur import ControleurSprint
+    _CONTROLEUR_AVAILABLE = True
+except Exception:
+    _CONTROLEUR_AVAILABLE = False
+
 
 # =============================================
 # Types de données
@@ -189,13 +195,36 @@ class CircuitScorer:
         # Ajouter suggestions IOF
         if not iof.iof_valid:
             if iof.dog_legs > 0:
-                suggestions.append(f"Corriger {iof.dog_legs} dog-leg(s) détecté(s) (angle entrée/sortie < 20°)")
+                suggestions.append(f"Corriger {iof.dog_legs} dog-leg(s) détecté(s) (angle entrée/sortie < 25°)")
             if iof.too_close_controls > 0:
-                suggestions.append(f"{iof.too_close_controls} poste(s) trop proches (< 60m) — règle IOF AA3.5.5")
+                suggestions.append(f"{iof.too_close_controls} poste(s) trop proches — règle IOF AA3.5.5")
             if iof.climb_ratio > 0.04 and target_length:
                 suggestions.append(
                     f"D+ trop élevé ({iof.climb_ratio:.1%} vs limite IOF 4%) — alléger le tracé"
                 )
+
+        # Enrichir issues avec le contrôleur IOF/FFCO (per-poste avec références)
+        if _CONTROLEUR_AVAILABLE and controls:
+            try:
+                ctrl_report = ControleurSprint().validate(controls)
+                issues = [
+                    {
+                        "code": iss.code,
+                        "severity": iss.severity,
+                        "control_index": iss.control_index,
+                        "leg_from": iss.leg_from,
+                        "leg_to": iss.leg_to,
+                        "message": iss.message,
+                        "suggestion": iss.suggestion,
+                        "rule_reference": iss.rule_reference,
+                    }
+                    for iss in ctrl_report.issues
+                ]
+                # Sync dog-leg count avec le contrôleur (haversine corrigé)
+                iof.dog_legs = sum(1 for iss in ctrl_report.issues if iss.code == "C01")
+                iof.too_close_controls = sum(1 for iss in ctrl_report.issues if iss.code == "C02")
+            except Exception:
+                pass  # Fallback silencieux si contrôleur non disponible
 
         return CircuitScore(
             total_score=total,
@@ -392,20 +421,29 @@ class CircuitScorer:
         if total_length > 0:
             iof.climb_ratio = climb / total_length
 
-        # --- Dog-legs : angle entrée/sortie < 20° ---
+        # --- Dog-legs : bearing haversine corrigé (angle entrée/sortie < 25°) ---
         dog_legs = 0
         for i in range(1, len(positions) - 1):
             prev, curr, nxt = positions[i - 1], positions[i], positions[i + 1]
-            in_dx = curr[0] - prev[0]
-            in_dy = curr[1] - prev[1]
-            out_dx = nxt[0] - curr[0]
-            out_dy = nxt[1] - curr[1]
-            in_angle = math.atan2(in_dy, in_dx)
-            out_angle = math.atan2(out_dy, out_dx)
-            diff = abs(math.degrees(out_angle - in_angle)) % 360
+            # positions = (lng, lat), donc lng=x, lat=y
+            b_in = math.degrees(math.atan2(
+                math.sin(math.radians(curr[0] - prev[0])) * math.cos(math.radians(curr[1])),
+                math.cos(math.radians(prev[1])) * math.sin(math.radians(curr[1])) -
+                math.sin(math.radians(prev[1])) * math.cos(math.radians(curr[1])) *
+                math.cos(math.radians(curr[0] - prev[0]))
+            )) % 360
+            b_out = math.degrees(math.atan2(
+                math.sin(math.radians(nxt[0] - curr[0])) * math.cos(math.radians(nxt[1])),
+                math.cos(math.radians(curr[1])) * math.sin(math.radians(nxt[1])) -
+                math.sin(math.radians(curr[1])) * math.cos(math.radians(nxt[1])) *
+                math.cos(math.radians(nxt[0] - curr[0]))
+            )) % 360
+            # Dog-leg: angle entre b_in et inverse de b_out
+            b_out_inv = (b_out + 180) % 360
+            diff = abs(b_in - b_out_inv) % 360
             if diff > 180:
                 diff = 360 - diff
-            if diff < 20:
+            if diff < 25:
                 dog_legs += 1
         iof.dog_legs = dog_legs
 

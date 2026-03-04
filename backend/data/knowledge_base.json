@@ -1,0 +1,201 @@
+{
+  "version": "1.0",
+  "sources": [
+    {
+      "id": "guide_couleurs_2024",
+      "title": "Guide de mise en place des circuits de couleur 2024",
+      "type": "ffco",
+      "description": "Guide officiel de la FFCO définissant les circuits par couleur, les distances, les niveaux de difficulté et les règles de sécurité pour les compétitions pédestres de course d'orientation en France."
+    },
+    {
+      "id": "isom_2017",
+      "title": "ISOM 2017-2 — International Specification for Orienteering Maps",
+      "type": "iof",
+      "description": "Norme internationale de l'IOF pour la cartographie de course d'orientation en forêt. Définit les symboles, les couleurs, les échelles, l'équidistance et les règles de généralisation des cartes."
+    },
+    {
+      "id": "methode_federale_2016",
+      "title": "Méthode Fédérale — Édition 2016",
+      "type": "ffco",
+      "description": "Référentiel pédagogique de la FFCO pour le traçage de circuits de course d'orientation. Décrit la progression technique de T1 à T17, les concepts de navigation et les principes de traçage pour forêt et sprint."
+    }
+  ],
+  "chunks": [
+    {
+      "id": "gc_principes_generaux",
+      "source_id": "guide_couleurs_2024",
+      "section": "Principes généraux",
+      "topic": "circuits_couleur",
+      "tags": ["couleurs", "principes", "compétition", "distance"],
+      "content": "Les circuits de course d'orientation sont classés en 6 couleurs selon leur difficulté croissante : Vert (très facile, destiné aux débutants et jeunes enfants), Bleu (facile), Jaune (modéré), Orange (difficile), Violet (très difficile) et Noir (extrême, réservé aux élites). En compétition officielle, un minimum de 5 circuits est obligatoire : Vert, Bleu, Jaune, Orange et Violet. Chaque couleur peut être déclinée selon trois modulations de distance : Long (LD), Moyen (MD) et Court (Sprint). Pour le calcul de la distance effective en pédestre, on applique la règle suivante : 100 mètres de dénivelé positif équivalent à 1 kilomètre de terrain plat."
+    },
+    {
+      "id": "gc_distances_ld",
+      "source_id": "guide_couleurs_2024",
+      "section": "Distances pédestre LD",
+      "topic": "distances",
+      "tags": ["distance", "LD", "pédestre"],
+      "content": "En format Longue Distance (LD) pédestre, les distances effectives par couleur sont les suivantes : Noir et Violet entre 8 et 12 km, Orange entre 5 et 8 km, Jaune entre 4 et 5 km, Bleu entre 3 et 4 km, et Vert entre 2 et 3 km. Ces distances incluent la compensation du dénivelé (100m D+ = 1 km plat). Le traceur doit viser le milieu de la fourchette pour un terrain standard et ajuster vers le bas pour un terrain exigeant (forte pente, végétation dense)."
+    },
+    {
+      "id": "gc_distances_md",
+      "source_id": "guide_couleurs_2024",
+      "section": "Distances pédestre MD",
+      "topic": "distances",
+      "tags": ["distance", "MD", "pédestre"],
+      "content": "En format Moyenne Distance (MD) pédestre, les distances effectives sont réduites par rapport à la LD pour favoriser la dimension technique : Noir et Violet entre 4 et 6 km, Orange entre 3 et 4 km, Jaune entre 2 et 4 km, Bleu entre 2 et 3 km, et Vert entre 2 et 2.5 km. La MD se distingue de la LD par une densité technique plus élevée : les interpostes sont plus courts et les choix d'itinéraire plus fréquents, nécessitant une lecture de carte plus intense et des changements de direction rapprochés."
+    },
+    {
+      "id": "gc_distances_sprint",
+      "source_id": "guide_couleurs_2024",
+      "section": "Distances pédestre Sprint",
+      "topic": "distances",
+      "tags": ["distance", "sprint", "pédestre"],
+      "content": "En format Sprint pédestre, seuls les niveaux Orange, Jaune et Bleu disposent de fourchettes de distances spécifiques : Orange entre 2.3 et 3.8 km, Jaune entre 1.8 et 2.8 km, et Bleu entre 1 et 1.8 km. Le sprint se caractérise par des distances plus courtes, un rythme de décision très rapide et une navigation principalement basée sur la lecture de carte à grande échelle. Les postes sont généralement placés dans des environnements urbains ou semi-urbains."
+    },
+    {
+      "id": "gc_format_relais",
+      "source_id": "guide_couleurs_2024",
+      "section": "Format relais",
+      "topic": "relais",
+      "tags": ["relais", "distance", "équipe"],
+      "content": "Le format relais impose des contraintes spécifiques de distance par relayeur et par couleur. En Orange, le relais comprend 2 à 3 relayeurs avec environ 4 km par relayeur. En Jaune, 2 relayeurs courent environ 3.5 km chacun. En Vert, 2 relayeurs parcourent environ 2 km chacun. Le traceur doit veiller à l'équité entre les relayeurs en utilisant des systèmes de papillons (boucles interchangeables) pour que chaque relayeur parcoure une distance similaire avec une difficulté technique comparable."
+    },
+    {
+      "id": "gc_securite_adaptation",
+      "source_id": "guide_couleurs_2024",
+      "section": "Règles sécurité et adaptation",
+      "topic": "sécurité",
+      "tags": ["sécurité", "adaptation", "terrain", "météo"],
+      "content": "La sécurité des participants est une priorité absolue. Les parcours loisir doivent être strictement séparés de la compétition, soit par des départs distincts, soit par des circuits dédiés. En cas de conditions météorologiques défavorables (forte chaleur, pluie verglaçante, neige) ou de terrain particulièrement exigeant (dénivelé important, sol glissant), les distances doivent être réduites d'environ 10%. Le traceur et l'expert (contrôleur) sont conjointement responsables de l'adaptation des circuits au public visé, en tenant compte de l'âge, du niveau et des conditions du jour."
+    },
+    {
+      "id": "gc_niveaux_difficulte",
+      "source_id": "guide_couleurs_2024",
+      "section": "Niveaux de difficulté",
+      "topic": "difficulté",
+      "tags": ["difficulté", "couleur", "public", "niveau"],
+      "content": "Chaque couleur cible un public et un niveau technique précis. Le Vert s'adresse aux débutants complets, enfants de moins de 10 ans et familles : la navigation se fait uniquement sur chemins avec des postes très visibles. Le Bleu vise les enfants de 10-12 ans et débutants autonomes : navigation sur chemins avec quelques sorties simples. Le Jaune correspond aux jeunes de 12-14 ans et pratiquants de niveau intermédiaire : introduction à la navigation hors-chemin avec des lignes d'arrêt évidentes. L'Orange concerne les coureurs confirmés : navigation technique avec choix d'itinéraire. Le Violet et le Noir sont réservés aux coureurs expérimentés et élites : navigation de précision en tout terrain."
+    },
+    {
+      "id": "isom_normes_carte",
+      "source_id": "isom_2017",
+      "section": "Normes carte",
+      "topic": "cartographie",
+      "tags": ["carte", "échelle", "courbes", "équidistance"],
+      "content": "La norme ISOM 2017 définit l'échelle de base des cartes de course d'orientation en forêt à 1:15 000. Un agrandissement à 1:10 000 est autorisé, auquel cas les symboles doivent être agrandis à 150% de leur taille nominale. L'équidistance standard des courbes de niveau est de 5 mètres ; une équidistance de 2.5 mètres peut être utilisée pour des terrains très plats afin de conserver une représentation utile du relief. Les lignes du nord magnétique doivent être parallèles aux bords de la carte et espacées de 20 mm sur le tirage final. La carte doit être à jour et refléter fidèlement l'état du terrain au moment de la compétition."
+    },
+    {
+      "id": "isom_lisibilite",
+      "source_id": "isom_2017",
+      "section": "Lisibilité et généralisation",
+      "topic": "cartographie",
+      "tags": ["carte", "lisibilité", "généralisation"],
+      "content": "La lisibilité est l'exigence fondamentale de toute carte de course d'orientation : le coureur doit pouvoir lire la carte en courant. La généralisation cartographique est obligatoire et comprend quatre techniques : la sélection (choisir les éléments les plus importants), la simplification (réduire le détail des formes), le déplacement (décaler légèrement un symbole pour éviter la superposition) et l'exagération (agrandir un élément important mais trop petit). L'écart minimum entre deux symboles de même couleur est de 0.15 mm. La largeur de passage minimum entre deux éléments infranchissables doit être de 0.4 mm sur la carte, garantissant que le coureur identifie un passage praticable."
+    },
+    {
+      "id": "isom_infranchissables",
+      "source_id": "isom_2017",
+      "section": "Éléments infranchissables",
+      "topic": "sécurité_carte",
+      "tags": ["infranchissable", "sécurité", "symboles", "interdiction"],
+      "content": "L'ISOM 2017 définit plusieurs symboles représentant des éléments infranchissables que le coureur ne doit jamais traverser. Symbole 201 : barre rocheuse infranchissable (falaise). Symbole 301 : plan d'eau infranchissable. Symbole 307 : marais infranchissable. Symbole 515 : mur infranchissable. Symbole 518 : clôture infranchissable. Symbole 520 : zone interdite d'accès (jaune hachuré). Symbole 709 : zone hors-limites dessinée en violet, interdisant toute pénétration. Le traceur doit impérativement vérifier que l'itinéraire optimal ne nécessite pas la traversée de ces éléments, et qu'aucun poste n'oblige le coureur à les franchir."
+    },
+    {
+      "id": "isom_penetrabilite",
+      "source_id": "isom_2017",
+      "section": "Pénétrabilité végétation",
+      "topic": "végétation",
+      "tags": ["végétation", "pénétrabilité", "runnabilité", "vitesse"],
+      "content": "La norme ISOM 2017 classe la végétation selon sa pénétrabilité, directement liée à la vitesse de déplacement (runnabilité). Le blanc (symbole 405) représente la forêt ouverte avec 100% de runnabilité : course normale. Le vert clair à 30% (symbole 406) correspond à une course ralentie, entre 60% et 80% de la vitesse normale. Le vert moyen à 60% (symbole 408) impose la marche, entre 20% et 60% de la vitesse. Le vert foncé à 100% (symbole 410) représente la végétation de lutte, avec moins de 20% de la vitesse. Le jaune (symboles 401/403) indique un terrain découvert. Ces informations sont essentielles pour estimer les temps de parcours et évaluer la difficulté physique d'un interposte."
+    },
+    {
+      "id": "isom_symboles_parcours",
+      "source_id": "isom_2017",
+      "section": "Symboles de parcours",
+      "topic": "parcours",
+      "tags": ["parcours", "symboles", "violet", "postes"],
+      "content": "Les symboles de parcours sont imprimés en violet (magenta) sur la carte de course d'orientation. Le symbole 701 (départ) est un triangle équilatéral de 6 mm de côté. Le symbole 703 (poste) est un cercle de 5 mm de diamètre intérieur avec un trait de 0.35 mm d'épaisseur. Le symbole 705 (ligne de parcours) est un trait continu de 0.35 mm reliant les cercles de poste ; il doit être interrompu lorsqu'il masque des détails importants de la carte nécessaires à la navigation. Le symbole 706 (arrivée) est un double cercle concentrique de 5 mm et 7 mm de diamètre. Le symbole 709 marque les zones hors-limites par des hachures violettes. Tous ces symboles doivent être positionnés pour ne pas masquer les détails cartographiques utiles au coureur."
+    },
+    {
+      "id": "isom_couleurs",
+      "source_id": "isom_2017",
+      "section": "Couleurs ISOM",
+      "topic": "cartographie",
+      "tags": ["couleurs", "carte", "sémiologie"],
+      "content": "La norme ISOM 2017 utilise un système de couleurs strictement codifié pour la cartographie d'orientation. Le brun représente le relief : courbes de niveau, formes du terrain (buttes, dépressions, fossés). Le noir est utilisé pour les éléments artificiels (routes, bâtiments, clôtures) et les éléments rocheux (falaises, blocs). Le gris (30% de noir) représente les surfaces rocheuses et les blocs. Le bleu représente l'hydrographie : cours d'eau, lacs, marais, fontaines. Le jaune indique le terrain découvert : champs, clairières, zones ouvertes. Le vert traduit la pénétrabilité de la végétation, du clair (ralentissement léger) au foncé (impénétrable). Le violet (magenta) est réservé exclusivement aux informations de parcours : postes, lignes de parcours, zones interdites."
+    },
+    {
+      "id": "mf_philosophie",
+      "source_id": "methode_federale_2016",
+      "section": "Philosophie du traçage",
+      "topic": "traçage",
+      "tags": ["traçage", "philosophie", "pédagogie"],
+      "content": "« Tracer c'est penser un itinéraire. » La Méthode Fédérale de la FFCO pose comme principe fondamental que le traçage ne doit pas être un simple exercice de placement de postes, mais la construction de situations d'apprentissage et de décision pour le coureur. Chaque interposte doit poser un problème de navigation adapté au niveau technique visé. Le traceur doit se mettre dans la peau du coureur et anticiper ses réactions, ses erreurs possibles, et les enseignements qu'il tirera de son parcours. L'objectif est de créer une expérience sportive complète, combinant effort physique, réflexion tactique et lecture de carte."
+    },
+    {
+      "id": "mf_progression_t1_t3",
+      "source_id": "methode_federale_2016",
+      "section": "Progression T1-T3 (fondamentaux)",
+      "topic": "progression",
+      "tags": ["progression", "TD", "fondamentaux", "T1", "T2", "T3"],
+      "content": "Les niveaux techniques T1 à T3 constituent les fondamentaux de la navigation en course d'orientation. En T1, le coureur utilise uniquement des éléments planimétriques évidents (routes, chemins larges). Les postes sont placés aux changements de direction. L'itinéraire est unique et le point d'attaque correspond au poste lui-même. En T2, les mêmes principes s'appliquent mais les changements de ligne ne se font qu'au poste : le coureur suit une ligne continue jusqu'au prochain poste. En T3, les changements de ligne sont autorisés pendant l'interposte, avec un maximum de 2 changements par interposte, introduisant ainsi les premières décisions de navigation."
+    },
+    {
+      "id": "mf_progression_t4_t7",
+      "source_id": "methode_federale_2016",
+      "section": "Progression T4-T7 (technique de base)",
+      "topic": "progression",
+      "tags": ["progression", "TD", "technique", "T4", "T5", "T6", "T7"],
+      "content": "Les niveaux T4 à T7 développent la technique de base hors des chemins évidents. En T4, les postes sont placés à proximité immédiate des lignes directrices et des points d'attaque, parfaitement visibles depuis ceux-ci. Des lignes d'arrêt évidentes sont présentes derrière chaque poste pour limiter le risque de dépassement. En T5, le coureur s'oriente sur différents types de lignes : lisières de végétation, limites de culture, cours d'eau, lignes électriques. En T6, le coureur effectue des traversées de terrain découvert (« sauts ») avec des lignes d'arrêt évidentes et une visibilité parfaite. En T7, les sauts se font entre lignes avec un azimut approximatif vers des lignes d'arrêt sûres, sur des distances inférieures à 200 mètres."
+    },
+    {
+      "id": "mf_progression_t8_t10",
+      "source_id": "methode_federale_2016",
+      "section": "Progression T8-T10 (relief et automatismes)",
+      "topic": "progression",
+      "tags": ["progression", "TD", "relief", "automatismes", "T8", "T9", "T10"],
+      "content": "Les niveaux T8 à T10 introduisent la lecture du relief et les automatismes de navigation. En T8, l'orientation devient précise dans l'approche du poste. Le choix d'itinéraire utilise des éléments planimétriques mais reste encadré par des lignes d'arrêt clairement identifiables. En T9, la lecture du relief entre en jeu de manière progressive. Les postes sont placés sur des sommets faciles à identifier. Le coureur utilise les crêtes ou les rentrants comme mains courantes naturelles pour se guider. En T10, l'orientation devient grossière sur les interpostes longs avec des points d'appui et des points d'attaque évidents, permettant au coureur de développer sa capacité à simplifier la lecture de carte."
+    },
+    {
+      "id": "mf_progression_t11_t14",
+      "source_id": "methode_federale_2016",
+      "section": "Progression T11-T14 (précision et anticipation)",
+      "topic": "progression",
+      "tags": ["progression", "TD", "précision", "anticipation", "T11", "T12", "T13", "T14"],
+      "content": "Les niveaux T11 à T14 exigent précision et anticipation. En T11-T12, le coureur doit s'orienter avec précision vers des éléments de relief simples (buttes isolées, dépressions). Le point d'attaque se situe à moins de 200 mètres du poste et les lignes d'arrêt restent évidentes. En T13, les postes sont placés sans ligne d'arrêt évidente derrière eux, ce qui oblige le coureur à planifier soigneusement son approche et à adapter sa vitesse de course. La moindre erreur de navigation entraîne une perte de temps significative. En T14, l'attaque du poste se fait en zone pauvre en détails, nécessitant une estimation précise des distances et un suivi rigoureux de l'azimut."
+    },
+    {
+      "id": "mf_progression_t15_t17",
+      "source_id": "methode_federale_2016",
+      "section": "Progression T15-T17 (performance)",
+      "topic": "progression",
+      "tags": ["progression", "TD", "performance", "T15", "T16", "T17"],
+      "content": "Les niveaux T15 à T17 représentent le sommet de la performance technique en course d'orientation. En T15, le coureur est confronté à des choix d'itinéraire complexes où plusieurs options de longueur et de difficulté similaires s'offrent à lui, nécessitant une analyse rapide des avantages et risques de chaque variante. En T16, l'orientation grossière se combine avec une lecture du relief difficile, notamment dans les flancs de colline où la progression est latérale et les courbes de niveau se superposent visuellement. En T17, l'orientation fine s'exerce en terrain très détaillé avec une absence totale de mains courantes et une visibilité réduite par la végétation dense."
+    },
+    {
+      "id": "mf_concepts_navigation",
+      "source_id": "methode_federale_2016",
+      "section": "Concepts clés navigation",
+      "topic": "navigation",
+      "tags": ["navigation", "concepts", "technique", "POP"],
+      "content": "La Méthode Fédérale définit plusieurs concepts fondamentaux de navigation. La méthode P.O.P. est la base : Pliée (la carte est pliée pour ne montrer que la zone utile), Orientée (la carte est toujours orientée par rapport au terrain, le nord de la carte vers le nord magnétique), Pouce (le pouce est posé sur la position actuelle du coureur). Les mains courantes (ou lignes directrices) sont des éléments linéaires du terrain (chemins, lisières, cours d'eau, courbes de niveau) utilisés pour guider la progression. Les lignes d'arrêt sont des éléments distincts situés au-delà du poste, signalant au coureur qu'il a dépassé sa cible. Les points d'attaque sont des éléments facilement identifiables à partir desquels le coureur navigue avec précision vers le poste."
+    },
+    {
+      "id": "mf_sprint_urbain",
+      "source_id": "methode_federale_2016",
+      "section": "Sprint urbain",
+      "topic": "sprint",
+      "tags": ["sprint", "urbain", "ville", "progression"],
+      "content": "Le sprint urbain suit une progression technique spécifique adaptée au milieu urbain. En T1 sprint, chaque interposte comprend un maximum de 3 changements de direction. Les postes sont placés aux carrefours et leur position ne doit pas influencer le choix d'itinéraire du coureur, garantissant que la navigation reste simple. En T2 sprint, le nombre de changements de direction passe à 5 maximum. L'équilibre entre choix complexes et vitesse de course devient central. Les obstacles (passages étroits, contournements) se trouvent sur l'interposte et non au niveau du poste. En T3 sprint, les environnements sont complexes (zones multi-niveaux, passages souterrains). Les sorties de poste forcent la planification anticipée. Tous les obstacles urbains sont exploités : escaliers, tunnels, murs, passages sous bâtiments."
+    },
+    {
+      "id": "mf_principes_tracage",
+      "source_id": "methode_federale_2016",
+      "section": "Principes généraux traçage",
+      "topic": "traçage",
+      "tags": ["traçage", "principes", "sécurité", "cohérence"],
+      "content": "Le traçage de circuits de course d'orientation repose sur plusieurs principes fondamentaux. L'équilibre sécurité/risque impose d'adapter la difficulté technique pour créer une situation d'apprentissage sans mettre les coureurs en danger. La cohérence technique exige que les postes soient placés sur des éléments correspondant au niveau visé : en T1, uniquement aux carrefours évidents ; en T17, sur des micro-détails en terrain complexe. Les boucles de validation consistent à vérifier que les compétences des coureurs sont bien sollicitées et validées par des succès en compétition. Pour les catégories vétérans, le principe clé est de maintenir la difficulté technique équivalente à celle des élites tout en réduisant les exigences physiques (distance et dénivelé réduits)."
+    }
+  ]
+}

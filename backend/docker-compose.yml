@@ -1,0 +1,73 @@
+# =============================================
+# AItraceur - Docker Compose
+# Sprint 1: Setup minimal pour développement
+# =============================================
+
+services:
+  # -----------------------------
+  # Backend FastAPI
+  # -----------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aitraceur-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://aitraceur:aitraceur@postgres:5432/aitraceur
+      - REDIS_URL=redis://redis:6379/0
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./src:/app/src
+      - ocad_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # -----------------------------
+  # PostgreSQL + PostGIS
+  # -----------------------------
+  postgres:
+    image: postgres:15
+    container_name: aitraceur-postgres
+    environment:
+      - POSTGRES_USER=aitraceur
+      - POSTGRES_PASSWORD=aitraceur
+      - POSTGRES_DB=aitraceur
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aitraceur"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # -----------------------------
+  # Redis (pour cache et tâches async)
+  # -----------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: aitraceur-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+# -----------------------------
+# Volumes persistants
+# -----------------------------
+volumes:
+  postgres_data:
+  redis_data:
+  ocad_uploads:

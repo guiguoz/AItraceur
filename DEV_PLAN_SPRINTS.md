@@ -267,3 +267,157 @@ Support mixte, exports riches, finitions.
 ### Directive Claude
 > Finalise les fonctionnalités multi-environnements, ajoute les exports et améliore l’UX pour une release beta utilisable par de vrais traceurs.
 
+---
+
+## ÉTAPE 10a – Bypass OCAD : OSM comme support de travail ✅ 2026-03-04
+
+### Objectif
+Supprimer la dépendance dure à un fichier `.ocd`. L’app fonctionne sur fond OSM dès l’ouverture. OCAD devient un enrichissement optionnel.
+
+### Tâches Frontend
+- `frontend/src/components/MapViewer.jsx` — Supprimer early-return `!ocadData`, ajouter `MapRefCapture` + prop `onMapReady`
+- `frontend/src/App.jsx` — Retirer 6 gates OCAD, bbox fallback depuis viewport Leaflet (`mapRef`), OcadUploader → widget optionnel
+
+### Directive Claude
+> Retire les 6 gates OCAD dans App.jsx et MapViewer.jsx, ajoute un `mapRef` pour exposer les bounds Leaflet, et replace le bloc `OcadUploader` plein écran par un widget optionnel dans la sidebar.
+
+---
+
+## ÉTAPE 10b – Module Contrôleur : règles structurées + checks C01–C12 ✅ 2026-03-04
+
+### Objectif
+Créer le module `ControleurSprint` qui valide un circuit sprint poste par poste selon les normes IOF/FFCO, avec issues structurées (code, sévérité, control_index, suggestion, référence règle).
+
+### Tâches Backend
+- `backend/src/services/controleur/controleur_rules.json` — Nouveau : règles IOF/FFCO structurées
+- `backend/src/services/controleur/controleur.py` — Nouveau : classe `ControleurSprint`, 12 checks C01–C12
+- `backend/src/services/generation/scorer.py` — Alimenter `issues` depuis `ControleurSprint.validate()`, corriger bearing dog-leg (haversine)
+
+### Directive Claude
+> Crée `controleur_rules.json` avec les seuils IOF/FFCO sprint et `controleur.py` avec `ControleurSprint.validate()` retournant une liste d’issues structurées (C01–C12) avec indices de postes et suggestions, puis connecte-le au scorer.py.
+
+---
+
+## ÉTAPE 10c – Corrections automatiques du traceur + endpoint generate-sprint ✅ 2026-03-04
+
+### Objectif
+Pour chaque issue ERROR/WARNING, le traceur applique une mutation ciblée et soumet à nouveau au contrôleur. Boucle max 5 itérations avec log du dialogue.
+
+### Tâches Backend
+- `backend/src/services/controleur/traceur_corrections.py` — Nouveau : mutations ciblées par type d’issue (C01/C02/C08/C10)
+- `backend/src/main.py` — Nouveau endpoint `POST /api/v1/generation/generate-sprint` avec boucle traceur↔contrôleur
+
+### Directive Claude
+> Crée `traceur_corrections.py` avec une fonction `apply_corrections(controls, issues, candidates)` puis crée l’endpoint `/generate-sprint` qui orchestre la boucle traceur↔contrôleur (max 5 itérations) et retourne le log du dialogue.
+
+---
+
+## ÉTAPE 10d – Frontend : barre de progression + DialogueLog ✅ 2026-03-04
+
+### Objectif
+Afficher le dialogue traceur↔contrôleur avec barre de progression animée pendant la génération.
+
+### Tâches Frontend
+- `frontend/src/services/api.js` — Ajouter `generateSprint(bbox, circuitConfig)`
+- `frontend/src/components/DialogueLog.jsx` — Nouveau : log avec icônes 🗺/⚖️ et statuts
+- `frontend/src/App.jsx` — `handleAiGenerate` appelle `/generate-sprint`, barre de progression par étape
+
+### Directive Claude
+> Crée `DialogueLog.jsx` affichant les échanges traceur↔contrôleur, modifie `handleAiGenerate` pour appeler `generateSprint()` et afficher une barre de progression étape par étape pendant la génération.
+
+---
+
+## ÉTAPE 10e – Route Analyzer : A* graphe OSM pour dog-leg réel ✅ 2026-03-04
+
+### Objectif
+Implémenter l’équivalent du Route Analyzer OCAD avec graphe OSM + A* pour détecter les dog-legs réels et valider le choix d’itinéraire.
+
+### Tâches Backend
+- `backend/src/services/optimization/route_analyzer.py` — Nouveau : `RouteAnalyzer` (NetworkX + A* + Yen’s k-shortest)
+- `backend/src/services/controleur/controleur.py` — Connecter C01 et C11 à `RouteAnalyzer`
+
+### Directive Claude
+> Crée `route_analyzer.py` avec un graphe NetworkX construit depuis les ways OSM et A* pour trouver la route optimale entre deux postes WGS84, puis utilise `detect_dogleg()` dans le check C01 et `route_diversity_score()` dans le check C11 du contrôleur.
+
+---
+
+## ÉTAPE 10f – Route Analyzer visuel : k meilleurs itinéraires entre deux postes ✅ 2026-03-04
+
+### Objectif
+Afficher les k meilleures routes OSM entre deux postes cliqués dans la sidebar, comme l'outil Route Analyzer d'OCAD. Bouton 🔍 par jambe dans ControlsList, polylines colorées sur la carte.
+
+### Tâches
+- `backend/src/services/optimization/route_analyzer.py` — Ajout `get_k_routes()` (Yen's k-shortest via `nx.shortest_simple_paths`) + `route_length_m()`
+- `backend/src/main.py` — Endpoint `POST /api/v1/terrain/routes-between` : fetch OSM, construit RouteAnalyzer, retourne k routes + diversité
+- `frontend/src/services/api.js` — `getRoutesBetweenControls(params)` (timeout 60s)
+- `frontend/src/App.jsx` — State `routeDisplay`, handler `handleShowRoutes()`, prop `routeDisplay` → MapViewer, props `onShowRoutes`/`activeRouteLegIdx` → ControlsList
+- `frontend/src/components/MapViewer.jsx` — Rendu de k Polylines colorées (bleu/orange/rouge) avec Popup distance, prop `routeDisplay`
+- `frontend/src/components/ControlsList.jsx` — Séparateur de jambe avec bouton 🔍 toggle ; actif = fond bleu
+
+### UX
+- Clic 🔍 → requête backend → 3 polylines colorées (rang 1 bleu, 2 orange, 3 rouge) sur la carte
+- Re-clic → toggle off
+- Score de diversité Jaccard retourné (utilisé en interne par C11)
+
+---
+
+## ÉTAPES 11a+11b – PDFs IOF/FFCO → cerveau de génération ✅ 2026-03-04
+
+### Objectif
+Les 22 PDF (IOF/FFCO guidelines) alimentent directement le pipeline de génération de postes :
+- Prompt LLM enrichi des règles pertinentes (circuit_type + TD) issues des PDF
+- Algorithme génétique avec seuils calibrés par niveau (dog-leg, distance min/max) depuis `placement_rules.json`
+
+### Tâches Backend
+- `backend/requirements.txt` — Ajout `pymupdf`
+- `backend/src/services/knowledge_base/ingest_docs.py` — Extraction fitz + chunking 800/200 → `data/pdf_knowledge.jsonl`
+- `backend/src/services/knowledge_base/local_rag.py` — `charger_dataset()` charge aussi `pdf_knowledge.jsonl` ; `search_chunks()` pour retrieval direct ; `reload()` post-ingestion
+- `backend/src/services/knowledge_base/placement_rules.json` — Seuils IOF/FFCO par circuit_type + TD (min/max jambe, dog-leg angle, climb ratio)
+- `backend/src/services/knowledge_base/course_rules_retriever.py` — `get_course_rules(circuit_type, td_level)` + `get_placement_rules()`
+- `backend/src/services/generation/ai_generator.py` — `{rules_context}` injecté dans `CIRCUIT_GENERATION_PROMPT` + `circuit_type`/`technical_level` passés à `GenerationConfig`
+- `backend/src/services/generation/genetic_algo.py` — `GenerationConfig` inclut `circuit_type`/`technical_level` ; `_load_placement_rules()` au init ; seuils dog-leg/distance dynamiques dans `_default_scoring()`
+- `backend/src/main.py` — Endpoint `POST /api/v1/knowledge/ingest-docs` (déclenche ingestion + reload LocalRAG)
+
+### Usage
+1. Lancer une fois : `POST /api/v1/knowledge/ingest-docs` → indexe les 22 PDF
+2. Redémarrer le backend → LocalRAG charge `pdf_knowledge.jsonl` automatiquement
+3. Générer un circuit → prompt LLM + seuils GA incluent les règles IOF/FFCO du bon niveau
+
+
+---
+
+## ÉTAPE 13 – OCAD-first workflow : carte OCAD comme fond, postes sur éléments ✅ 2026-03-04
+
+### Objectif
+Quand un .ocd est chargé, l'app bascule en mode "OCAD-first" :
+- Fond de carte = PNG OCAD géoréférencé seul (OSM masqué à l'affichage)
+- OSM reste utilisé en coulisses pour enrichir les candidats (intersections piétonnes)
+- Candidats postes = coins/virages OCAD + intersections OSM (fusionnés, dédupliqués)
+- Rapport des éléments OCAD détectés visible dans la sidebar
+
+### Tâches — 13a : MapViewer OCAD-first
+- `frontend/src/components/MapViewer.jsx` — Prop `ocadMode` : masque `<TileLayer>` OSM si true
+- `frontend/src/App.jsx` — State `mapMode: 'osm' | 'ocad'`, auto-switch à 'ocad' quand tile service répond, toggle sidebar OCAD/OSM
+
+### Tâches — 13b : extractCandidatePoints() exhaustif
+- `frontend/src/App.jsx` — Refonte de `extractCandidatePoints()` :
+  - Coins de polygones bâtiments (isom 521/522/527/528) au lieu du centroïde
+  - Vertices de changement de direction sur lignes chemins (angle < 150° = virage net)
+  - Endpoints des LineStrings (carrefours, impasses)
+  - Tous les Points avec code ISOM attractif
+  - Déduplication ~15m (`deduplicatePoints()`)
+  - Max porté à 600
+
+### Tâches — 13c : Endpoint analyse OCAD + panel sidebar
+- `backend/src/main.py` — `POST /api/v1/ocad/analyze` : reçoit GeoJSON WGS84, retourne rapport structuré (total features, by_category, candidate_points_extracted, top_candidates, terrain_summary, recommendations)
+- `frontend/src/components/OcadAnalysisPanel.jsx` — Panel sidebar affiché post-chargement OCAD (catégories ISOM, nb candidats extraits, résumé terrain)
+- `frontend/src/services/api.js` — `analyzeOcadGeojson(geojson)`
+
+### Tâches — 13d : Fusion OCAD+OSM dans generate-sprint
+- `backend/src/main.py` — `generate_sprint_with_validation()` : toujours fusionner OCAD + OSM (même si OCAD fournit 50+ candidats), déduplication 10m, limite 800 pts
+- RouteAnalyzer toujours construit depuis OSM highway_ways (même si carte OCAD affichée)
+
+### Architecture
+- OCAD → GeoJSON (client ocad2geojson) → extractCandidatePoints() → coins/virages/points → backend
+- OSM → Overpass (backend) → intersections piétonnes → fusion avec OCAD
+- Résultat : GA places controls sur éléments concrets (carrefours, coins bâtiments, buttes, dépressions)

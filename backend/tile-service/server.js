@@ -20,12 +20,6 @@ fs.mkdirSync(RENDER_DIR, { recursive: true })
 
 const upload = multer({ dest: UPLOAD_DIR })
 
-// Resolution in meters/pixel for the final PNG.
-// renderSvg() renders the SVG directly at this resolution (no intermediate oversized raster).
-// R=1 → 5km map = ~5000×5000px (sharp quality, ~25Mpx, well under Sharp's 268Mpx limit).
-// R=4 was too low → blurry when zooming in Leaflet ImageOverlay.
-const RESOLUTION = 1
-
 app.post('/upload', upload.single('file'), async (req, res) => {
   try {
     const mapId = path.parse(req.file.filename).name
@@ -47,11 +41,16 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     const outputPath = path.join(RENDER_DIR, `${mapId}.png`)
     const extent = tiler.bounds
 
-    console.log(`[render] Rendering at ${RESOLUTION}m/px...`)
+    // Dynamic resolution: cap image at ~50Mpx to stay well under Sharp's 268Mpx limit.
+    // R=1 → 5km map ~25Mpx (fine). R=2 → 10km map ~25Mpx. R=4 → 20km map ~25Mpx.
+    const extentW = extent[2] - extent[0]
+    const extentH = extent[3] - extent[1]
+    const RESOLUTION = Math.max(1, Math.ceil(Math.sqrt(extentW * extentH / 50_000_000)))
+    console.log(`[render] Extent ${Math.round(extentW)}×${Math.round(extentH)}m → resolution ${RESOLUTION}m/px`)
+
     // Use renderSvg directly (not render()) to avoid an oversized intermediate raster.
     // render() internally uses svgResolution = min(R, scale/15000) which at scale 1:5000
     // gives 0.333 m/px → ~300Mpx SVG, exceeding Sharp's pixel limit.
-    // renderSvg() at RESOLUTION=1 produces ~6800×5200px directly for a 5km map.
     const svg = renderSvg(tiler, extent, RESOLUTION, { fill: 'white' })
     const xml = new XMLSerializer().serializeToString(svg)
     await sharp(Buffer.from(xml)).png().toFile(outputPath)

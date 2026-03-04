@@ -132,6 +132,13 @@ function FitBounds({ bounds }) {
   return null;
 }
 
+// Expose Leaflet map instance to parent via callback
+function MapRefCapture({ onReady }) {
+  const map = useMap();
+  useEffect(() => { onReady?.(map); }, [map, onReady]);
+  return null;
+}
+
 // Pan map to AI suggestion when it changes
 function PanToSuggestion({ suggestion }) {
   const map = useMap();
@@ -144,6 +151,13 @@ function PanToSuggestion({ suggestion }) {
   return null;
 }
 
+// Route display colors — rank 1 blue, rank 2 orange, rank 3 red
+const ROUTE_STYLES = [
+  { color: '#3b82f6', weight: 4, opacity: 0.9, dashArray: null },
+  { color: '#f59e0b', weight: 3, opacity: 0.75, dashArray: '8 5' },
+  { color: '#ef4444', weight: 3, opacity: 0.6, dashArray: '5 5' },
+];
+
 export function MapViewer({
   ocadData = null,
   onMapClick,
@@ -155,6 +169,9 @@ export function MapViewer({
   imageData = null,
   onAddForbiddenZone,
   onUpdateSuggestion,
+  onMapReady = null,
+  routeDisplay = null,
+  ocadMode = false,  // true → masque OSM, affiche uniquement PNG OCAD
 }) {
   // Polygon drawing — local intermediate state
   const [drawingVertices, setDrawingVertices] = useState([]);
@@ -196,20 +213,6 @@ export function MapViewer({
     .sort((a, b) => a.order - b.order)
     .map(c => [c.lat, c.lng]);
 
-  if (!ocadData) {
-    return (
-      <div className="w-full h-full flex items-center justify-center bg-gray-900 border-l border-gray-800">
-        <div className="text-center p-8 max-w-xs">
-          <svg className="w-16 h-16 mx-auto text-gray-700 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-          </svg>
-          <p className="text-gray-400 text-lg font-medium mb-2">Aucune carte chargée</p>
-          <p className="text-gray-600 text-sm">Importez un fichier .ocd depuis le panneau latéral pour commencer à tracer votre parcours.</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div
       className="w-full h-full relative"
@@ -220,23 +223,26 @@ export function MapViewer({
         zoom={6}
         className="w-full h-full"
       >
+        <MapRefCapture onReady={onMapReady} />
         <MapEvents
           onControlClick={onMapClick}
           onForbiddenClick={handleForbiddenClick}
           activeTool={activeTool}
         />
 
-        {/* OSM base layer — dimmed under OCAD render */}
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          opacity={imageData ? 0.25 : 1}
-        />
+        {/* OSM base layer — masqué en mode OCAD, atténué en mode mixte */}
+        {!ocadMode && (
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            opacity={imageData ? 0.25 : 1}
+          />
+        )}
 
         <FitBounds bounds={imageData ? imageData.bounds : finalBounds} />
         <PanToSuggestion suggestion={currentSuggestion} />
 
-        {/* OCAD map as georeferenced PNG */}
+        {/* OCAD map as georeferenced PNG — fond principal en mode OCAD */}
         {imageData && (
           <ImageOverlay url={imageData.url} bounds={imageData.bounds} opacity={1} zIndex={10} />
         )}
@@ -299,6 +305,31 @@ export function MapViewer({
             </Popup>
           </Marker>
         ))}
+
+        {/* Route Analyzer — k best routes as colored polylines */}
+        {routeDisplay?.routes?.map((route, i) => {
+          const style = ROUTE_STYLES[i] || ROUTE_STYLES[ROUTE_STYLES.length - 1];
+          const positions = route.waypoints.map(([lng, lat]) => [lat, lng]);
+          return (
+            <Polyline
+              key={`route-${i}`}
+              positions={positions}
+              pathOptions={{
+                color: style.color,
+                weight: style.weight,
+                opacity: style.opacity,
+                ...(style.dashArray ? { dashArray: style.dashArray } : {}),
+              }}
+            >
+              <Popup>
+                <div className="text-xs">
+                  <strong>Itinéraire #{route.rank}</strong><br />
+                  {Math.round(route.distance_m)} m
+                </div>
+              </Popup>
+            </Polyline>
+          );
+        })}
 
         {/* AI suggestion — draggable purple marker */}
         {currentSuggestion && (

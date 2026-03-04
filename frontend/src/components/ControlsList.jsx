@@ -72,7 +72,7 @@ function ElevationProfile({ elevations }) {
   );
 }
 
-const ControlsList = ({ controls, onDelete, totalDistance, controlCount }) => {
+const ControlsList = ({ controls, onDelete, totalDistance, controlCount, onShowRoutes, activeRouteLegIdx }) => {
   const [climbData, setClimbData] = useState(null);
   const [loadingClimb, setLoadingClimb] = useState(false);
 
@@ -146,36 +146,61 @@ const ControlsList = ({ controls, onDelete, totalDistance, controlCount }) => {
 
       {/* Control list */}
       {ordered.length > 0 ? (
-        <div className="space-y-1">
+        <div className="space-y-0.5">
           {ordered.map((control, index) => (
-            <div
-              key={control.id}
-              className="flex items-center gap-2 p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800 group transition-colors"
-            >
-              <TypeIcon type={control.type} />
-              <span className="text-xs font-mono text-gray-400 w-5 text-center">
-                {getLabel(control, index)}
-              </span>
-              <span className="flex-1 text-xs text-gray-300 truncate">
-                {TYPE_LABELS[control.type]}
-              </span>
-              {/* Altitude au poste si disponible */}
-              {climbData?.elevations && (() => {
-                const ev = climbData.elevations.find(e => e.order === control.order);
-                return ev ? (
-                  <span className="text-[10px] text-gray-500 mr-1">{Math.round(ev.elevation)}m</span>
-                ) : null;
-              })()}
-              <button
-                onClick={() => onDelete(control.id)}
-                className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-red-400 p-0.5 rounded"
-                title="Supprimer"
-                aria-label={`Supprimer ${TYPE_LABELS[control.type]}`}
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+            <div key={control.id}>
+              <div className="flex items-start gap-2 p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800 group transition-colors">
+                <TypeIcon type={control.type} />
+                <span className="text-xs font-mono text-gray-400 w-5 text-center mt-0.5">
+                  {getLabel(control, index)}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <span className="text-xs text-gray-300">
+                    {TYPE_LABELS[control.type]}
+                  </span>
+                  {/* Description IOF colonne D (FFCO 2018) */}
+                  {control.description && control.description !== 'Position libre' && (
+                    <p className="text-[10px] text-violet-400/80 truncate leading-tight mt-0.5" title={control.description}>
+                      {control.description}
+                    </p>
+                  )}
+                </div>
+                {/* Altitude au poste si disponible */}
+                {climbData?.elevations && (() => {
+                  const ev = climbData.elevations.find(e => e.order === control.order);
+                  return ev ? (
+                    <span className="text-[10px] text-gray-500 mr-1 mt-0.5">{Math.round(ev.elevation)}m</span>
+                  ) : null;
+                })()}
+                <button
+                  onClick={() => onDelete(control.id)}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-red-400 p-0.5 rounded"
+                  title="Supprimer"
+                  aria-label={`Supprimer ${TYPE_LABELS[control.type]}`}
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              {/* Séparateur de jambe avec bouton Route Analyzer */}
+              {index < ordered.length - 1 && onShowRoutes && (
+                <div className="flex items-center gap-1 py-0.5 px-2">
+                  <div className="flex-1 h-px bg-gray-700/60" />
+                  <button
+                    onClick={() => onShowRoutes(index, control, ordered[index + 1])}
+                    title="Voir les itinéraires possibles"
+                    className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
+                      activeRouteLegIdx === index
+                        ? 'bg-blue-600 text-white'
+                        : 'text-gray-600 hover:text-blue-400 hover:bg-gray-700'
+                    }`}
+                  >
+                    🔍
+                  </button>
+                  <div className="flex-1 h-px bg-gray-700/60" />
+                </div>
+              )}
             </div>
           ))}
         </div>

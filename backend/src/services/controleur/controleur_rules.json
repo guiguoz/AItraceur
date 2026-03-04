@@ -1,0 +1,72 @@
+{
+  "sprint": {
+    "control_placement": {
+      "min_separation_m": 30,
+      "feature_quality": {
+        "preferred": [
+          "building_corner", "path_junction", "fence_corner",
+          "opening_in_fence", "statue", "pillar", "road_junction"
+        ],
+        "acceptable": ["amenity", "intersection"],
+        "avoid": ["mid_street", "open_area", "ambiguous"]
+      },
+      "reference": "ISSprOM 2019 §6.1 + IOF Sprint Guidelines Jun 2020 §6"
+    },
+    "legs": {
+      "dog_leg_proximity_m": 30,
+      "dog_leg_angle_deg": 25,
+      "min_leg_m": 30,
+      "recommended_leg_min_m": 50,
+      "recommended_leg_max_m": 200,
+      "max_leg_m": 400,
+      "parallel_bearing_threshold_deg": 20,
+      "route_choice_diversity_min": 0.25,
+      "reference": "IOF Sprint Guidelines Jun 2020 §4.3, FFCO Règles Techniques Ed.2023 §8"
+    },
+    "circuit": {
+      "min_controls": 12,
+      "max_controls": 28,
+      "winning_time_targets": {
+        "elite": {"min_min": 12, "max_min": 15},
+        "junior": {"min_min": 10, "max_min": 13},
+        "training": {"min_min": 8, "max_min": 12}
+      },
+      "max_climb_pct": 3.0,
+      "reference": "IOF Sprint Guidelines Jun 2020 §3.1, Mémento Corps Arbitral FFCO Ed.2023"
+    },
+    "safety": {
+      "forbidden_zone_types": [
+        "building_interior", "private_land", "heavy_traffic_road", "construction"
+      ],
+      "road_crossing": "safe_crossing_only",
+      "reference": "FFCO Règles Techniques et Sécurité Ed.juin2023 §12, IOF Sprint §5"
+    }
+  },
+  "forest": {
+    "control_placement": {
+      "min_separation_m": 60,
+      "feature_quality": {
+        "preferred": [
+          "knoll", "depression", "boulder", "pit", "earth_bank",
+          "cliff", "marsh", "stream_junction", "path_junction",
+          "building_corner", "fence_corner", "ruined_wall"
+        ],
+        "acceptable": ["open_land", "vegetation_boundary"],
+        "avoid": ["open_area_center", "featureless_slope"]
+      },
+      "reference": "ISOM 2017 §6 + IOF Forest Guidelines Jun 2020 §4"
+    },
+    "legs": {
+      "dog_leg_angle_deg": 20,
+      "min_leg_m": 60,
+      "max_leg_m": 1500,
+      "reference": "IOF Forest Guidelines Jun 2020 §3.4, IOF Article 16.8.1"
+    },
+    "circuit": {
+      "min_controls": 10,
+      "max_controls": 30,
+      "max_climb_pct": 8.0,
+      "reference": "IOF Forest Guidelines Jun 2020 §3.1"
+    }
+  }
+}

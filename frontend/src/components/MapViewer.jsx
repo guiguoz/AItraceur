@@ -183,12 +183,16 @@ export function MapViewer({
   }, [activeTool]);
 
   const handleForbiddenClick = (latlng) => {
-    // Format [lng, lat] — GeoJSON standard, cohérent avec zones OCAD et OSM
-    setDrawingVertices(prev => [...prev, [latlng.lng, latlng.lat]]);
+    // [lat, lng] pour Leaflet (affichage)
+    setDrawingVertices(prev => [...prev, [latlng.lat, latlng.lng]]);
   };
 
   const handleClosePolygon = () => {
-    if (drawingVertices.length >= 3) onAddForbiddenZone?.(drawingVertices);
+    if (drawingVertices.length >= 3) {
+      // Convertir en [lng, lat] (GeoJSON standard) pour le backend
+      const polygon = drawingVertices.map(([lat, lng]) => [lng, lat]);
+      onAddForbiddenZone?.(polygon);
+    }
     setDrawingVertices([]);
   };
 
@@ -253,10 +257,11 @@ export function MapViewer({
         {terrainData && <RunnabilityLayer terrainData={terrainData} />}
 
         {/* Completed forbidden zones — red dashed polygons */}
+        {/* forbiddenZones stockées en [lng,lat] (backend) → convertir en [lat,lng] pour Leaflet */}
         {forbiddenZones.map((zone, i) => (
           <Polygon
             key={`fz-${i}`}
-            positions={zone}
+            positions={zone.map(([lng, lat]) => [lat, lng])}
             pathOptions={{ color: '#cc0000', fillColor: '#cc0000', fillOpacity: 0.18, weight: 2, dashArray: '5 4' }}
           />
         ))}

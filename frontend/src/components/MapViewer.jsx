@@ -173,6 +173,7 @@ export function MapViewer({
   routeDisplay = null,
   ocadMode = false,  // true → masque OSM, affiche uniquement PNG OCAD
   backgroundControls = [],  // mode compétition — postes des autres circuits
+  pendingFinish = null,     // arrivée encore en suggestion → ligne tiretée
 }) {
   // Polygon drawing — local intermediate state
   const [drawingVertices, setDrawingVertices] = useState([]);
@@ -289,6 +290,17 @@ export function MapViewer({
             pathOptions={{ color: IOF_COLOR, weight: 2, opacity: 0.85 }}
           />
         )}
+
+        {/* Ligne tiretée dernier poste → arrivée pendante (suggestion) */}
+        {pendingFinish && orderedPositions.length >= 1 && (() => {
+          const last = orderedPositions[orderedPositions.length - 1]
+          return (
+            <Polyline
+              positions={[last, [pendingFinish.lat, pendingFinish.lng]]}
+              pathOptions={{ color: IOF_COLOR, weight: 2, opacity: 0.55, dashArray: '8 6' }}
+            />
+          )
+        })()}
 
         {/* Background controls — autres circuits (mode compétition) */}
         {backgroundControls.map((ctrl, i) => (

@@ -805,15 +805,43 @@ class GeneticAlgorithm:
             max_leg_m = float(_rules.get("max_leg_m", 200))
             long_legs = sum(1 for l in leg_lengths if l > max_leg_m)
             sprint_leg_score = max(0.0, 100.0 - long_legs * 25)
-            # Pondération sprint : dénivelé remplacé par jambe_sprint + terrain_quality
+
+            # --- 9. Sprint : bonus cluster de désorientation ---
+            cluster_bonus = 0.0
+            cluster_radius = float(_rules.get("disorientation_cluster_radius_m", 0))
+            cluster_target_size = int(_rules.get("disorientation_cluster_size", 0))
+            cluster_target_count = int(_rules.get("disorientation_cluster_count", 0))
+            if cluster_radius > 0 and cluster_target_size >= 3:
+                n = len(controls)
+                found_clusters = 0
+                counted_in_cluster = set()
+                for i in range(n):
+                    if i in counted_in_cluster:
+                        continue
+                    nearby = [i]
+                    for j in range(n):
+                        if j != i and j not in counted_in_cluster:
+                            if self._haversine_m(controls[i], controls[j]) <= cluster_radius:
+                                nearby.append(j)
+                    if len(nearby) >= cluster_target_size:
+                        found_clusters += 1
+                        counted_in_cluster.update(nearby[:cluster_target_size])
+                if cluster_target_count > 0:
+                    # Bonus proportionnel : 100 si target atteint, décroissant sinon
+                    cluster_bonus = min(100.0, (found_clusters / cluster_target_count) * 100.0)
+
+            # Pondération sprint : dénivelé remplacé par jambe_sprint + terrain_quality + cluster
+            cluster_weight = 0.08 if cluster_radius > 0 else 0.0
+            base_weight_adj = 1.0 - cluster_weight
             return (
-                length_score   * 0.22
+                (length_score   * 0.22
                 + sprint_leg_score * 0.18
                 + td_score     * 0.13
                 + angle_score  * 0.22
                 + equity_score * 0.10
                 + safety_score * 0.05
-                + terrain_score * 0.10
+                + terrain_score * 0.10) * base_weight_adj
+                + cluster_bonus * cluster_weight
             )
 
         return (

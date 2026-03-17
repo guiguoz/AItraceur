@@ -84,11 +84,20 @@ def _move_toward_candidate(
 
 # ── Correction principale ─────────────────────────────────────────────────────
 
+def _in_bbox(lat: float, lng: float, bbox: Optional[Dict]) -> bool:
+    """Vérifie que (lat, lng) est dans la bounding box {min_x, min_y, max_x, max_y}."""
+    if not bbox:
+        return True
+    return (bbox.get("min_y", -90) <= lat <= bbox.get("max_y", 90) and
+            bbox.get("min_x", -180) <= lng <= bbox.get("max_x", 180))
+
+
 def apply_corrections(
     controls: List[Dict],
     issues: List[ControleurIssue],
     candidates: List[Dict],
     oob_polygons: Optional[List] = None,
+    bounding_box: Optional[Dict] = None,
 ) -> tuple[List[Dict], List[str]]:
     """
     Applique des corrections ciblées par type d'issue.
@@ -129,16 +138,26 @@ def apply_corrections(
             i_to = issue.leg_to
             if 0 <= i_from < len(new_controls) and 0 <= i_to < len(new_controls):
                 prev, nxt = new_controls[i_from], new_controls[i_to]
-                new_pos = _move_point_perpendicular(
-                    ctrl["lat"], ctrl["lng"],
-                    prev["lat"], prev["lng"],
-                    nxt["lat"], nxt["lng"],
-                    distance_m=45.0
-                )
-                new_controls[idx]["lat"] = new_pos["lat"]
-                new_controls[idx]["lng"] = new_pos["lng"]
-                corrected_indices.add(idx)
-                messages.append(f"Correction C01 P{idx + 1} → déplacement perpendiculaire 45m")
+                bearing_seg = _bearing_deg(prev["lat"], prev["lng"], nxt["lat"], nxt["lng"])
+                R = 6_371_000
+                dlat = math.degrees(45.0 / R)
+                dlng = math.degrees(45.0 / (R * math.cos(math.radians(ctrl["lat"]))))
+                # Essayer les deux côtés perpendiculaires, privilégier celui dans la bbox
+                chosen = None
+                for side in [90, -90]:
+                    perp = (bearing_seg + side) % 360
+                    new_pos = {
+                        "lat": ctrl["lat"] + dlat * math.cos(math.radians(perp)),
+                        "lng": ctrl["lng"] + dlng * math.sin(math.radians(perp)),
+                    }
+                    if _in_bbox(new_pos["lat"], new_pos["lng"], bounding_box):
+                        chosen = new_pos
+                        break
+                if chosen:
+                    new_controls[idx]["lat"] = chosen["lat"]
+                    new_controls[idx]["lng"] = chosen["lng"]
+                    corrected_indices.add(idx)
+                    messages.append(f"Correction C01 P{idx + 1} → déplacement perpendiculaire 45m")
 
         elif issue.code == "C02":
             # Trop proches : trouver un candidat OSM à bonne distance

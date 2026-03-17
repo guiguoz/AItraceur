@@ -3685,7 +3685,8 @@ def generate_sprint_with_validation(body: dict = Body(...)):
             current_controls,
             report.issues,
             candidate_points,
-            oob_polygons=oob_polygons
+            oob_polygons=oob_polygons,
+            bounding_box=bounding_box,
         )
 
         if corr_messages:
@@ -3704,6 +3705,29 @@ def generate_sprint_with_validation(body: dict = Body(...)):
             break
 
         current_controls = corrected
+
+    # ── Clip de sécurité bbox ──────────────────────────────────────────────────
+    # Supprime tout poste (hors start/finish) qui serait sorti de la bbox après corrections
+    if bounding_box:
+        _mn_x = bounding_box.get("min_x", -180)
+        _mx_x = bounding_box.get("max_x", 180)
+        _mn_y = bounding_box.get("min_y", -90)
+        _mx_y = bounding_box.get("max_y", 90)
+        _margin = 0.001  # ~100m de tolérance
+        filtered = []
+        for ctrl in current_controls:
+            if ctrl.get("type") in ("start", "finish"):
+                filtered.append(ctrl)
+            elif (_mn_x - _margin <= ctrl["lng"] <= _mx_x + _margin and
+                  _mn_y - _margin <= ctrl["lat"] <= _mx_y + _margin):
+                filtered.append(ctrl)
+        if len(filtered) < len(current_controls):
+            n_removed = len(current_controls) - len(filtered)
+            dialogue.append({
+                "role": "system", "step": 99,
+                "message": f"Clip bbox : {n_removed} poste(s) hors-carte supprimé(s)."
+            })
+            current_controls = filtered
 
     # ── Résultat ───────────────────────────────────────────────────────────────
     final_report_dict = controleur.to_dict(final_report) if final_report else {}

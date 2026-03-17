@@ -26,7 +26,10 @@
       "max_climb_ratio": 0.03,
       "min_control_separation_m": 35,
       "route_choice_diversity_min": 0.15,
-      "notes": "Niveau régional sprint. Min 1 jambe avec choix d'itinéraire réel"
+      "disorientation_cluster_radius_m": 80,
+      "disorientation_cluster_size": 3,
+      "disorientation_cluster_count": 1,
+      "notes": "Niveau régional sprint. Min 1 jambe avec choix d'itinéraire réel. 1 cluster désorientation 3P/80m recommandé."
     },
     "TD4": {
       "min_leg_m": 60,
@@ -35,7 +38,10 @@
       "max_climb_ratio": 0.04,
       "min_control_separation_m": 40,
       "route_choice_diversity_min": 0.25,
-      "notes": "Niveau national sprint. Choix d'itinéraire sur 2-3 jambes minimum"
+      "disorientation_cluster_radius_m": 80,
+      "disorientation_cluster_size": 4,
+      "disorientation_cluster_count": 1,
+      "notes": "Niveau national sprint. 1 cluster désorientation 4P/80m recommandé."
     },
     "TD5": {
       "min_leg_m": 80,
@@ -44,7 +50,10 @@
       "max_climb_ratio": 0.04,
       "min_control_separation_m": 40,
       "route_choice_diversity_min": 0.30,
-      "notes": "Elite sprint. IOF : pas de dog-leg, pas de couloir unique, choix d'itinéraire obligatoire"
+      "disorientation_cluster_radius_m": 80,
+      "disorientation_cluster_size": 4,
+      "disorientation_cluster_count": 2,
+      "notes": "Elite sprint. IOF : pas de dog-leg. 1-2 clusters désorientation 4P/80m recommandés."
     }
   },
   "forest": {

@@ -41,11 +41,14 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     const outputPath = path.join(RENDER_DIR, `${mapId}.png`)
     const extent = tiler.bounds
 
-    // Dynamic resolution: cap image at ~50Mpx to stay well under Sharp's 268Mpx limit.
-    // R=1 → 5km map ~25Mpx (fine). R=2 → 10km map ~25Mpx. R=4 → 20km map ~25Mpx.
+    // Adaptive resolution: fine for small maps (sprint), coarser for large maps.
+    // Keeps output under Sharp's 268Mpx hard limit (we target <50Mpx).
+    // sprint 600×600m @ 0.1m/px → 36Mpx ✓  |  MD 2km² @ 0.5m/px → 16Mpx ✓  |  LD ≥1m/px
     const extentW = extent[2] - extent[0]
     const extentH = extent[3] - extent[1]
-    const RESOLUTION = Math.max(1, Math.ceil(Math.sqrt(extentW * extentH / 50_000_000)))
+    const areaPx = extentW * extentH / 50_000_000
+    const RAW = Math.sqrt(areaPx)
+    const RESOLUTION = RAW < 0.3 ? 0.1 : RAW < 0.8 ? 0.5 : Math.ceil(RAW)
     console.log(`[render] Extent ${Math.round(extentW)}×${Math.round(extentH)}m → resolution ${RESOLUTION}m/px`)
 
     // Use renderSvg directly (not render()) to avoid an oversized intermediate raster.

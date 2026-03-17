@@ -309,7 +309,6 @@ function App() {
   const [mapMode, setMapMode] = useState('osm') // 'osm' | 'ocad'
   const [ocadAnalysis, setOcadAnalysis] = useState(null)
   const [renderLoading, setRenderLoading] = useState(false)
-  const [showChat, setShowChat] = useState(false)
   const [terrainData, setTerrainData] = useState(null)
   const [showRunnability, setShowRunnability] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
@@ -318,6 +317,7 @@ function App() {
   const [controleurReport, setControleurReport] = useState(null)
   const [progressLabel, setProgressLabel] = useState('')
   const [routeDisplay, setRouteDisplay] = useState(null) // { legIdx, routes }
+  const [lastBbox, setLastBbox] = useState(null) // bbox du dernier appel de génération
 
   // Leaflet map ref — used for viewport bbox when no OCAD loaded
   const mapRef = useRef(null)
@@ -326,6 +326,15 @@ function App() {
   const [circuits, setCircuits] = useState([])
   const [activeCircuitId, setActiveCircuitId] = useState(null)
   const [showCreationForm, setShowCreationForm] = useState(false)
+
+  // Competition mode
+  const [competitionMode, setCompetitionMode] = useState(false)
+  const [competitionName, setCompetitionName] = useState('')
+
+  const getAllExistingControls = () =>
+    circuits
+      .filter(c => c.id !== activeCircuitId)
+      .flatMap(c => (c.controls || []).map(ctrl => ({ ...ctrl, circuitName: c.name })))
 
   // Derived active circuit
   const activeCircuit = circuits.find(c => c.id === activeCircuitId) ?? null
@@ -479,6 +488,7 @@ function App() {
                  max_x: bounds.getEast(), max_y: bounds.getNorth() }
       }
       console.log('[AI Generate] bbox WGS84:', bbox)
+      setLastBbox(bbox)
       const circuitParams = getCircuitParams(activeCircuit)
       const startControl = activeCircuit.controls.find(c => c.type === 'start')
       const mapContext = ocadData?.geojson ? buildMapContext(ocadData.geojson) : null
@@ -531,6 +541,7 @@ function App() {
         num_variants: 1,
         circuit_type: activeCircuit.type,
         ...circuitParams,
+        target_controls: Math.ceil((circuitParams.target_controls ?? 12) * 1.5),
         ...(mapContext && { map_context: mapContext }),
         ...(startControl && { start_position: [startControl.lng, startControl.lat] }),
         // Forbidden zones: user-drawn + OCAD OOB + bâtiments OSM (sprint)
@@ -552,6 +563,9 @@ function App() {
           ...(startControl && { start_position: [startControl.lng, startControl.lat] }),
           forbidden_zones_polygons: oobZones,
           candidate_points: candidatePoints.slice(0, 600),
+          existing_controls: competitionMode
+            ? getAllExistingControls().map(c => ({ lat: c.lat, lng: c.lng, circuitName: c.circuitName }))
+            : [],
         }
         const res = await generateSprint(sprintParams)
         const data = res.data
@@ -572,16 +586,24 @@ function App() {
       const hasStart = activeCircuit.controls.some(c => c.type === 'start')
       const hasFinish = activeCircuit.controls.some(c => c.type === 'finish')
 
+      const inBbox = (s) => {
+        if (!bbox) return true
+        return s.lat >= bbox.min_y && s.lat <= bbox.max_y &&
+               s.lng >= bbox.min_x && s.lng <= bbox.max_x
+      }
+
       const suggestions = controls
         .map((c, idx) => ({
           id: `ai_${Date.now()}_${idx}`,
-          type: c.type || (idx === 0 ? 'start' : idx === best.controls.length - 1 ? 'finish' : 'control'),
-          lat: c.y,
-          lng: c.x,
+          type: c.type || (idx === 0 ? 'start' : 'control'),
+          lat: c.y ?? c.lat,
+          lng: c.x ?? c.lng,
           order: c.order ?? idx + 1,
           description: c.description || '',
+          reused: c.reused ?? false,
         }))
         .filter(s => !(s.type === 'start' && hasStart) && !(s.type === 'finish' && hasFinish))
+        .filter(s => s.type === 'start' || s.type === 'finish' || inBbox(s))
 
       console.log('[AI Generate] suggestions:', suggestions)
       updateActiveCircuit({ aiSuggestions: suggestions, suggestionIdx: 0, status: 'ai_suggesting' })
@@ -604,22 +626,85 @@ function App() {
       const newControl = { ...suggestion, order: c.controls.length + 1 }
       const controls = [...c.controls, newControl].map((ctrl, i) => ({ ...ctrl, order: i + 1 }))
       const newIdx = c.suggestionIdx + 1
-      return {
-        controls,
-        suggestionIdx: newIdx,
-        status: newIdx >= c.aiSuggestions.length ? 'complete' : 'ai_suggesting',
+      const targetLength = getCircuitParams(c).target_length_m
+      // Projeter la distance avec l'arrivée (déjà posée ou dans les suggestions restantes)
+      const hasFinish = controls.some(ctrl => ctrl.type === 'finish')
+      let projected = controls
+      if (!hasFinish) {
+        const finishAhead = c.aiSuggestions.slice(newIdx).find(s => s.type === 'finish')
+        if (finishAhead) projected = [...controls, { ...finishAhead, order: controls.length + 1 }]
       }
+      const distOk = computeCourseDistance(projected) >= targetLength * 0.9
+      const exhausted = newIdx >= c.aiSuggestions.length
+      const status = distOk ? 'complete' : exhausted ? 'needs_completion' : 'ai_suggesting'
+      return { controls, suggestionIdx: newIdx, status }
     })
   }
 
   const handleSkipSuggestion = () => {
     updateActiveCircuit(c => {
       const newIdx = c.suggestionIdx + 1
-      return {
-        suggestionIdx: newIdx,
-        status: newIdx >= c.aiSuggestions.length ? 'complete' : 'ai_suggesting',
-      }
+      const targetLength = getCircuitParams(c).target_length_m
+      const exhausted = newIdx >= c.aiSuggestions.length
+      if (!exhausted) return { suggestionIdx: newIdx, status: 'ai_suggesting' }
+      const distOk = computeCourseDistance(c.controls) >= targetLength * 0.9
+      return { suggestionIdx: newIdx, status: distOk ? 'complete' : 'needs_completion' }
     })
+  }
+
+  const handleCompleteCircuit = async () => {
+    if (!activeCircuit || isGenerating) return
+    const circuitParams = getCircuitParams(activeCircuit)
+    const placed = activeCircuit.controls.filter(c => c.type === 'control')
+    const missing = Math.max(2, circuitParams.target_controls - placed.length)
+    const isSprintCircuit = activeCircuit.type === 'sprint'
+    const bbox = lastBbox
+    setIsGenerating(true)
+    setProgressLabel('Complétion du circuit…')
+    try {
+      let newControls
+      if (isSprintCircuit) {
+        const res = await generateSprint({
+          bounding_box: bbox,
+          ...circuitParams,
+          target_controls: Math.ceil(missing * 1.5),
+          existing_controls: activeCircuit.controls.map(c => ({ lat: c.lat, lng: c.lng, circuitName: 'current' })),
+          forbidden_zones_polygons: activeCircuit.forbiddenZones ?? [],
+        })
+        newControls = res.data?.controls ?? []
+      } else {
+        const res = await generateCircuit({
+          bounding_box: bbox,
+          ...circuitParams,
+          target_controls: Math.ceil(missing * 1.5),
+          required_controls: placed.map(c => ({ lat: c.lat, lng: c.lng })),
+        })
+        newControls = res.data?.circuits?.[0]?.controls ?? []
+      }
+      const hasFinish = activeCircuit.controls.some(c => c.type === 'finish')
+      const inBbox = (s) => !bbox || (s.lat >= bbox.min_y && s.lat <= bbox.max_y && s.lng >= bbox.min_x && s.lng <= bbox.max_x)
+      const newSuggestions = newControls
+        .map((c, idx) => ({
+          id: `ai_${Date.now()}_${idx}`,
+          type: c.type || 'control',
+          lat: c.y ?? c.lat,
+          lng: c.x ?? c.lng,
+          order: idx + 1,
+          description: c.description || '',
+        }))
+        .filter(s => s.type !== 'start')
+        .filter(s => !(s.type === 'finish' && hasFinish))
+        .filter(s => s.type === 'finish' || inBbox(s))
+      updateActiveCircuit(c => ({
+        aiSuggestions: [...(c.aiSuggestions || []), ...newSuggestions],
+        suggestionIdx: c.aiSuggestions?.length ?? 0,
+        status: newSuggestions.length > 0 ? 'ai_suggesting' : 'complete',
+      }))
+    } catch (err) {
+      console.error('[Complétion] Erreur:', err.message)
+    } finally {
+      setIsGenerating(false)
+    }
   }
 
   const handleUpdateSuggestion = ({ lat, lng }) => {
@@ -724,6 +809,28 @@ function App() {
               <p className="text-[10px] text-blue-400 font-medium uppercase tracking-wider">Éditeur de parcours</p>
             </div>
           </div>
+        </div>
+
+        {/* Competition mode toggle */}
+        <div className="px-4 py-2 border-b border-gray-700 bg-gray-800/60">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-gray-300">Mode Compétition</span>
+            <button
+              onClick={() => setCompetitionMode(v => !v)}
+              className={`relative w-9 h-5 rounded-full transition-colors ${competitionMode ? 'bg-blue-500' : 'bg-gray-600'}`}
+            >
+              <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${competitionMode ? 'translate-x-4' : ''}`} />
+            </button>
+          </div>
+          {competitionMode && (
+            <input
+              type="text"
+              value={competitionName}
+              onChange={e => setCompetitionName(e.target.value)}
+              placeholder="Nom de la compétition"
+              className="mt-2 w-full text-xs bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white placeholder-gray-400 focus:outline-none focus:border-blue-400"
+            />
+          )}
         </div>
 
         {/* Circuit selector — always visible */}
@@ -927,6 +1034,27 @@ function App() {
                     />
                   )}
 
+                  {/* Complétion automatique — suggestions épuisées avant cible */}
+                  {activeCircuit.status === 'needs_completion' && controls.length > 0 && (() => {
+                    const p = getCircuitParams(activeCircuit)
+                    const missing = Math.max(1, p.target_controls - controlCount)
+                    return (
+                      <div className="rounded-xl border border-orange-700/40 bg-orange-900/20 p-3 text-xs">
+                        <p className="font-semibold text-orange-400 mb-1">Suggestions épuisées</p>
+                        <p className="text-gray-400 mb-2">
+                          {courseDistance}m / {p.target_length_m}m · {controlCount} / {p.target_controls} postes
+                        </p>
+                        <button
+                          onClick={handleCompleteCircuit}
+                          disabled={isGenerating}
+                          className="w-full py-1.5 px-3 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors"
+                        >
+                          {isGenerating ? 'Génération…' : `Compléter (${missing} poste${missing > 1 ? 's' : ''} manquant${missing > 1 ? 's' : ''})`}
+                        </button>
+                      </div>
+                    )
+                  })()}
+
                   {/* Badge conformité IOF (visible quand circuit complet) */}
                   {activeCircuit.status === 'complete' && controls.length > 0 && (() => {
                     const p = getCircuitParams(activeCircuit)
@@ -955,6 +1083,11 @@ function App() {
                               {controlCount} / cible {p.target_controls}
                             </span>
                           </div>
+                          {(activeCircuit.skippedCount ?? 0) > 0 && !distOk && (
+                            <div className="mt-2 pt-2 border-t border-yellow-700/30 text-yellow-300">
+                              {activeCircuit.skippedCount} poste{activeCircuit.skippedCount > 1 ? 's' : ''} refusé{activeCircuit.skippedCount > 1 ? 's' : ''} → distance réduite. Relancez la génération IA pour compléter.
+                            </div>
+                          )}
                         </div>
                       </div>
                     )
@@ -1016,15 +1149,6 @@ function App() {
                       Export IOF XML 3.0
                     </button>
 
-                    <button
-                      onClick={() => setShowChat(v => !v)}
-                      className="w-full mt-2 py-2 px-4 bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-600 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-                      </svg>
-                      {showChat ? 'Fermer le chat' : 'Chat IA (ffco-iof-v7)'}
-                    </button>
                   </div>
                 </>
               ) : (
@@ -1044,8 +1168,6 @@ function App() {
         </div>
       </aside>
 
-      {/* AI Chat panel */}
-      {showChat && <AiChatPanel onClose={() => setShowChat(false)} />}
 
       {/* MAIN MAP */}
       <main className="flex-1 relative z-10 bg-gray-950">
@@ -1095,6 +1217,7 @@ function App() {
           onMapReady={(map) => { mapRef.current = map }}
           routeDisplay={routeDisplay}
           ocadMode={mapMode === 'ocad' && !!imageData}
+          backgroundControls={competitionMode ? getAllExistingControls() : []}
         />
       </main>
 
@@ -1103,6 +1226,8 @@ function App() {
         isOpen={showCreationForm}
         onClose={() => setShowCreationForm(false)}
         onCreateCircuit={handleCreateCircuit}
+        competitionMode={competitionMode}
+        existingCircuitCount={circuits.length}
       />
     </div>
   )

@@ -95,6 +95,7 @@ from src.services.ocad.terrain_descriptor import (
 from src.services.knowledge_base.local_rag import LocalRAG
 from src.services.controleur.controleur import ControleurSprint
 from src.services.controleur.traceur_corrections import apply_corrections
+from src.models.contribution import Contribution, ControlFeature  # noqa: F401 — tables ML
 
 
 # =============================================
@@ -134,6 +135,17 @@ def startup_event():
     # Créer le dossier d'upload s'il n'existe pas
     settings.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     print(f"[OK] Dossier d'upload: {settings.UPLOAD_DIR}")
+
+
+    # Router collecte ML / contribution
+    from src.api.contribute import router as contribute_router
+    app.include_router(contribute_router, prefix="/api/v1", tags=["Collecte ML"])
+    print("[OK] Router /contribute charge")
+
+    # Vérification et téléchargement automatique du modèle ML (thread daemon)
+    import threading
+    from src.services.learning.model_updater import check_and_download
+    threading.Thread(target=check_and_download, daemon=True, name="ml-model-updater").start()
 
 
 @app.on_event("shutdown")
@@ -3477,6 +3489,7 @@ def generate_sprint_with_validation(body: dict = Body(...)):
     candidate_points = body.get("candidate_points", [])
     forbidden_zones = body.get("forbidden_zones_polygons", [])
     start_position = body.get("start_position", None)
+    existing_controls = body.get("existing_controls", [])  # mode compétition
 
     dialogue = []
     oob_polygons = list(forbidden_zones)
@@ -3581,6 +3594,33 @@ def generate_sprint_with_validation(body: dict = Body(...)):
     best_circuit = gen_result[0]
     best_controls = best_circuit.controls if hasattr(best_circuit, "controls") else (best_circuit.get("controls", []) if isinstance(best_circuit, dict) else [])
     best_latlng = _to_latlng(best_controls)
+
+    # ── Mode compétition : snapping sur les postes des circuits existants ──────
+    def _haversine_m(lat1, lng1, lat2, lng2):
+        R = 6371000
+        dlat = math.radians(lat2 - lat1)
+        dlng = math.radians(lng2 - lng1)
+        a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlng/2)**2
+        return R * 2 * math.asin(math.sqrt(a))
+
+    SNAP_THRESHOLD_M = 15
+    n_reused = 0
+    if existing_controls:
+        for ctrl in best_latlng:
+            if ctrl.get("type") in ("start", "finish"):
+                continue
+            for ex in existing_controls:
+                d = _haversine_m(ctrl["lat"], ctrl["lng"], ex.get("lat", 0), ex.get("lng", 0))
+                if d <= SNAP_THRESHOLD_M:
+                    ctrl["lat"] = ex["lat"]
+                    ctrl["lng"] = ex["lng"]
+                    ctrl["reused"] = True
+                    ctrl["reused_from"] = ex.get("circuitName", "")
+                    n_reused += 1
+                    break
+        if n_reused:
+            dialogue.append({"role": "system", "step": 1,
+                             "message": f"Mode compétition : {n_reused} poste(s) réutilisé(s) depuis circuits existants"})
 
     total_dist_m = sum(
         __import__("math").hypot(

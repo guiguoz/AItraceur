@@ -21,7 +21,7 @@ function buildName({ type, sex, category, color }) {
   return `${sex}${category} ${TYPE_SHORT[type]}`
 }
 
-export default function CircuitCreationModal({ isOpen, onClose, onCreateCircuit }) {
+export default function CircuitCreationModal({ isOpen, onClose, onCreateCircuit, competitionMode = false, existingCircuitCount = 0 }) {
   const [type, setType] = useState('md')
   const [sex, setSex] = useState('H')
   const [category, setCategory] = useState('21E')
@@ -51,6 +51,14 @@ export default function CircuitCreationModal({ isOpen, onClose, onCreateCircuit 
         </div>
 
         <div className="p-5 space-y-4">
+          {/* Guide mode compétition */}
+          {competitionMode && (
+            <div className="rounded-lg bg-blue-900/40 border border-blue-700/50 px-3 py-2 text-xs text-blue-300">
+              {existingCircuitCount === 0
+                ? 'Commencez par le circuit le plus long (circuit maître).'
+                : `Les postes des ${existingCircuitCount} circuit(s) existant(s) seront réutilisés si proches (<15m).`}
+            </div>
+          )}
 
           {/* Type */}
           <div>

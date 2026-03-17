@@ -172,6 +172,7 @@ export function MapViewer({
   onMapReady = null,
   routeDisplay = null,
   ocadMode = false,  // true → masque OSM, affiche uniquement PNG OCAD
+  backgroundControls = [],  // mode compétition — postes des autres circuits
 }) {
   // Polygon drawing — local intermediate state
   const [drawingVertices, setDrawingVertices] = useState([]);
@@ -288,6 +289,22 @@ export function MapViewer({
             pathOptions={{ color: IOF_COLOR, weight: 2, opacity: 0.85 }}
           />
         )}
+
+        {/* Background controls — autres circuits (mode compétition) */}
+        {backgroundControls.map((ctrl, i) => (
+          <Marker
+            key={`bg_${i}`}
+            position={[ctrl.lat, ctrl.lng]}
+            icon={L.divIcon({
+              className: '',
+              html: `<div style="width:20px;height:20px;border:2px solid #888;border-radius:50%;background:rgba(136,136,136,0.15);box-sizing:border-box;"></div>`,
+              iconSize: [20, 20],
+              iconAnchor: [10, 10],
+            })}
+          >
+            <Popup><div className="text-xs text-gray-500">{ctrl.circuitName || 'Autre circuit'}</div></Popup>
+          </Marker>
+        ))}
 
         {/* Control markers with IOF/ISOM symbols */}
         {controls.map((control) => (

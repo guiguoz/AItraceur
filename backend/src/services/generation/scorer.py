@@ -13,6 +13,12 @@ try:
 except Exception:
     _CONTROLEUR_AVAILABLE = False
 
+try:
+    from ..learning.ml_trainer import MLScorer
+    _ML_AVAILABLE = True
+except Exception:
+    _ML_AVAILABLE = False
+
 
 # =============================================
 # Types de données
@@ -74,7 +80,7 @@ class CircuitScorer:
     - Sécurité
     """
 
-    # Pondérations
+    # Pondérations (s'adaptent si MLScore disponible : ML prend 20%, les autres ×0.8)
     WEIGHTS = {
         "length": 0.20,
         "climb": 0.15,
@@ -83,6 +89,8 @@ class CircuitScorer:
         "balance": 0.15,
         "safety": 0.15,
     }
+    WEIGHTS_WITH_ML = {k: v * 0.80 for k, v in WEIGHTS.items()}
+    ML_WEIGHT = 0.20
 
     def __init__(self):
         """Initialise le scorer."""
@@ -113,6 +121,8 @@ class CircuitScorer:
         target_length: float = None,
         target_climb: float = None,
         category: str = None,
+        circuit_type: str = None,
+        map_type: str = None,
     ) -> CircuitScore:
         """
         Calcule le score d'un circuit.
@@ -163,15 +173,52 @@ class CircuitScorer:
         else:
             breakdown.safety_score = 70
 
+        # Score ML (20% si modèle disponible, fallback silencieux)
+        ml_score = None
+        if _ML_AVAILABLE and MLScorer.is_available() and positions:
+            legs = [
+                self._haversine_m(positions[i], positions[i + 1])
+                for i in range(len(positions) - 1)
+            ]
+            avg_leg = sum(legs) / len(legs) if legs else 0
+            ml_score = MLScorer.predict(
+                {
+                    "leg_distance_m": avg_leg,
+                    "leg_bearing_change": None,
+                    "control_position_ratio": 0.5,
+                    "td_grade": None,
+                    "pd_grade": None,
+                    "terrain_symbol_density": None,
+                    "nearest_path_dist_m": None,
+                    "attractiveness_score": None,
+                },
+                circuit_type=circuit_type,
+                map_type=map_type,
+                ffco_category=category,
+            )
+
         # Calcul du score total
-        total = (
-            breakdown.length_score * self.WEIGHTS["length"]
-            + breakdown.climb_score * self.WEIGHTS["climb"]
-            + breakdown.control_distance_score * self.WEIGHTS["control_distance"]
-            + breakdown.variety_score * self.WEIGHTS["variety"]
-            + breakdown.balance_score * self.WEIGHTS["balance"]
-            + breakdown.safety_score * self.WEIGHTS["safety"]
-        )
+        if ml_score is not None:
+            w = self.WEIGHTS_WITH_ML
+            total = (
+                breakdown.length_score * w["length"]
+                + breakdown.climb_score * w["climb"]
+                + breakdown.control_distance_score * w["control_distance"]
+                + breakdown.variety_score * w["variety"]
+                + breakdown.balance_score * w["balance"]
+                + breakdown.safety_score * w["safety"]
+                + ml_score * 100 * self.ML_WEIGHT
+            )
+            breakdown.technical_score = round(ml_score * 100, 1)  # visible dans le détail
+        else:
+            total = (
+                breakdown.length_score * self.WEIGHTS["length"]
+                + breakdown.climb_score * self.WEIGHTS["climb"]
+                + breakdown.control_distance_score * self.WEIGHTS["control_distance"]
+                + breakdown.variety_score * self.WEIGHTS["variety"]
+                + breakdown.balance_score * self.WEIGHTS["balance"]
+                + breakdown.safety_score * self.WEIGHTS["safety"]
+            )
 
         # Déterminer la lettre
         if total >= 90:

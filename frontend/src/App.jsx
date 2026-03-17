@@ -787,22 +787,7 @@ function App() {
       ? activeCircuit.aiSuggestions[activeCircuit.suggestionIdx] ?? null
       : null
 
-  // Arrivée en attente de validation : cherche dans les suggestions restantes
-  const hasFinishInControls = controls.some(c => c.type === 'finish')
-  const pendingFinish = hasFinishInControls ? null :
-    (activeCircuit?.aiSuggestions ?? [])
-      .slice(activeCircuit?.suggestionIdx ?? 0)
-      .find(s => s.type === 'finish') ?? null
-
-  // Distance affichée inclut la jambe retour au dernier poste → arrivée pendante
-  const courseDistance = (() => {
-    if (!pendingFinish) return computeCourseDistance(controls)
-    const lastControl = [...controls]
-      .filter(c => ['start', 'control'].includes(c.type))
-      .sort((a, b) => b.order - a.order)[0]
-    if (!lastControl) return computeCourseDistance(controls)
-    return computeCourseDistance(controls) + Math.round(haversineDistance(lastControl, pendingFinish))
-  })()
+  const courseDistance = computeCourseDistance(controls)
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -1234,7 +1219,6 @@ function App() {
           routeDisplay={routeDisplay}
           ocadMode={mapMode === 'ocad' && !!imageData}
           backgroundControls={competitionMode ? getAllExistingControls() : []}
-          pendingFinish={pendingFinish}
         />
       </main>
 

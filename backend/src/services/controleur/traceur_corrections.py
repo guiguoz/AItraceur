@@ -43,7 +43,8 @@ def _move_toward_candidate(
     candidates: List[Dict],
     min_dist_m: float = 35.0,
     forbidden_positions: Optional[List[Dict]] = None,
-    oob_polygons: Optional[List] = None
+    oob_polygons: Optional[List] = None,
+    bounding_box: Optional[Dict] = None,
 ) -> Optional[Dict]:
     """
     Remplace un poste par le candidat OSM le plus proche respectant les contraintes.
@@ -62,6 +63,10 @@ def _move_toward_candidate(
     for cand in sorted_cands:
         clat = cand.get("y", cand.get("lat", 0))
         clng = cand.get("x", cand.get("lng", 0))
+
+        # Vérifier que le candidat est dans la bbox
+        if not _in_bbox(clat, clng, bounding_box):
+            continue
 
         # Vérifier distance minimale par rapport aux autres postes
         too_close = any(
@@ -166,7 +171,8 @@ def apply_corrections(
                 ctrl, candidates,
                 min_dist_m=35.0,
                 forbidden_positions=other_positions,
-                oob_polygons=oob_polygons
+                oob_polygons=oob_polygons,
+                bounding_box=bounding_box,
             )
             if new_pos:
                 new_controls[idx]["lat"] = new_pos["lat"]
@@ -183,7 +189,8 @@ def apply_corrections(
                 ctrl, candidates,
                 min_dist_m=20.0,
                 forbidden_positions=other_positions,
-                oob_polygons=oob_polygons
+                oob_polygons=oob_polygons,
+                bounding_box=bounding_box,
             )
             if new_pos:
                 new_controls[idx]["lat"] = new_pos["lat"]
@@ -205,7 +212,8 @@ def apply_corrections(
                 ctrl, good_candidates,
                 min_dist_m=20.0,
                 forbidden_positions=other_positions,
-                oob_polygons=oob_polygons
+                oob_polygons=oob_polygons,
+                bounding_box=bounding_box,
             )
             if new_pos:
                 new_controls[idx]["lat"] = new_pos["lat"]

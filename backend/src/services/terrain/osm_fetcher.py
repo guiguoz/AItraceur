@@ -612,6 +612,13 @@ out body;"""
     except Exception:
         pass  # non bloquant
 
+    # Filtrer les candidats hors bbox (Overpass peut retourner des points marginaux)
+    mn_x = bbox_dict.get("min_x", -180)
+    mx_x = bbox_dict.get("max_x", 180)
+    mn_y = bbox_dict.get("min_y", -90)
+    mx_y = bbox_dict.get("max_y", 90)
+    candidates = [c for c in candidates if mn_x <= c["x"] <= mx_x and mn_y <= c["y"] <= mx_y]
+
     # Mélanger et limiter à 600 candidats
     random.shuffle(candidates)
     candidates = candidates[:600]

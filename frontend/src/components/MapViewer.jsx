@@ -183,7 +183,8 @@ export function MapViewer({
   }, [activeTool]);
 
   const handleForbiddenClick = (latlng) => {
-    setDrawingVertices(prev => [...prev, [latlng.lat, latlng.lng]]);
+    // Format [lng, lat] — GeoJSON standard, cohérent avec zones OCAD et OSM
+    setDrawingVertices(prev => [...prev, [latlng.lng, latlng.lat]]);
   };
 
   const handleClosePolygon = () => {

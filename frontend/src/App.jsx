@@ -637,7 +637,16 @@ function App() {
       const distOk = computeCourseDistance(projected) >= targetLength * 0.9
       const exhausted = newIdx >= c.aiSuggestions.length
       const status = distOk ? 'complete' : exhausted ? 'needs_completion' : 'ai_suggesting'
-      return { controls, suggestionIdx: newIdx, status }
+      // Auto-ajouter le finish aux controls quand le circuit est complet
+      let finalControls = controls
+      if (status === 'complete' && !hasFinish) {
+        const finishToAdd = c.aiSuggestions.slice(newIdx).find(s => s.type === 'finish')
+        if (finishToAdd) {
+          finalControls = [...controls, { ...finishToAdd, order: controls.length + 1 }]
+            .map((ctrl, i) => ({ ...ctrl, order: i + 1 }))
+        }
+      }
+      return { controls: finalControls, suggestionIdx: newIdx, status }
     })
   }
 
@@ -648,7 +657,17 @@ function App() {
       const exhausted = newIdx >= c.aiSuggestions.length
       if (!exhausted) return { suggestionIdx: newIdx, status: 'ai_suggesting' }
       const distOk = computeCourseDistance(c.controls) >= targetLength * 0.9
-      return { suggestionIdx: newIdx, status: distOk ? 'complete' : 'needs_completion' }
+      const status = distOk ? 'complete' : 'needs_completion'
+      // Auto-ajouter le finish si circuit complet
+      let finalControls = c.controls
+      if (status === 'complete' && !c.controls.some(ctrl => ctrl.type === 'finish')) {
+        const finishToAdd = c.aiSuggestions.slice(newIdx).find(s => s.type === 'finish')
+        if (finishToAdd) {
+          finalControls = [...c.controls, { ...finishToAdd, order: c.controls.length + 1 }]
+            .map((ctrl, i) => ({ ...ctrl, order: i + 1 }))
+        }
+      }
+      return { controls: finalControls, suggestionIdx: newIdx, status }
     })
   }
 

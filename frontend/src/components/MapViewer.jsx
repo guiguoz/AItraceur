@@ -139,6 +139,18 @@ function MapRefCapture({ onReady }) {
   return null;
 }
 
+// Create a custom pane above ImageOverlay so forbidden zones are always visible
+function CreateForbiddenPane() {
+  const map = useMap();
+  useEffect(() => {
+    if (!map.getPane('forbiddenPane')) {
+      map.createPane('forbiddenPane');
+      map.getPane('forbiddenPane').style.zIndex = 450;  // above overlayPane (400) and imageOverlay
+    }
+  }, [map]);
+  return null;
+}
+
 // Pan map to AI suggestion when it changes
 function PanToSuggestion({ suggestion }) {
   const map = useMap();
@@ -230,6 +242,7 @@ export function MapViewer({
         className="w-full h-full"
       >
         <MapRefCapture onReady={onMapReady} />
+        <CreateForbiddenPane />
         <MapEvents
           onControlClick={onMapClick}
           onForbiddenClick={handleForbiddenClick}
@@ -262,7 +275,8 @@ export function MapViewer({
           <Polygon
             key={`fz-${i}`}
             positions={zone.map(([lng, lat]) => [lat, lng])}
-            pathOptions={{ color: '#cc0000', fillColor: '#cc0000', fillOpacity: 0.18, weight: 2, dashArray: '5 4' }}
+            pane="forbiddenPane"
+            pathOptions={{ color: '#cc0000', fillColor: '#cc0000', fillOpacity: 0.25, weight: 2.5, dashArray: '6 4' }}
           />
         ))}
 
@@ -270,7 +284,8 @@ export function MapViewer({
         {drawingVertices.length >= 2 && (
           <Polyline
             positions={drawingVertices}
-            pathOptions={{ color: '#cc0000', weight: 2, dashArray: '6 4', opacity: 0.7 }}
+            pane="forbiddenPane"
+            pathOptions={{ color: '#cc0000', weight: 2.5, dashArray: '6 4', opacity: 0.9 }}
           />
         )}
 

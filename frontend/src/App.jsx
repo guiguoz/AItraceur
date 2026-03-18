@@ -70,6 +70,30 @@ function computeCourseDistance(controls) {
   return Math.round(total)
 }
 
+// Collect all GeoJSON vertices in [lat, lng] format for coverage check
+function buildOcadVertices(geojson) {
+  const pts = []
+  const walk = (coords) => {
+    if (typeof coords[0] === 'number') pts.push([coords[1], coords[0]])
+    else coords.forEach(walk)
+  }
+  geojson.features.forEach(f => f.geometry?.coordinates && walk(f.geometry.coordinates))
+  return pts
+}
+
+// Returns true if [lat, lng] is within thresholdM of at least one GeoJSON vertex
+function isOnOcadMap(lat, lng, ocadVertices, thresholdM = 45) {
+  if (!ocadVertices || ocadVertices.length === 0) return true
+  const latRad = lat * Math.PI / 180
+  const thr2 = thresholdM / 111320  // rough degrees threshold for quick pre-filter
+  for (const [vlat, vlng] of ocadVertices) {
+    if (Math.abs(vlat - lat) > thr2 || Math.abs(vlng - lng) > thr2 * Math.cos(latRad)) continue
+    const d = haversineDistance({ lat, lng }, { lat: vlat, lng: vlng })
+    if (d <= thresholdM) return true
+  }
+  return false
+}
+
 function extractBoundingBox(geojson) {
   const xs = [], ys = []
   const walk = (coords) => {
@@ -591,6 +615,8 @@ function App() {
         return s.lat >= bbox.min_y && s.lat <= bbox.max_y &&
                s.lng >= bbox.min_x && s.lng <= bbox.max_x
       }
+      // Build OCAD vertex list once for coverage check (zones blanches filter)
+      const ocadVertices = ocadData?.geojson ? buildOcadVertices(ocadData.geojson) : null
 
       const suggestions = controls
         .map((c, idx) => ({
@@ -604,6 +630,7 @@ function App() {
         }))
         .filter(s => !(s.type === 'start' && hasStart) && !(s.type === 'finish' && hasFinish))
         .filter(s => s.type === 'start' || s.type === 'finish' || inBbox(s))
+        .filter(s => s.type === 'start' || s.type === 'finish' || isOnOcadMap(s.lat, s.lng, ocadVertices))
 
       console.log('[AI Generate] suggestions:', suggestions)
       updateActiveCircuit({ aiSuggestions: suggestions, suggestionIdx: 0, status: 'ai_suggesting' })

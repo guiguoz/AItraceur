@@ -38,8 +38,11 @@ class Contribution(Base):
     length_m = Column(Float, nullable=True)
     climb_m = Column(Float, nullable=True)
 
-    # Déduplication — hash SHA256 du fichier XML source (anonyme, non réversible)
+    # Déduplication — hash SHA256 du fichier source (anonyme, non réversible)
     xml_hash = Column(String(64), nullable=True, index=True)
+
+    # Source du pipeline : xml_ocad | gpx_osm | kmz_osm
+    source_format = Column(String(20), nullable=True, default="xml_ocad")
 
     # Consentement
     consent_educational = Column(Boolean, default=False)  # CC BY-NC partage éducatif

@@ -193,6 +193,115 @@ def delete_contribution(
 
 
 # =============================================
+# POST /api/v1/contribute/gpx
+# Pipeline GPX+OSM — sprint urbain uniquement
+# =============================================
+@router.post("/contribute/gpx")
+async def contribute_gpx(
+    gpx_file: Optional[UploadFile] = File(None, description="Fichier GPX du circuit (waypoints ou tracklog)"),
+    kmz_file: Optional[UploadFile] = File(None, description="Fichier KMZ du circuit (placemarks)"),
+    ffco_category: Optional[str] = Form(None, description="H21E, D16, H45, Open..."),
+    climb_m: Optional[float] = Form(None),
+    consent_aitraceur: bool = Form(..., description="Consentement obligatoire"),
+    consent_educational: bool = Form(False),
+    db: Session = Depends(get_db),
+):
+    """
+    Pipeline GPX/KMZ + OSM pour sprint urbain.
+
+    - GPX : waypoints (postes CO) ou tracklog complet
+    - KMZ : placemarks KML (image JPEG ignorée pour le ML)
+    - Terrain : calculé depuis OSM/Overpass automatiquement
+    - circuit_type et map_type fixés à sprint/urban (seul pipeline valide)
+    - Aucune coordonnée absolue stockée.
+    """
+    if not consent_aitraceur:
+        raise HTTPException(status_code=400, detail="Consentement obligatoire non coché.")
+    if gpx_file is None and kmz_file is None:
+        raise HTTPException(status_code=400, detail="Un fichier GPX ou KMZ est requis.")
+
+    from src.services.learning.gpx_feature_extractor import GpxFeatureExtractor
+
+    extractor = GpxFeatureExtractor()
+    result = None
+    file_hash = None
+
+    if gpx_file and gpx_file.filename and gpx_file.filename.lower().endswith(".gpx"):
+        content = await gpx_file.read()
+        file_hash = hashlib.sha256(content).hexdigest()
+        existing = db.query(Contribution).filter(Contribution.xml_hash == file_hash).first()
+        if existing:
+            raise HTTPException(status_code=409, detail=f"Ce fichier GPX a déjà été contribué (id={existing.id}).")
+        result = extractor.extract_from_gpx(
+            content=content,
+            circuit_type="sprint",
+            map_type="urban",
+            ffco_category=ffco_category or "Open",
+            climb_m=climb_m,
+        )
+    elif kmz_file and kmz_file.filename and kmz_file.filename.lower().endswith(".kmz"):
+        content = await kmz_file.read()
+        file_hash = hashlib.sha256(content).hexdigest()
+        existing = db.query(Contribution).filter(Contribution.xml_hash == file_hash).first()
+        if existing:
+            raise HTTPException(status_code=409, detail=f"Ce fichier KMZ a déjà été contribué (id={existing.id}).")
+        result = extractor.extract_from_kmz(
+            content=content,
+            circuit_type="sprint",
+            map_type="urban",
+            ffco_category=ffco_category or "Open",
+            climb_m=climb_m,
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Format non reconnu. Fournir un fichier .gpx ou .kmz.")
+
+    if result is None or result.n_controls < 2:
+        raise HTTPException(status_code=422, detail="Circuit invalide ou trop peu de postes (< 2 postes détectés).")
+
+    contrib = Contribution(
+        xml_hash=file_hash,
+        source_format="gpx_osm" if gpx_file else "kmz_osm",
+        circuit_type=result.circuit_type,
+        map_type=result.map_type,
+        ffco_category=ffco_category,
+        td_grade=result.td_grade,
+        pd_grade=result.pd_grade,
+        n_controls=result.n_controls,
+        length_m=result.length_m,
+        climb_m=result.climb_m,
+        consent_educational=consent_educational,
+    )
+    db.add(contrib)
+    db.flush()
+
+    for fv in result.controls:
+        db.add(ControlFeature(
+            contribution_id=contrib.id,
+            leg_distance_m=fv.leg_distance_m,
+            leg_bearing_change=fv.leg_bearing_change,
+            control_position_ratio=fv.control_position_ratio,
+            td_grade=fv.td_grade,
+            pd_grade=fv.pd_grade,
+            terrain_symbol_density=fv.terrain_symbol_density,
+            nearest_path_dist_m=fv.nearest_path_dist_m,
+            control_feature_type=fv.control_feature_type,
+            attractiveness_score=fv.attractiveness_score,
+            quality_score=fv.quality_score,
+        ))
+
+    db.commit()
+
+    return {
+        "contribution_id": contrib.id,
+        "source_format": contrib.source_format,
+        "n_controls": result.n_controls,
+        "length_m": result.length_m,
+        "td_grade": result.td_grade,
+        "message": "Merci pour votre contribution sprint urbain (pipeline GPX+OSM).",
+    }
+
+
+# =============================================
 # GET /api/v1/admin/export-features
 # Export CSV pour chercheurs (clé admin requise)
 # =============================================

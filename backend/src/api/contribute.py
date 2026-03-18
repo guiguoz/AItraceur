@@ -302,6 +302,28 @@ async def contribute_gpx(
 
 
 # =============================================
+# POST /api/v1/parse-kmz
+# Parsing léger KMZ → coordonnées (non stockées)
+# =============================================
+@router.post("/parse-kmz")
+async def parse_kmz_coords(
+    kmz_file: UploadFile = File(..., description="Fichier KMZ à parser"),
+):
+    """
+    Parse un KMZ et retourne les coordonnées des placemarks.
+    Aucune donnée stockée — utilisé pour charger un circuit sur la carte.
+    """
+    if not kmz_file.filename or not kmz_file.filename.lower().endswith(".kmz"):
+        raise HTTPException(status_code=400, detail="Fichier .kmz attendu.")
+    content = await kmz_file.read()
+    from src.services.importers.kmz_importer import parse_kmz
+    points = parse_kmz(content)
+    if len(points) < 2:
+        raise HTTPException(status_code=422, detail="Aucun placemark GPS trouvé dans le KMZ.")
+    return {"points": points, "n": len(points)}
+
+
+# =============================================
 # GET /api/v1/admin/export-features
 # Export CSV pour chercheurs (clé admin requise)
 # =============================================

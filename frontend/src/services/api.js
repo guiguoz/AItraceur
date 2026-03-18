@@ -102,4 +102,27 @@ export const uploadOcdForRender = (file, onProgress) => {
 export const exportCircuitIOF = (circuitId) =>
   api.get(`/api/v1/circuits/${circuitId}/export/iof`);
 
+// ── Pipeline GPX+OSM (ML sprint urbain) ─────────────────────────────────────
+export const contributeGpx = (file, { ffcoCategory, consentEducational } = {}) => {
+  const form = new FormData();
+  const ext = file.name.split('.').pop().toLowerCase();
+  form.append(ext === 'kmz' ? 'kmz_file' : 'gpx_file', file);
+  if (ffcoCategory) form.append('ffco_category', ffcoCategory);
+  form.append('consent_aitraceur', 'true');
+  form.append('consent_educational', consentEducational ? 'true' : 'false');
+  return api.post('/api/v1/contribute/gpx', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  });
+};
+
+export const parseKmzCoords = (file) => {
+  const form = new FormData();
+  form.append('kmz_file', file);
+  return api.post('/api/v1/parse-kmz', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 30000,
+  });
+};
+
 export default api;

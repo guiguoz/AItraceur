@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { MapViewer } from './components/MapViewer'
 import OcadUploader from './components/OcadUploader'
+import GpxImporter from './components/GpxImporter'
 import ControlsList from './components/ControlsList'
 import TerrainPanel from './components/TerrainPanel'
 import CircuitCreationModal from './components/CircuitCreationModal'
@@ -432,6 +433,25 @@ function App() {
     setActiveCircuitId(circuit.id)
     setShowCreationForm(false)
     setActiveTool('start')
+  }
+
+  // Charge un circuit depuis GPX/KMZ directement sur la carte
+  const handleLoadGpxControls = ({ controls, name, type, sex, category }) => {
+    const circuit = {
+      id: crypto.randomUUID(),
+      name: name || 'Circuit GPX',
+      type: type || 'sprint',
+      sex: sex || 'H',
+      category: category || '21',
+      controls,
+      forbiddenZones: [],
+      status: 'complete',
+      aiSuggestions: [],
+      suggestionIdx: 0,
+    }
+    setCircuits(prev => [...prev, circuit])
+    setActiveCircuitId(circuit.id)
+    setActiveTool('view')
   }
 
   const handleDeleteCircuit = (id) => {
@@ -922,6 +942,19 @@ function App() {
           )}
 
           <div className="space-y-4">
+
+              {/* GPX/KMZ importer — sprint urbain */}
+              <div className="bg-gray-700/50 p-4 rounded-xl border border-gray-700">
+                <h2 className="text-sm font-semibold text-gray-200 mb-3 flex items-center gap-2">
+                  <svg className="w-4 h-4 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  Import GPX / KMZ
+                  <span className="text-xs text-violet-400 font-normal ml-auto">sprint urbain</span>
+                </h2>
+                <GpxImporter onLoadControls={handleLoadGpxControls} />
+              </div>
 
               {/* OCAD map uploader — optional enhancement */}
               <div className="bg-gray-700/50 p-4 rounded-xl border border-gray-700">

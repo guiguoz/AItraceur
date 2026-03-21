@@ -61,8 +61,11 @@ async def contribute(
     xml_bytes = await xml_file.read()
 
     # Déduplication — hash SHA256 du XML (anonyme, non réversible)
+    # Recherche le hash brut (1 circuit) ET les hash suffixés "hash:0", "hash:1"... (multi-circuit)
     xml_hash = hashlib.sha256(xml_bytes).hexdigest()
-    existing = db.query(Contribution).filter(Contribution.xml_hash == xml_hash).first()
+    existing = db.query(Contribution).filter(
+        Contribution.xml_hash.like(f"{xml_hash}%")
+    ).first()
     if existing:
         raise HTTPException(
             status_code=409,
@@ -108,9 +111,13 @@ async def contribute(
     contribution_ids = []
     total_controls = 0
 
-    for result in results:
+    for i, result in enumerate(results):
+        # Multi-circuit : suffixe ":i" pour éviter toute violation de contrainte UNIQUE sur
+        # xml_hash (présente dans les DB créées avec une ancienne version du modèle).
+        # Single circuit : hash brut conservé pour compatibilité avec les anciennes contributions.
+        circuit_hash = xml_hash if len(results) == 1 else f"{xml_hash}:{i}"
         contrib = Contribution(
-            xml_hash=xml_hash,
+            xml_hash=circuit_hash,
             circuit_type=result.circuit_type,
             map_type=map_type,
             ffco_category=ffco_category,

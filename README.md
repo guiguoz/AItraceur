@@ -17,7 +17,7 @@
 - **Carte OCAD** : rendu tuilé des fichiers `.ocd` (optionnel)
 - **Terrain OSM** : enrichissement automatique depuis Overpass API
 - **Export** : IOF XML 3.0, GPX, PDF, KML/KMZ
-- **RAG local** : 22 PDF IOF/FFCO indexés, LLM local via Ollama (Llama 3)
+- **RAG local** : 22 PDF IOF/FFCO indexés, chaîne LLM (OpenAI → fallback local)
 
 ---
 

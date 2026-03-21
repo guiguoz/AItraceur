@@ -3,9 +3,14 @@
 # Sprint 7: Génération de circuits (Forêt)
 # =============================================
 
+from __future__ import annotations
+
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from ..learning.ocad_patch_scorer import HeatmapCache
 
 # Import conditionnel pour OpenAI
 try:
@@ -40,6 +45,7 @@ class GenerationRequest:
     required_controls: List[Dict] = field(default_factory=list)
     candidate_points: List[Dict] = field(default_factory=list)  # [{x, y, isom}, ...]
     map_context: Optional[str] = None  # ISOM terrain summary from OCAD GeoJSON
+    heatmap_cache: Optional[HeatmapCache] = field(default=None, repr=False)
 
 
 @dataclass
@@ -282,6 +288,7 @@ class AIGenerator:
             min_control_distance=min_dist,
             sprint_mode=sprint_mode,
             candidate_points=request.candidate_points,
+            heatmap_cache=request.heatmap_cache,
         )
 
         # Initialiser le GA

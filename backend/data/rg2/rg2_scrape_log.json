@@ -1,0 +1,16 @@
+{
+  "started_at": "2026-03-20T22:09:15.455738Z",
+  "generate_dataset": true,
+  "instances": {
+    "https://www.boc.routegadget.co.uk/rg2": {
+      "status": "ok",
+      "positives": 2376,
+      "negatives": 4752,
+      "samples": 7128,
+      "patches_pos": 2376,
+      "patches_neg": 4752
+    }
+  },
+  "finished_at": "2026-03-20T22:10:34.694717Z",
+  "total_samples": 7128
+}

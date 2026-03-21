@@ -18,17 +18,25 @@ from .feature_extractor import (
     _haversine_m,
 )
 
-# Attractivité CO par type de feature OSM urbain
+# Attractivité CO par type de feature OSM urbain (ISprOM 2019)
 _OSM_ATTRACTIVENESS: Dict[str, float] = {
-    "intersection": 0.90,   # Carrefour de rues → poste sprint par excellence
-    "building_corner": 0.80,  # Angle de bâtiment
-    "amenity": 0.85,        # Fontaine, horloge, boîte aux lettres
-    "path": 0.70,           # Chemin/rue générique
+    "intersection": 0.90,       # Carrefour piéton → poste sprint classique
+    "building_corner": 0.80,    # Angle de bâtiment
+    "steps": 0.95,              # ISprOM 515 escaliers → feature très distinctive
+    "barrier_point": 0.80,      # ISprOM 507-509 bollard/bloc/barrière
+    "urban_landmark": 0.85,     # ISprOM 614 statue/monument/mémorial
+    "urban_amenity": 0.75,      # Fontaine, banc, poubelle, info
+    "amenity": 0.75,            # Compat ancienne valeur
+    "path": 0.60,               # Chemin/rue générique
 }
 
 _OSM_FEATURE_TYPE: Dict[str, str] = {
     "intersection": "street_intersection",
     "building_corner": "building_corner",
+    "steps": "steps",
+    "barrier_point": "barrier_point",
+    "urban_landmark": "urban_landmark",
+    "urban_amenity": "urban_amenity",
     "amenity": "urban_amenity",
     "path": "path",
 }
@@ -75,15 +83,15 @@ def _circuit_quality_score(controls: List[Tuple[float, float]]) -> float:
     good_turns = sum(1 for c in changes if 30 <= c <= 150)
     variety = good_turns / max(len(changes), 1)
 
-    # Pénalités
+    # Pénalités — seuils calibrés sprint urbain (virages serrés fréquents)
     penalties = 0.0
     for c in changes:
-        if c < 25:  # dog-leg
-            penalties += 10.0
-    min_leg_sprint = 20.0
+        if c < 15:  # dog-leg réel (quasi demi-tour immédiat)
+            penalties += 8.0
+    min_leg_sprint = 15.0  # jambe très courte sprint (escalier, passage étroit)
     for leg in legs:
         if leg < min_leg_sprint:
-            penalties += 15.0
+            penalties += 10.0
 
     score = (balance * 0.4 + variety * 0.6) * 100 - penalties
     return max(0.0, min(100.0, score)) / 100.0
@@ -107,7 +115,7 @@ def _grade_td(legs: List[float]) -> int:
 
 def _compute_osm_terrain(
     controls: List[Tuple[float, float]],  # (lng, lat)
-    radius_m: float = 50.0,
+    radius_m: float = 75.0,
 ) -> List[Dict[str, Any]]:
     """
     Pour chaque contrôle, calcule les features terrain depuis les données OSM.

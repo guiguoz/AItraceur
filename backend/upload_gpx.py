@@ -79,7 +79,10 @@ def upload_file(filepath: Path, ffco_category: str) -> str:
         print(f"  ~ DOUBLON (déjà contribué)")
         return "DOUBLON"
     else:
-        detail = resp.json().get("detail", resp.text[:120]) if resp.content else resp.text[:120]
+        try:
+            detail = resp.json().get("detail", resp.text[:120])
+        except Exception:
+            detail = resp.text[:120] if resp.text else f"HTTP {resp.status_code}"
         print(f"  ✗ ECHEC {resp.status_code} : {detail}")
         return "ECHEC"
 

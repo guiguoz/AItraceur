@@ -90,3 +90,13 @@ logs/
 .cache/
 tmp/
 temp/
+
+# Dataset images ML (volumineuses)
+backend/data/rg2/dataset/
+
+# Outils binaires locaux
+curl.exe
+poppler/
+tools/
+backend/data/models/best_model.pth
+*.pth

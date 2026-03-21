@@ -3,11 +3,24 @@
 # Sprint 7: Génération de circuits (Forêt)
 # =============================================
 
+from __future__ import annotations
+
 import random
 import math
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Callable
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Callable
 from datetime import datetime
+
+import numpy as np
+
+try:
+    from ..learning.ocad_patch_scorer import OcadPatchScorer as _OcadPatchScorer
+    _PATCH_SCORER_CLASS = _OcadPatchScorer
+except Exception:
+    _PATCH_SCORER_CLASS = None
+
+if TYPE_CHECKING:
+    from ..learning.ocad_patch_scorer import HeatmapCache
 
 
 # =============================================
@@ -61,6 +74,11 @@ class GenerationConfig:
     # Type et niveau technique — pour charger les seuils IOF/FFCO dynamiques
     circuit_type: str = "forest"  # "sprint", "forest", "md", "couleur"
     technical_level: int = 3      # TD1–TD5
+
+    # Grille de scores V2 précomputée (optionnel)
+    # Si fourni : Smart Seeding + evaluate_fitness() utilisent le cache pour les lookups O(1).
+    # Si None : fallback ISOM attractiveness (comportement existant, aucune régression).
+    heatmap_cache: Optional[HeatmapCache] = field(default=None, repr=False)
 
 
 @dataclass
@@ -117,6 +135,9 @@ class GeneticAlgorithm:
 
         # Scores d'attractivité IOF par code ISOM (Étape 14 — control_descriptions.json)
         self._isom_att_scores = self._load_isom_attractiveness()
+
+        # Visual terrain scorer (XGBoost, AUC=0.85 — Phase C)
+        self._patch_scorer = _PATCH_SCORER_CLASS.load() if _PATCH_SCORER_CLASS else None
 
     def _load_placement_rules(self) -> dict:
         """Charge les seuils IOF/FFCO depuis placement_rules.json selon circuit_type et technical_level."""
@@ -278,7 +299,17 @@ class GeneticAlgorithm:
         80% smart (jambes calibrées à target_leg_m) + 20% aléatoire pour la diversité.
         L'initialisation smart est indispensable sur les grandes cartes (bbox > 2× target) :
         les circuits aléatoires seraient trop longs pour que le GA converge.
+
+        Smart Seeding V2 : si config.heatmap_cache est fourni, précompute les top 20%
+        de positions visuellement attractives pour biaiser l'initialisation.
         """
+        # Précomputer les top candidats pour le Smart Seeding V2
+        self._top_candidates: List[Tuple[float, float]] = []
+        if self.config.heatmap_cache is not None:
+            self._top_candidates = self.config.heatmap_cache.get_top_candidates(
+                top_percent=0.20
+            )
+
         population = []
         smart_count = int(self.config.population_size * 0.8)
 
@@ -346,12 +377,20 @@ class GeneticAlgorithm:
             if bb:
                 nx = max(bb["min_x"], min(bb["max_x"], nx))
                 ny = max(bb["min_y"], min(bb["max_y"], ny))
+
+            # Smart Seeding V2 (40% des cas si HeatmapCache disponible) :
+            # tire le poste depuis les top-20% de la carte plutôt qu'au hasard.
+            # → la population initiale démarre déjà sur des terrains attractifs.
+            if self._top_candidates and random.random() < 0.40:
+                nx, ny = random.choice(self._top_candidates)
+
             # Snap vers le candidate_point OCAD le plus proche (60% des cas)
             # → ancre les postes sur des éléments terrain dès l'initialisation
-            if random.random() < 0.60:
+            elif random.random() < 0.60:
                 cp = self._find_nearest_cp(nx, ny, target_leg_m * 0.5)
                 if cp:
                     nx, ny = cp
+
             if not self._is_in_forbidden_zone(nx, ny, forbidden_zones):
                 controls.append((nx, ny))
                 current = (nx, ny)
@@ -657,40 +696,205 @@ class GeneticAlgorithm:
             controls[idx] = (x, y)
         return controls
 
+    def evaluate_fitness(
+        self,
+        controls: List[Tuple[float, float]],
+        config: GenerationConfig,
+    ) -> float:
+        """
+        Fitness multicritère d'un chromosome ordonné (parcours point-to-point).
+
+        Le parcours est traité comme une séquence ordonnée D→P1→P2→…→A.
+        Maximiser ce score produit des circuits visuellement attractifs,
+        respectant la distance cible et sans dog-legs IOF.
+
+        Critères :
+          A (+) AI Score      — score V2 moyen par HeatmapCache lookup O(1)
+          B (-) Distance      — pénalité relative erreur longueur totale vs cible
+          C (-) Dog-legs      — pénalité éliminatoire par angle intérieur < seuil IOF
+          D (+) Rythme        — bonus CV (écart-type / moyenne) des inter-postes
+
+        Args:
+            controls: Liste ordonnée [(lng, lat)] incluant départ et arrivée.
+            config:   GenerationConfig avec target_length_m, heatmap_cache, etc.
+
+        Returns:
+            float — score global, à maximiser. Peut être négatif pour mauvais circuits.
+        """
+        if len(controls) < 2:
+            return -100.0
+
+        # ── A. Score IA (HeatmapCache lookup) ──────────────────────────────
+        if config.heatmap_cache is not None:
+            ai_scores = np.array(
+                [config.heatmap_cache.query(lng, lat) for lng, lat in controls]
+            )
+            ai_score = float(ai_scores.mean())
+        else:
+            # Fallback : attractivité ISOM rule-based (comportement existant)
+            ai_score = self._terrain_quality_score_isom(controls) / 100.0
+
+        # ── B. Pénalité distance ────────────────────────────────────────────
+        leg_m = np.array([
+            self._haversine_m(controls[i], controls[i + 1])
+            for i in range(len(controls) - 1)
+        ], dtype=np.float64)
+        total_m = float(leg_m.sum())
+        target_m = config.target_length_m
+        dist_error = abs(total_m - target_m) / max(target_m, 1.0)
+        dist_penalty = dist_error  # [0, ∞] — 1.0 = erreur 100%
+
+        # ── C. Pénalité dog-leg (angle intérieur < seuil IOF) ─────────────
+        # IMPORTANT : vecteurs partent DEPUIS le poste i vers l'extérieur.
+        # Droite → angle intérieur ≈ 180° → pas de pénalité.
+        # Aller-retour → angle intérieur ≈ 0° → dog-leg éliminatoire.
+        dog_leg_threshold = float(self._placement_rules.get("dog_leg_angle_deg", 60.0))
+        n_dogleg = 0
+        for i in range(1, len(controls) - 1):
+            # v1 : du poste i vers le poste PRÉCÉDENT
+            dx1 = controls[i - 1][0] - controls[i][0]
+            dy1 = controls[i - 1][1] - controls[i][1]
+            # v2 : du poste i vers le poste SUIVANT
+            dx2 = controls[i + 1][0] - controls[i][0]
+            dy2 = controls[i + 1][1] - controls[i][1]
+            norm1 = math.hypot(dx1, dy1)
+            norm2 = math.hypot(dx2, dy2)
+            if norm1 < 1e-10 or norm2 < 1e-10:
+                continue
+            cos_a = (dx1 * dx2 + dy1 * dy2) / (norm1 * norm2)
+            angle_deg = math.degrees(math.acos(max(-1.0, min(1.0, cos_a))))
+            if angle_deg < dog_leg_threshold:
+                n_dogleg += 1
+        angle_penalty = float(n_dogleg) * 20.0  # −20 pts par dog-leg
+
+        # ── D. Bonus de rythme (coefficient de variation des inter-postes) ─
+        if len(leg_m) >= 2:
+            mean_leg = float(leg_m.mean())
+            rhythm = float(leg_m.std() / (mean_leg + 1e-6))  # CV [0, ∞]
+        else:
+            rhythm = 0.0
+
+        # ── Score final (à maximiser) ───────────────────────────────────────
+        W_AI = 30.0
+        W_DIST = 40.0    # poids fort — respect de la distance cible
+        W_ANGLE = 1.0    # multiplicateur × 20 par dog-leg → éliminatoire
+        W_RHYTHM = 15.0
+
+        return (
+            W_AI * ai_score
+            - W_DIST * dist_penalty
+            - W_ANGLE * angle_penalty
+            + W_RHYTHM * rhythm
+        )
+
+    def _terrain_quality_score_isom(self, controls: List[Tuple[float, float]]) -> float:
+        """
+        [Fallback] Critère terrain via ISOM attractiveness + ML OSM (sans HeatmapCache).
+        Utilisé par evaluate_fitness() quand config.heatmap_cache is None.
+        """
+        return self._terrain_quality_score(controls)
+
     def _terrain_quality_score(self, controls: List[Tuple[float, float]]) -> float:
         """
-        Critère terrain quality (Étape 14) : préférer les postes sur des features
-        IOF descriptibles (attractivité 0–1 depuis control_descriptions.json).
+        Critère terrain quality : blend ISOM attractiveness (rule-based) + ML visual scorer.
 
         Pour chaque poste intermédiaire (hors départ/arrivée) :
-        - Cherche le candidat le plus proche dans 60m
-        - Récupère son score d'attractivité ISOM
-        - Moyenne → note 0–100
-        Bonus : intersection géométrique (_intersection=True) → 1.0 forcé
+        - ISOM attractiveness : candidat le plus proche dans 60m → score 0–1
+        - ML patch scorer : XGBoost sur vecteur couleur ISOM 7-dim (si modèle chargé)
+        - Blend : 40% ISOM + 60% ML quand les deux sont disponibles, sinon ISOM seul
+        - Intersection géométrique (_intersection=True) → attractiveness forcé à 1.0
         """
         if not self.config.candidate_points or len(controls) < 3:
             return 50.0  # Neutre si pas de candidats
 
         ATT_RADIUS_M = 60.0
+        ML_RADIUS_M = 64.0
         scores = []
         for pos in controls[1:-1]:  # Exclure départ et arrivée
+            # --- Score ISOM attractiveness (rule-based) ---
             best_att = None
             best_d = ATT_RADIUS_M
             for cp in self.config.candidate_points:
                 d = self._haversine_m(pos, (cp["x"], cp["y"]))
                 if d < best_d:
                     best_d = d
-                    # Intersection géométrique = best possible
                     if cp.get("_intersection"):
                         best_att = 1.0
                     else:
                         isom = cp.get("isom")
                         best_att = self._isom_att_scores.get(isom, 0.45) if isom else 0.45
-            scores.append(best_att if best_att is not None else 0.15)
+            att = best_att if best_att is not None else 0.15
+
+            # --- Score ML visuel (data-driven, blend quand disponible) ---
+            if self._patch_scorer is not None:
+                ml = self._patch_scorer.score_position(
+                    pos[0], pos[1], self.config.candidate_points, ML_RADIUS_M
+                )
+                if ml is not None:
+                    scores.append(att * 0.4 + ml * 0.6)
+                    continue
+
+            scores.append(att)
 
         if not scores:
             return 50.0
         return (sum(scores) / len(scores)) * 100.0
+
+    def _monotony_score(self, controls: List[Tuple[float, float]]) -> float:
+        """
+        Pénalise la monotonie directionnelle : séquences de jambes consécutives
+        dans la même direction (±60°). Un circuit varié explore toutes les directions.
+        Score 100 si max_run ≤ 2 jambes, décroît ensuite (40→ pour 4+).
+        """
+        if len(controls) < 4:
+            return 75.0
+        bearings = []
+        for i in range(len(controls) - 1):
+            dx = controls[i + 1][0] - controls[i][0]
+            dy = controls[i + 1][1] - controls[i][1]
+            bearings.append(math.degrees(math.atan2(dx, dy)) % 360)
+        max_run = 1
+        current_run = 1
+        for i in range(1, len(bearings)):
+            diff = abs(bearings[i] - bearings[i - 1]) % 360
+            if diff > 180:
+                diff = 360 - diff
+            if diff < 60:
+                current_run += 1
+                max_run = max(max_run, current_run)
+            else:
+                current_run = 1
+        if max_run <= 2:
+            return 100.0
+        elif max_run == 3:
+            return 70.0
+        elif max_run == 4:
+            return 40.0
+        else:
+            return max(0.0, 40.0 - (max_run - 4) * 15.0)
+
+    def _leg_alternation_score(self, controls: List[Tuple[float, float]]) -> float:
+        """
+        Récompense l'alternance court/long entre jambes consécutives.
+        Classe chaque jambe en C(<80% moy), L(>120% moy) ou M.
+        Score = % d'alternances C↔L parmi les jambes C/L (0-100).
+        Évite les circuits monotones type CCCCLLL ou toutes jambes identiques.
+        """
+        if len(controls) < 4:
+            return 75.0
+        legs = [self._haversine_m(controls[i], controls[i + 1]) for i in range(len(controls) - 1)]
+        mean_leg = sum(legs) / len(legs) if legs else 0.0
+        if mean_leg == 0.0:
+            return 75.0
+        types = [
+            'C' if l < mean_leg * 0.80 else ('L' if l > mean_leg * 1.20 else 'M')
+            for l in legs
+        ]
+        cl_types = [t for t in types if t != 'M']
+        if len(cl_types) < 2:
+            return 75.0
+        alternations = sum(1 for i in range(len(cl_types) - 1) if cl_types[i] != cl_types[i + 1])
+        return (alternations / (len(cl_types) - 1)) * 100.0
 
     def _default_scoring(
         self,
@@ -698,8 +902,8 @@ class GeneticAlgorithm:
         config: GenerationConfig,
     ) -> float:
         """
-        Fitness multi-objectifs IOF (7 critères pondérés).
-        Critère 7 : terrain quality — postes sur features IOF descriptibles (Étape 14).
+        Fitness multi-objectifs IOF (9 critères pondérés).
+        Critères 8-9 : anti-monotonie directionnelle + alternance court/long.
         """
         controls = circuit.controls
         if len(controls) < 2:
@@ -797,16 +1001,30 @@ class GeneticAlgorithm:
         control_diff = abs(len(controls) - config.target_controls)
         safety_score = max(0.0, 100.0 - control_diff * 10)
 
-        # --- 7. Terrain quality (10%) : postes sur features IOF descriptibles ---
-        terrain_score = self._terrain_quality_score(controls)
+        # --- 7. Terrain quality (10%) : V2 visual (HeatmapCache) ou fallback ISOM ---
+        # Quand heatmap_cache disponible : score moyen V2 sur les postes intermédiaires.
+        # Sinon : comportement ISOM attractiveness identique à avant (aucune régression).
+        if config.heatmap_cache is not None:
+            pts_mid = controls[1:-1] if len(controls) > 2 else controls
+            terrain_score = float(np.mean([
+                config.heatmap_cache.query(lng, lat) for lng, lat in pts_mid
+            ])) * 100.0
+        else:
+            terrain_score = self._terrain_quality_score(controls)
 
-        # --- 8. Sprint : pénaliser les jambes > max_leg_m (seuil dynamique) ---
+        # --- 8. Anti-monotonie directionnelle ---
+        monotony_score = self._monotony_score(controls)
+
+        # --- 9. Alternance court/long ---
+        alternation_score = self._leg_alternation_score(controls)
+
+        # --- 10. Sprint : pénaliser les jambes > max_leg_m (seuil dynamique) ---
         if config.sprint_mode and leg_lengths:
             max_leg_m = float(_rules.get("max_leg_m", 200))
             long_legs = sum(1 for l in leg_lengths if l > max_leg_m)
             sprint_leg_score = max(0.0, 100.0 - long_legs * 25)
 
-            # --- 9. Sprint : bonus cluster de désorientation ---
+            # Bonus cluster de désorientation
             cluster_bonus = 0.0
             cluster_radius = float(_rules.get("disorientation_cluster_radius_m", 0))
             cluster_target_size = int(_rules.get("disorientation_cluster_size", 0))
@@ -827,31 +1045,34 @@ class GeneticAlgorithm:
                         found_clusters += 1
                         counted_in_cluster.update(nearby[:cluster_target_size])
                 if cluster_target_count > 0:
-                    # Bonus proportionnel : 100 si target atteint, décroissant sinon
                     cluster_bonus = min(100.0, (found_clusters / cluster_target_count) * 100.0)
 
             # Pondération sprint : dénivelé remplacé par jambe_sprint + terrain_quality + cluster
             cluster_weight = 0.08 if cluster_radius > 0 else 0.0
             base_weight_adj = 1.0 - cluster_weight
             return (
-                (length_score   * 0.22
-                + sprint_leg_score * 0.18
-                + td_score     * 0.13
-                + angle_score  * 0.22
-                + equity_score * 0.10
-                + safety_score * 0.05
-                + terrain_score * 0.10) * base_weight_adj
+                (length_score       * 0.22
+                + sprint_leg_score  * 0.15
+                + td_score          * 0.11
+                + angle_score       * 0.17
+                + equity_score      * 0.07
+                + safety_score      * 0.05
+                + terrain_score     * 0.10
+                + monotony_score    * 0.07
+                + alternation_score * 0.06) * base_weight_adj
                 + cluster_bonus * cluster_weight
             )
 
         return (
-            length_score  * 0.18
-            + climb_score * 0.13
-            + td_score    * 0.14
-            + angle_score * 0.18
-            + equity_score * 0.17
-            + safety_score * 0.10
-            + terrain_score * 0.10
+            length_score       * 0.18
+            + climb_score      * 0.10
+            + td_score         * 0.11
+            + angle_score      * 0.15
+            + equity_score     * 0.13
+            + safety_score     * 0.08
+            + terrain_score    * 0.10
+            + monotony_score   * 0.08
+            + alternation_score * 0.07
         )
 
     def _calculate_total_length(self, controls: List[Tuple[float, float]]) -> float:

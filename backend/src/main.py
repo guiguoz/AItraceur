@@ -3453,6 +3453,69 @@ def export_circuit_kmz(
 # ÉTAPE 10c — Dialogue Traceur ↔ Contrôleur
 # =============================================
 
+
+def _fetch_mapant_bbox_image(
+    bounding_box: dict,
+    zoom: int = 15,
+) -> "tuple | None":
+    """
+    Assemble une image PIL depuis les tuiles MapAnt couvrant la bounding_box.
+
+    Retourne (PIL.Image, bbox_wgs84, mpp) ou None si indisponible.
+    bbox_wgs84 = (min_lng, min_lat, max_lng, max_lat) de l'image assemblée
+    mpp = mètres par pixel à ce zoom.
+    """
+    try:
+        import io
+        import math
+        from PIL import Image as _PILImage
+        from src.services.terrain.mapant_fetcher import (
+            MapantFetcher, lat_lon_to_tile, tile_to_lat_lon, meters_per_pixel,
+        )
+
+        min_x = bounding_box.get("min_x", 0)
+        min_y = bounding_box.get("min_y", 0)
+        max_x = bounding_box.get("max_x", 0)
+        max_y = bounding_box.get("max_y", 0)
+        if min_x == max_x or min_y == max_y:
+            return None
+
+        # Tuiles couvrant la bbox
+        tx_min, ty_max = lat_lon_to_tile(min_y, min_x, zoom)  # SW → tuile NW
+        tx_max, ty_min = lat_lon_to_tile(max_y, max_x, zoom)  # NE → tuile SE
+        # Sécurité : limiter à 16×16 tuiles (évite les bbox trop grandes)
+        if (tx_max - tx_min + 1) * (ty_max - ty_min + 1) > 256:
+            return None
+
+        fetcher = MapantFetcher(zoom=zoom, use_cache=True)
+        TILE_PX = 256
+        n_cols = tx_max - tx_min + 1
+        n_rows = ty_max - ty_min + 1
+        canvas = _PILImage.new("RGB", (n_cols * TILE_PX, n_rows * TILE_PX), (255, 255, 255))
+
+        for row, ty in enumerate(range(ty_min, ty_max + 1)):
+            for col, tx in enumerate(range(tx_min, tx_max + 1)):
+                tile_bytes = fetcher.fetch_tile(tx, ty, z=zoom)
+                if tile_bytes:
+                    tile_img = _PILImage.open(io.BytesIO(tile_bytes)).convert("RGB")
+                    canvas.paste(tile_img, (col * TILE_PX, row * TILE_PX))
+
+        # WGS84 bounds de l'image assemblée (coins des tuiles extrêmes)
+        lat_nw, lng_nw = tile_to_lat_lon(tx_min, ty_min, zoom)
+        lat_se, lng_se = tile_to_lat_lon(tx_max + 1, ty_max + 1, zoom)
+        bbox_wgs84 = (lng_nw, lat_se, lng_se, lat_nw)  # (min_lng, min_lat, max_lng, max_lat)
+
+        mid_lat = (min_y + max_y) / 2
+        mpp = meters_per_pixel(mid_lat, zoom)
+
+        return canvas, bbox_wgs84, mpp
+
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug("_fetch_mapant_bbox_image failed: %s", e)
+        return None
+
+
 @app.post(
     "/api/v1/generation/generate-sprint",
     summary="Génération sprint avec validation contrôleur automatique",
@@ -3545,6 +3608,39 @@ def generate_sprint_with_validation(body: dict = Body(...)):
     elif not candidate_points:
         dialogue.append({"role": "system", "step": 0, "message": "Aucun candidat ni bounding_box — génération aléatoire"})
 
+    # ── Étape 1b : Construction HeatmapCache V2 (optionnel) ────────────────────
+    # Si MapAnt est disponible pour la bbox → assemble une image ISOM rasterisée,
+    # puis précompute une grille de scores V2 pour le Smart Seeding + fitness terrain.
+    # Fallback silencieux → heatmap_cache = None → comportement ISOM identique à avant.
+    heatmap_cache = None
+    if bounding_box:
+        try:
+            from src.services.learning.ocad_patch_scorer import OcadPatchScorer as _OPS
+            _scorer_v2 = _OPS.load()
+            if _scorer_v2 is not None:
+                _mapant_result = _fetch_mapant_bbox_image(bounding_box, zoom=15)
+                if _mapant_result is not None:
+                    _map_img, _bbox_wgs84, _mpp = _mapant_result
+                    heatmap_cache = _scorer_v2.build_heatmap_cache(
+                        map_img=_map_img,
+                        bbox=_bbox_wgs84,
+                        mpp=_mpp,
+                        step_px=20,
+                    )
+                    dialogue.append({
+                        "role": "system", "step": 0,
+                        "message": (
+                            f"HeatmapCache V2 : grille {heatmap_cache.scores.shape[1]}×"
+                            f"{heatmap_cache.scores.shape[0]} "
+                            f"(score moyen {heatmap_cache.scores.mean():.3f})"
+                        )
+                    })
+        except Exception as _hm_err:
+            dialogue.append({
+                "role": "system", "step": 0,
+                "message": f"HeatmapCache indisponible (fallback ISOM) : {_hm_err}"
+            })
+
     # ── Étape 2 : Génération initiale ──────────────────────────────────────────
     generator = AIGenerator()
     gen_request = GenerationRequest(
@@ -3558,6 +3654,7 @@ def generate_sprint_with_validation(body: dict = Body(...)):
         candidate_points=candidate_points,
         forbidden_zones=oob_polygons,
         start_position=start_position,
+        heatmap_cache=heatmap_cache,
     )
 
     try:

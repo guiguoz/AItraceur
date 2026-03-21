@@ -19,6 +19,12 @@ try:
 except Exception:
     _ML_AVAILABLE = False
 
+try:
+    from ..learning.ocad_patch_scorer import OcadPatchScorer as _OcadPatchScorer
+    _PATCH_SCORER: Optional["_OcadPatchScorer"] = _OcadPatchScorer.load()
+except Exception:
+    _PATCH_SCORER = None
+
 
 # =============================================
 # Types de données
@@ -123,6 +129,7 @@ class CircuitScorer:
         category: str = None,
         circuit_type: str = None,
         map_type: str = None,
+        candidate_points: List[Dict] = None,
     ) -> CircuitScore:
         """
         Calcule le score d'un circuit.
@@ -173,7 +180,15 @@ class CircuitScorer:
         else:
             breakdown.safety_score = 70
 
-        # Score ML (20% si modèle disponible, fallback silencieux)
+        # Score terrain visuel XGBoost (remplace terrain_symbol_density=0.0)
+        patch_score = None
+        if _PATCH_SCORER is not None and candidate_points:
+            circuit_positions = [(c["x"], c["y"]) for c in controls]
+            raw = _PATCH_SCORER.score_circuit(circuit_positions, candidate_points)
+            patch_score = raw  # [0..1]
+            breakdown.technical_score = round(raw * 100, 1)
+
+        # Score ML contributions (20% si modèle disponible, fallback silencieux)
         ml_score = None
         if _ML_AVAILABLE and MLScorer.is_available() and positions:
             legs = [
@@ -198,7 +213,9 @@ class CircuitScorer:
             )
 
         # Calcul du score total
-        if ml_score is not None:
+        # Priorité patch_score (visuel XGBoost) > ml_score (contributions DB)
+        effective_ml = patch_score if patch_score is not None else ml_score
+        if effective_ml is not None:
             w = self.WEIGHTS_WITH_ML
             total = (
                 breakdown.length_score * w["length"]
@@ -207,9 +224,10 @@ class CircuitScorer:
                 + breakdown.variety_score * w["variety"]
                 + breakdown.balance_score * w["balance"]
                 + breakdown.safety_score * w["safety"]
-                + ml_score * 100 * self.ML_WEIGHT
+                + effective_ml * 100 * self.ML_WEIGHT
             )
-            breakdown.technical_score = round(ml_score * 100, 1)  # visible dans le détail
+            if patch_score is None:
+                breakdown.technical_score = round(ml_score * 100, 1)
         else:
             total = (
                 breakdown.length_score * self.WEIGHTS["length"]

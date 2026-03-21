@@ -598,17 +598,73 @@ out body geom;"""
             lng, lat = poly[i]
             candidates.append({"x": lng, "y": lat, "type": "building_corner"})
 
-    # ── Fontaines et mobilier urbain (Streeto : "street furniture") ──────────
-    amenity_query = f"""[out:json][timeout:30];
-node["amenity"~"^(fountain|clock|post_box)$"]({b});
+    # ── Noeuds ISprOM : mobilier urbain, escaliers, obstacles, repères ────────
+    # Requête unique fusionnée pour minimiser les appels Overpass
+    # Codes ISprOM 2019-2 : 522=auvent, 523=ruine, 525=tour, 526=monument/statue,
+    #                        530=élément rond (fontaine), 531=élément croix (banc)
+    isprOM_query = f"""[out:json][timeout:60];
+(
+  node["amenity"~"^(fountain|drinking_water|bench|shelter|waste_basket|bicycle_parking|recycling|clock|post_box|telephone|vending_machine)$"]({b});
+  node["historic"~"^(memorial|monument|statue|ruins|wayside_cross|wayside_shrine)$"]({b});
+  node["leisure"~"^(picnic_table|fountain|sculpture)$"]({b});
+  node["man_made"~"^(column|monument|tower|chimney|flagpole|water_tower)$"]({b});
+  node["barrier"~"^(bollard|block|chain|jersey_barrier|cycle_barrier)$"]({b});
+  node["highway"="steps"]({b});
+  node["tourism"~"^(artwork|information)$"]({b});
+);
 out body;"""
+
+    def get_isom_for_osm_feature(tags: dict) -> int:
+        """
+        Retourne le code ISprOM 2019-2 (colonne H) pour un noeud OSM.
+
+        Codes utilisés :
+          522 — Auvent / Préau (abri, kiosque)
+          523 — Ruine
+          525 — Petite tour / Siège surélevé
+          526 — Monument / Statue (cairn, mémorial, statue)
+          530 — Élément artificiel remarquable, rond (fontaine, point d'eau, jeu)
+          531 — Élément artificiel remarquable, croix (banc, table, poubelle)
+        """
+        historic = tags.get("historic", "")
+        amenity  = tags.get("amenity", "")
+        leisure  = tags.get("leisure", "")
+        man_made = tags.get("man_made", "")
+        tourism  = tags.get("tourism", "")
+        highway  = tags.get("highway", "")
+
+        if historic in ("monument", "statue", "memorial", "wayside_cross", "wayside_shrine"):
+            return 526
+        if historic == "ruins":
+            return 523
+        if amenity == "shelter" or man_made in ("tower", "chimney", "water_tower"):
+            return 522
+        if man_made in ("column", "monument", "flagpole") or tourism == "artwork" or leisure == "sculpture":
+            return 526
+        if amenity in ("fountain", "drinking_water") or leisure == "fountain":
+            return 530
+        if amenity in ("bench", "waste_basket") or leisure == "picnic_table":
+            return 531
+        if highway == "steps":
+            return 524  # escalier — gardé pour compatibilité (attractiveness very_high)
+        # Mobilier divers : bollard, bicycle_parking, etc. → élément rond par défaut
+        return 530
+
     try:
-        ar = requests.post(OVERPASS_API_URL, data={"data": amenity_query}, timeout=45)
+        ar = requests.post(OVERPASS_API_URL, data={"data": isprOM_query}, timeout=75)
         if ar.ok:
             for elem in ar.json().get("elements", []):
                 lng, lat = elem.get("lon"), elem.get("lat")
-                if lng and lat:
-                    candidates.append({"x": lng, "y": lat, "type": "amenity"})
+                if not lng or not lat:
+                    continue
+                tags = elem.get("tags", {})
+                isom_code = get_isom_for_osm_feature(tags)
+                feat_type = {
+                    522: "shelter", 523: "ruin", 524: "steps",
+                    525: "tower",   526: "landmark", 530: "urban_amenity",
+                    531: "urban_amenity",
+                }.get(isom_code, "urban_amenity")
+                candidates.append({"x": lng, "y": lat, "type": feat_type, "isom": isom_code})
     except Exception:
         pass  # non bloquant
 
@@ -623,11 +679,13 @@ out body;"""
     random.shuffle(candidates)
     candidates = candidates[:600]
 
+    type_counts = {}
+    for c in candidates:
+        type_counts[c["type"]] = type_counts.get(c["type"], 0) + 1
     print(
         f"[sprint_features] {len(candidates)} candidats extraits "
-        f"({sum(1 for c in candidates if c['type']=='intersection')} intersections, "
-        f"{sum(1 for c in candidates if c['type']=='building_corner')} coins bât.), "
-        f"{len(building_polygons)} OOB polygones"
+        + ", ".join(f"{v} {k}" for k, v in type_counts.items())
+        + f", {len(building_polygons)} OOB polygones"
     )
 
     return {

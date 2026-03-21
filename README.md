@@ -8,9 +8,12 @@
 ## Fonctionnalités
 
 - **Génération automatique** de circuits sprint (urbain) et forêt via algorithme génétique multi-objectifs
+- **Fitness multicritère V2** : IA Score (HeatmapCache XGBoost), pénalité distance, détection dog-legs, bonus rythme
+- **HeatmapCache** : grille de scores V2 précomputée depuis tuiles MapAnt (O(1) lookups GA), Smart Seeding population initiale
 - **Contrôleur IOF/FFCO** : validation automatique des règles (dog-legs, jambes C01–C12, TD1-5/PD1-5)
 - **Boucle traceur ↔ contrôleur** : dialogue IA avec corrections automatiques (jusqu'à 5 itérations)
 - **Analyse de routes** : NetworkX A*, diversité des itinéraires, détection dog-legs
+- **Scorer XGBoost V2** : `patch_scorer_v2.pkl` (AUC=0.835) — scoring visuel de la qualité d'emplacement des postes
 - **Carte OCAD** : rendu tuilé des fichiers `.ocd` (optionnel)
 - **Terrain OSM** : enrichissement automatique depuis Overpass API
 - **Export** : IOF XML 3.0, GPX, PDF, KML/KMZ

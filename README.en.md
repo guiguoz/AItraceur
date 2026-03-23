@@ -77,6 +77,72 @@ Copy `backend/.env.example` to `backend/.env` and configure:
 
 ---
 
+## ML Pipeline — Control Placement Scorer (XGBoost V3)
+
+### Overview
+
+The `patch_scorer_v2.pkl` component is an XGBoost classifier trained to visually assess the quality of a control placement from an orienteering map tile.
+
+### 1. Dataset Scraping (RG2)
+
+The script `backend/scripts/scrape_rg2.py` automatically collects georeferenced controls from orienteering clubs using [RouteGadget 2](https://www.routegadget.co.uk):
+
+```bash
+cd backend && python scripts/scrape_rg2.py
+```
+
+**Results (2026-03-23 session):**
+- 102 RG2 instances probed, 88 with usable data
+- **370,213 positive controls** (WGS84, georeferenced)
+- **740,378 non-controls** (randomly generated negative samples)
+- Metadata: `lat`, `lon`, `course_type` (sprint/score/forest...), `mpp`, `event_name`
+
+Each control generates a **256×256 PNG patch** extracted from MapAnt tiles at the appropriate zoom level.
+
+### 2. Feature Extraction (18-dim)
+
+Module `backend/src/services/learning/patch_feature_extractor.py`:
+
+| Dimension | Feature | Description |
+|-----------|---------|-------------|
+| [0:7] | ISOM global | Pixel fraction per ISOM color class (brown/dense-green/light-green/yellow/blue/black/white) over the full 256×256 patch |
+| [7:14] | ISOM centre | Same 7 colors over the central 64×64 crop (control zone) |
+| [14] | `edge_density` | Fraction of pixels with Sobel gradient > 20 (geometric complexity) |
+| [15] | `corner_density` | Fraction of pixels with Harris response > 1% of max (intersections, corners) |
+| [16] | `entropy` | Normalized Shannon entropy [0,1] (visual richness) |
+| [17] | `is_urban` | 1 if coordinates fall within a dense urban area (hardcoded UK/FR bounding boxes), else 0 |
+
+### 3. XGBoost V3 Training (bi-mode)
+
+```bash
+cd backend && python scripts/train_control_scorer.py --phase xgboost
+```
+
+**Key parameters:**
+- `n_estimators=300`, `max_depth=6`, `scale_pos_weight=2.0` (1:2 class imbalance)
+- **Sample weighting**: `course_type=sprint` patches → weight 2.0×, others → 1.0× (urban sprint bias)
+- Parallel feature extraction (6 workers) via `ProcessPoolExecutor`
+
+**V3 metrics (238k patches, 88 clubs):**
+| Metric | Value |
+|--------|-------|
+| AUC-ROC | 0.807 |
+| F1 | 0.645 |
+| Precision | 0.545 |
+| Recall | **0.789** |
+
+The higher Recall (+4% vs V2) means fewer legitimate controls are missed. The slightly lower AUC reflects the broader dataset diversity (forest + score + sprint disciplines).
+
+### 4. Integration: HeatmapCache
+
+When `/generate-sprint` is called, the backend:
+1. Fetches the MapAnt map image (`_fetch_mapant_bbox_image`)
+2. Precomputes a V3 score grid (`scorer.build_heatmap_cache(img, bbox, mpp)`)
+3. Interpolates `lng/lat` from the WGS84 `bbox` to activate the `is_urban` feature
+4. Passes the `HeatmapCache` to the genetic algorithm → O(1) lookups during evolution
+
+---
+
 ## References & Credits
 
 This project draws on the following tools and standards:

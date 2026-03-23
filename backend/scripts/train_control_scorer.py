@@ -25,9 +25,11 @@ from __future__ import annotations
 
 import argparse
 import logging
+import multiprocessing
 import os
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Optional
 
@@ -39,17 +41,39 @@ from PIL import Image
 # Feature extraction — source unique de vérité dans patch_feature_extractor.py
 # ---------------------------------------------------------------------------
 # Ajout du répertoire src/ au path pour l'import depuis scripts/
-sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
+_SRC_DIR = str(Path(__file__).parents[1] / "src")
+sys.path.insert(0, _SRC_DIR)
 from services.learning.patch_feature_extractor import (  # noqa: E402
     ISOM_PALETTE, FEATURE_NAMES, extract_features,
 )
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
+    format="%(asctime)s[%(levelname)s] %(message)s",
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Worker parallèle — doit être au niveau module pour Windows (spawn)
+# ---------------------------------------------------------------------------
+
+def _extract_features_worker(args: tuple[str, int, float, float, float]) -> tuple[np.ndarray, int, float] | None:
+    """Extrait les features d'un patch dans un sous-processus."""
+    img_path_str, label, lat, lon, weight = args
+    # Réinjecter src/ dans le path du sous-processus (Windows spawn)
+    import sys as _sys
+    if _SRC_DIR not in _sys.path:
+        _sys.path.insert(0, _SRC_DIR)
+    from services.learning.patch_feature_extractor import extract_features as _ef
+    from PIL import Image as _Image
+    try:
+        img = _Image.open(img_path_str)
+        feats = _ef(img, lon, lat)
+        return (feats, int(label), weight)
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -58,40 +82,67 @@ log = logging.getLogger(__name__)
 
 def _load_dataset_features(
     metadata_csv: Path, dataset_dir: Path
-) -> tuple[np.ndarray, np.ndarray]:
-    """Load patches, extract ISOM features, return (X, y)."""
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Load patches, extract ISOM features en parallèle, return (X, y, w)."""
     df = pd.read_csv(metadata_csv)
-    df = df.dropna(subset=["img_path", "label"])
+
+    # --- FIX RÉTROCOMPATIBILITÉ ANCIEN DATASET ---
+    if "lat" not in df.columns:
+        df["lat"] = 0.0
+    if "lon" not in df.columns:
+        df["lon"] = 0.0
+    # ---------------------------------------------
+
+    df = df.dropna(subset=["img_path", "label", "lat", "lon"])
     df = df.drop_duplicates(subset=["img_path"])
     df["label"] = df["label"].astype(int)
-    log.info("Dataset: %d unique patches (%d pos, %d neg)",
-             len(df), (df["label"] == 1).sum(), (df["label"] == 0).sum())
 
-    X_rows = []
-    y_rows = []
+    if "course_type" in df.columns:
+        df["_weight"] = np.where(df["course_type"] == "sprint", 2.0, 1.0)
+    else:
+        df["_weight"] = 1.0
+
+    # Filtrage vectorisé des fichiers existants
+    df["_abs"] = df["img_path"].apply(lambda p: str(dataset_dir / p))
+    df = df[df["_abs"].apply(os.path.exists)].reset_index(drop=True)
+
+    n_pos = int((df["label"] == 1).sum())
+    n_neg = int((df["label"] == 0).sum())
+    log.info("Dataset: %d unique patches (%d pos, %d neg)", len(df), n_pos, n_neg)
+
+    rows: list[tuple[str, int, float, float, float]] = list(zip(
+        df["_abs"], df["label"], df["lat"], df["lon"], df["_weight"]
+    ))
+    n_workers = multiprocessing.cpu_count()
+    log.info("Extraction parallèle — %d workers, chunksize=500…", n_workers)
+
+    X_rows: list[np.ndarray] = []
+    y_rows: list[int] = []
+    w_rows: list[float] =[]
     skipped = 0
+    t0 = time.time()
 
-    for i, row in df.iterrows():
-        img_path = dataset_dir / row["img_path"]
-        if not img_path.exists():
-            skipped += 1
-            continue
-        try:
-            img = Image.open(img_path)
-            feats = extract_features(img)
-            X_rows.append(feats)
-            y_rows.append(int(row["label"]))
-        except Exception as e:
-            log.debug("Skip %s: %s", img_path.name, e)
-            skipped += 1
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        for i, result in enumerate(executor.map(_extract_features_worker, rows, chunksize=500)):
+            if result is not None:
+                feats, label, weight = result
+                X_rows.append(feats)
+                y_rows.append(label)
+                w_rows.append(weight)
+            else:
+                skipped += 1
 
-        if (i + 1) % 500 == 0:
-            log.info("  Features extracted: %d/%d (skipped=%d)", len(X_rows), len(df), skipped)
+            if (i + 1) % 10_000 == 0:
+                elapsed = time.time() - t0
+                rate = (i + 1) / elapsed
+                remaining = (len(rows) - i - 1) / max(rate, 1)
+                log.info("  %d/%d — %.0f patch/s — %.1f min restant",
+                         i + 1, len(rows), rate, remaining / 60)
 
     if skipped:
-        log.warning("Skipped %d patches (file not found or corrupt)", skipped)
+        log.warning("Skipped %d patches (fichier corrompu ou manquant)", skipped)
 
-    return np.array(X_rows, dtype=np.float32), np.array(y_rows, dtype=np.int32)
+    return np.array(X_rows, dtype=np.float32), np.array(y_rows, dtype=np.int32), np.array(w_rows, dtype=np.float32)
 
 
 def train_xgboost(dataset_dir: Path, output_dir: Path, output_name: str = "patch_scorer_v2") -> Path:
@@ -111,11 +162,13 @@ def train_xgboost(dataset_dir: Path, output_dir: Path, output_name: str = "patch
         log.error("metadata.csv not found at %s", metadata_csv)
         sys.exit(1)
 
-    log.info("=== Phase 1 — XGBoost v2 (17 features) ===")
-    log.info("Extracting features from patches (ISOM global+centre + Edge/Corner/Entropy)...")
+    log.info("=== Phase 1 — XGBoost v2 (18 features) ===")
+    log.info("Extracting features from patches (ISOM global+centre + Edge/Corner/Entropy + Urban)...")
     t0 = time.time()
-    X, y = _load_dataset_features(metadata_csv, dataset_dir)
+    X, y, w = _load_dataset_features(metadata_csv, dataset_dir)
     log.info("Feature extraction done in %.1fs — X shape: %s", time.time() - t0, X.shape)
+
+    assert X.shape[1] == 18, f"Erreur : dimension inattendue pour X. Attendue: 18, Obtenue: {X.shape[1]}"
 
     if len(X) < 50:
         log.error("Not enough patches (%d). Run scrape_rg2.py --generate-dataset first.", len(X))
@@ -126,8 +179,8 @@ def train_xgboost(dataset_dir: Path, output_dir: Path, output_name: str = "patch
     scale_pos_weight = n_neg / max(n_pos, 1)
     log.info("Class balance: %d pos / %d neg → scale_pos_weight=%.2f", n_pos, n_neg, scale_pos_weight)
 
-    X_train, X_val, y_train, y_val = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
+    X_train, X_val, y_train, y_val, w_train, w_val = train_test_split(
+        X, y, w, test_size=0.2, random_state=42, stratify=y
     )
 
     model = XGBClassifier(
@@ -145,7 +198,9 @@ def train_xgboost(dataset_dir: Path, output_dir: Path, output_name: str = "patch
     t0 = time.time()
     model.fit(
         X_train, y_train,
+        sample_weight=w_train,
         eval_set=[(X_val, y_val)],
+        sample_weight_eval_set=[w_val],
         verbose=50,
     )
     log.info("Training done in %.1fs", time.time() - t0)
@@ -248,6 +303,14 @@ def train_cnn(
         sys.exit(1)
 
     df = pd.read_csv(metadata_csv)
+
+    # --- FIX RÉTROCOMPATIBILITÉ ANCIEN DATASET ---
+    if "lat" not in df.columns:
+        df["lat"] = 0.0
+    if "lon" not in df.columns:
+        df["lon"] = 0.0
+    # ---------------------------------------------
+
     df = df.dropna(subset=["img_path", "label"])
     df = df.drop_duplicates(subset=["img_path"])
     df["label"] = df["label"].astype(int)
@@ -272,7 +335,7 @@ def train_cnn(
     n_pos = (df_train["label"] == 1).sum()
     n_neg = (df_train["label"] == 0).sum()
     class_weights = {1: n_neg / n_pos, 0: 1.0}
-    sample_weights = [class_weights[int(lbl)] for lbl in df_train["label"]]
+    sample_weights =[class_weights[int(lbl)] for lbl in df_train["label"]]
     sampler = WeightedRandomSampler(sample_weights, num_samples=len(sample_weights), replacement=True)
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, sampler=sampler,
@@ -311,7 +374,7 @@ def train_cnn(
     output_dir.mkdir(parents=True, exist_ok=True)
     best_path = output_dir / "best_model.pth"
     best_val_loss = float("inf")
-    history = []
+    history =[]
 
     log.info("Training for %d epochs (train=%d val=%d batch=%d)...",
              epochs, len(train_ds), len(val_ds), batch_size)
@@ -333,7 +396,7 @@ def train_cnn(
         # --- Validate ---
         model.eval()
         val_loss = 0.0
-        all_preds, all_probs, all_labels = [], [], []
+        all_preds, all_probs, all_labels = [], [],[]
         with torch.no_grad():
             for imgs, labels in val_loader:
                 imgs, labels = imgs.to(device), labels.to(device)
@@ -386,11 +449,11 @@ def train_cnn(
 # Inference helper (used by Phase C scorer.py)
 # ---------------------------------------------------------------------------
 
-def score_patch_xgboost(img: Image.Image, model_path: Path) -> float:
-    """Score a 256×256 patch with the XGBoost model. Returns probability [0..1]."""
+def score_patch_xgboost(img: Image.Image, lng: float, lat: float, model_path: Path) -> float:
+    """Score a 256×256 patch with the XGBoost model. Returns probability[0..1]."""
     import joblib
     model = joblib.load(model_path)
-    feats = extract_features(img).reshape(1, -1)
+    feats = extract_features(img, lng, lat).reshape(1, -1)
     return float(model.predict_proba(feats)[0, 1])
 
 

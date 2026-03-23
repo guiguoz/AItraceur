@@ -93,6 +93,11 @@ temp/
 
 # Dataset images ML (volumineuses)
 backend/data/rg2/dataset/
+backend/data/rg2/dataset_archive_238k/
+
+# GeoJSON RG2 volumineux (>100MB, données brutes de scraping)
+backend/data/rg2/rg2_controls.geojson
+backend/data/rg2/rg2_scrape_log.json
 
 # Outils binaires locaux
 curl.exe

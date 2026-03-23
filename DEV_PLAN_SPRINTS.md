@@ -421,3 +421,50 @@ Quand un .ocd est chargé, l'app bascule en mode "OCAD-first" :
 - OCAD → GeoJSON (client ocad2geojson) → extractCandidatePoints() → coins/virages/points → backend
 - OSM → Overpass (backend) → intersections piétonnes → fusion avec OCAD
 - Résultat : GA places controls sur éléments concrets (carrefours, coins bâtiments, buttes, dépressions)
+
+---
+
+## ÉTAPE 14 – GA V2 : HeatmapCache + fitness multicritère ✅ 2026-03-21
+
+### Objectif
+Remplacer le scoring ISOM statique du GA par une grille de scores V2 précomputée (HeatmapCache) pour des lookups O(1) pendant l'évolution, avec fitness multicritère.
+
+### Tâches Backend
+- `backend/src/services/learning/ocad_patch_scorer.py` — `HeatmapCache` dataclass (grille numpy + interpolation bilinéaire), `build_heatmap_cache(img, bbox, mpp, step_px)`
+- `backend/src/services/generation/genetic_algo.py` — `evaluate_fitness()` 4-critères (AI Score, pénalité distance, dog-leg, bonus rythme), Smart Seeding population initiale
+- `backend/src/main.py` — `_fetch_mapant_bbox_image()`, construction HeatmapCache avant GA, passage via `GenerationConfig.heatmap_cache`
+
+---
+
+## ÉTAPE 15 – Scraping RG2 + Pipeline ML V3 (18-dim, bi-mode) ✅ 2026-03-23
+
+### Objectif
+Constituer un dataset de patches CO à grande échelle depuis les clubs utilisant RouteGadget 2, puis réentraîner le scorer XGBoost avec un extracteur enrichi (feature `is_urban`) et une pondération sprint.
+
+### Tâches ML
+- `backend/scripts/scrape_rg2.py` — Scraper 102 instances RG2 (UK), 88 clubs avec données → 370k pos / 740k neg, métadonnées `lat`/`lon`/`course_type`, extraction parallèle patches PNG 256×256
+- `backend/src/services/learning/patch_feature_extractor.py` — Passage 17 → 18 features : ajout `is_urban` (bbox hardcodées UK/FR), signature `extract_features(img, lng, lat)`
+- `backend/scripts/train_control_scorer.py` — Extraction parallèle (6 workers, ProcessPoolExecutor), sample weighting `sprint=2.0×`, passage `lon`/`lat` à `extract_features`
+- `backend/src/services/learning/ocad_patch_scorer.py` — `score_map_image()` : param `bbox` optionnel, interpolation linéaire `(px,py) → (lng,lat)` quand worldfile absent ; `build_heatmap_cache()` passe `bbox` à `score_map_image` ; log "18-dim V3 bi-mode"
+- `backend/data/models/patch_scorer_v2.pkl` — Modèle V3 réentraîné (AUC=0.807, Recall=0.789, 238k patches)
+
+### Résultats
+| | V2 | V3 |
+|---|---|---|
+| Dataset | 12k patches, 1 club | 238k patches, 88 clubs |
+| Features | 17-dim | **18-dim** (+ is_urban) |
+| AUC-ROC | 0.835 | 0.807 |
+| Recall | 0.746 | **0.789** |
+| Généralisation | Forêt UK | **Multi-discipline + Sprint** |
+
+---
+
+## ÉTAPE 16 – Résilience Overpass : miroirs de fallback ✅ 2026-03-23
+
+### Objectif
+Éviter les timeouts de l'API Overpass principale en essayant automatiquement les miroirs disponibles.
+
+### Tâches Backend
+- `backend/src/services/terrain/osm_fetcher.py` — `_OVERPASS_MIRRORS` (3 URLs), helper `_post_overpass(query, timeout)` avec boucle try/except, les 3 call sites migrent vers ce helper
+- Fallback données vides si tous les miroirs échouent (comportement existant conservé, pas de 500)
+

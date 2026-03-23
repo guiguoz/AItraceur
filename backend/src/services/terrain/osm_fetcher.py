@@ -15,12 +15,26 @@ from datetime import datetime
 # Constants
 # =============================================
 
-# Overpass API endpoint (public, gratuit)
+# Overpass API endpoints — primaire + miroirs de fallback
 OVERPASS_API_URL = "https://overpass-api.de/api/interpreter"
+_OVERPASS_MIRRORS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://lz4.overpass-api.de/api/interpreter",
+]
 
-# D'autres endpoints de backup:
-# - https://lz4.overpass-api.de/api/interpreter
-# - https://z.overpass-api.de/api/interpreter
+
+def _post_overpass(query: str, timeout: int = 120) -> "requests.Response":
+    """Essaie chaque miroir Overpass dans l'ordre, lève la dernière exception si tous échouent."""
+    last_exc: Exception = RuntimeError("No Overpass mirrors configured")
+    for url in _OVERPASS_MIRRORS:
+        try:
+            resp = requests.post(url, data={"data": query}, timeout=timeout)
+            resp.raise_for_status()
+            return resp
+        except Exception as exc:
+            last_exc = exc
+    raise last_exc
 
 
 # =============================================
@@ -264,11 +278,7 @@ class OSMFetcher:
         print(f"  [REQ] Requête Overpass API...")
 
         try:
-            response = requests.post(
-                self.api_url,
-                data={"data": query},
-                timeout=180,  # 3 minutes timeout
-            )
+            response = _post_overpass(query, timeout=180)
 
             # Debug: afficher le status et les premiers caractères de la réponse
             print(f"  Response status: {response.status_code}")
@@ -548,11 +558,10 @@ def extract_sprint_features(bbox_dict: dict) -> dict:
 out body geom;"""
 
     try:
-        resp = requests.post(OVERPASS_API_URL, data={"data": query}, timeout=120)
-        resp.raise_for_status()
+        resp = _post_overpass(query, timeout=120)
         data = resp.json()
     except Exception as e:
-        print(f"[sprint_features] Overpass error: {e}")
+        print(f"[sprint_features] Overpass indisponible (tous miroirs), fallback données vides: {e}")
         return {"candidates": [], "oob_polygons": []}
 
     # Séparer highways et bâtiments
@@ -651,7 +660,7 @@ out body;"""
         return 530
 
     try:
-        ar = requests.post(OVERPASS_API_URL, data={"data": isprOM_query}, timeout=75)
+        ar = _post_overpass(isprOM_query, timeout=75)
         if ar.ok:
             for elem in ar.json().get("elements", []):
                 lng, lat = elem.get("lon"), elem.get("lat")

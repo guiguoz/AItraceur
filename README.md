@@ -78,6 +78,72 @@ Copier `backend/.env.example` en `backend/.env` et configurer :
 
 ---
 
+## Pipeline ML — Scorer de postes (XGBoost V3)
+
+### Vue d'ensemble
+
+Le composant `patch_scorer_v2.pkl` est un classificateur XGBoost entraîné pour évaluer visuellement la qualité d'un emplacement de poste à partir d'une tuile de carte CO.
+
+### 1. Scraping du dataset (RG2)
+
+Le script `backend/scripts/scrape_rg2.py` collecte automatiquement des postes géoréférencés depuis les clubs d'orientation utilisant [RouteGadget 2](https://www.routegadget.co.uk) :
+
+```bash
+cd backend && python scripts/scrape_rg2.py
+```
+
+**Résultats (session 2026-03-23) :**
+- 102 instances RG2 sondées, 88 avec des données exploitables
+- **370 213 postes positifs** (WGS84, géoréférencés)
+- **740 378 non-postes** (points négatifs générés aléatoirement)
+- Métadonnées : `lat`, `lon`, `course_type` (sprint/score/forest...), `mpp`, `event_name`
+
+Chaque poste génère un **patch PNG 256×256** extrait depuis les tuiles MapAnt au bon niveau de zoom.
+
+### 2. Extraction de features (18-dim)
+
+Module `backend/src/services/learning/patch_feature_extractor.py` :
+
+| Dimension | Feature | Description |
+|-----------|---------|-------------|
+| [0:7] | ISOM global | Fraction de pixels par couleur ISOM (brun/vert dense/vert clair/jaune/bleu/noir/blanc) sur le patch 256×256 |
+| [7:14] | ISOM centre | Mêmes 7 couleurs sur le crop central 64×64 (zone du poste) |
+| [14] | `edge_density` | Fraction pixels gradient Sobel > 20 (complexité géométrique) |
+| [15] | `corner_density` | Fraction pixels réponse Harris > 1% du max (intersections, angles) |
+| [16] | `entropy` | Entropie Shannon normalisée [0,1] (richesse visuelle) |
+| [17] | `is_urban` | 1 si coordonnées dans une zone urbaine dense (bbox hardcodées UK/FR), 0 sinon |
+
+### 3. Entraînement XGBoost V3 (bi-mode)
+
+```bash
+cd backend && python scripts/train_control_scorer.py --phase xgboost
+```
+
+**Paramètres clés :**
+- `n_estimators=300`, `max_depth=6`, `scale_pos_weight=2.0` (déséquilibre 1:2)
+- **Sample weighting** : patches `course_type=sprint` → poids 2.0×, autres → 1.0× (biais vers sprint urbain)
+- Extraction parallèle (6 workers) via `ProcessPoolExecutor`
+
+**Métriques V3 (238k patches, 88 clubs) :**
+| Métrique | Valeur |
+|---------|--------|
+| AUC-ROC | 0.807 |
+| F1 | 0.645 |
+| Precision | 0.545 |
+| Recall | **0.789** |
+
+Le Recall supérieur (+4% vs V2) signifie moins de postes légitimes manqués. L'AUC légèrement inférieure reflète la diversité accrue du dataset (forêt + score + sprint).
+
+### 4. Intégration : HeatmapCache
+
+À l'appel de `/generate-sprint`, le backend :
+1. Récupère l'image de carte MapAnt (`_fetch_mapant_bbox_image`)
+2. Précompute une grille de scores V3 (`scorer.build_heatmap_cache(img, bbox, mpp)`)
+3. Interpole `lng/lat` depuis la `bbox` WGS84 pour activer la feature `is_urban`
+4. Passe le `HeatmapCache` à l'algorithme génétique → lookups O(1) pendant l'évolution
+
+---
+
 ## Références & Crédits
 
 Ce projet s'est inspiré des outils et standards suivants :

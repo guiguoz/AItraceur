@@ -200,7 +200,7 @@ class OcadPatchScorer:
                 return None
 
             model = joblib.load(model_path)
-            log.info("OcadPatchScorer: loaded patch_scorer_v2.pkl (17-dim visual model)")
+            log.info("OcadPatchScorer: loaded patch_scorer_v2.pkl (18-dim visual model — V3 bi-mode)")
             return cls(model)
         except Exception as exc:
             log.debug("OcadPatchScorer: could not load model (%s)", exc)
@@ -210,22 +210,24 @@ class OcadPatchScorer:
     # API principale — mode image (v2)
     # ------------------------------------------------------------------
 
-    def score_patch(self, img: Image.Image) -> Optional[float]:
+    def score_patch(self, img: Image.Image, lng: float = 0.0, lat: float = 0.0) -> Optional[float]:
         """
         Score un patch PIL Image 256×256.
 
-        Extrait les 17 features visuelles et prédit la probabilité
+        Extrait les 18 features visuelles (+ géographiques) et prédit la probabilité
         que ce patch représente un bon emplacement de poste.
 
         Args:
             img: Image PIL (n'importe quel mode, converti en RGB automatiquement).
                  Taille recommandée : 256×256 (redimensionné si nécessaire).
+            lng: Longitude WGS84
+            lat: Latitude WGS84
 
         Returns:
             Probabilité [0..1], ou None si l'extraction échoue.
         """
         try:
-            vec = extract_features(img).reshape(1, -1)
+            vec = extract_features(img, lng, lat).reshape(1, -1)
             return float(self._model.predict_proba(vec)[0][1])
         except Exception as exc:
             log.debug("score_patch failed: %s", exc)
@@ -236,6 +238,8 @@ class OcadPatchScorer:
         map_img: Image.Image,
         candidates: List[Dict],
         mpp: float = 0.5,
+        worldfile: Optional[tuple[float, float, float, float, float, float]] = None,
+        bbox: Optional[tuple[float, float, float, float]] = None,
     ) -> List[Dict]:
         """
         Score une liste de candidats sur l'image complète de la carte.
@@ -249,12 +253,15 @@ class OcadPatchScorer:
                         Chaque dict est enrichi en place avec {"score": float}.
             mpp: Mètres par pixel de l'image carte (default 0.5 = échelle entraînement).
                  Exemple : pour une carte 1:4000 rendue à 100 dpi → mpp ≈ 1.016.
+            worldfile: Paramètres (A, D, B, E, C, F) pour conversion geographique (px → lng, lat).
+                       Si None, cherche "worldfile" dans l'objet OcadPatchScorer s'il existe.
 
         Returns:
             Liste de dicts [{px, py, score, ...}] dans le même ordre que candidates.
             score = None si le patch ne peut pas être évalué.
         """
         map_w, map_h = map_img.size
+        wf = worldfile or getattr(self, "worldfile", None)
 
         # FOV à l'entraînement : 256px × 0.5m/px = 128m de côté
         fov_m = 128.0
@@ -296,7 +303,19 @@ class OcadPatchScorer:
             if crop_px != 256:
                 region = region.resize((256, 256), Image.LANCZOS)
 
-            score = self.score_patch(region)
+            # Conversion px/py en lng/lat géographique
+            lng, lat = 0.0, 0.0
+            if wf:
+                A, D, B, E, C, F = wf
+                lng = A * px + B * py + C
+                lat = D * px + E * py + F
+            elif bbox:
+                # Interpolation linéaire depuis la bbox WGS84 (axe Y image inversé vs latitude)
+                min_lng, min_lat, max_lng, max_lat = bbox
+                lng = min_lng + (px / map_w) * (max_lng - min_lng)
+                lat = max_lat - (py / map_h) * (max_lat - min_lat)
+
+            score = self.score_patch(region, lng, lat)
             results.append({**cand, "score": score})
 
         return results
@@ -331,7 +350,11 @@ class OcadPatchScorer:
             "HeatmapCache: scoring %d positions (step=%dpx, %dx%d grid)…",
             len(candidates), step_px, len(xs), len(ys),
         )
-        results = self.score_map_image(map_img, candidates, mpp=mpp)
+        log.info(
+            "🔥 IA V3 : HeatmapCache généré et transmis à l'Algorithme Génétique ! (bbox=%s, is_urban actif)",
+            bbox,
+        )
+        results = self.score_map_image(map_img, candidates, mpp=mpp, bbox=bbox)
         scores_flat = np.array(
             [r["score"] if r["score"] is not None else 0.0 for r in results],
             dtype=np.float32,

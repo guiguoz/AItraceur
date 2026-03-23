@@ -25,11 +25,20 @@ _OVERPASS_MIRRORS = [
 
 
 def _post_overpass(query: str, timeout: int = 120) -> "requests.Response":
-    """Essaie chaque miroir Overpass dans l'ordre, lève la dernière exception si tous échouent."""
+    """Essaie chaque miroir Overpass dans l'ordre, lève la dernière exception si tous échouent.
+
+    Chaque miroir dispose d'un timeout réseau strict de 5s pour éviter que
+    les pannes Overpass ne bloquent l'endpoint pendant 45+ secondes.
+    """
+    _CONNECT_TIMEOUT = 5.0  # secondes max pour établir la connexion TCP
     last_exc: Exception = RuntimeError("No Overpass mirrors configured")
     for url in _OVERPASS_MIRRORS:
         try:
-            resp = requests.post(url, data={"data": query}, timeout=timeout)
+            resp = requests.post(
+                url,
+                data={"data": query},
+                timeout=(_CONNECT_TIMEOUT, timeout),  # (connect, read)
+            )
             resp.raise_for_status()
             return resp
         except Exception as exc:

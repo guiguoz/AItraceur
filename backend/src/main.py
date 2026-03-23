@@ -3621,11 +3621,14 @@ def generate_sprint_with_validation(body: dict = Body(...)):
                 _mapant_result = _fetch_mapant_bbox_image(bounding_box, zoom=15)
                 if _mapant_result is not None:
                     _map_img, _bbox_wgs84, _mpp = _mapant_result
+                    # step_px dynamique : cible ~75×75 cellules max (~5000 patchs)
+                    # pour éviter les timeouts sur les grandes images MapAnt
+                    _step_px = max(20, int(max(_map_img.width, _map_img.height) / 75))
                     heatmap_cache = _scorer_v2.build_heatmap_cache(
                         map_img=_map_img,
                         bbox=_bbox_wgs84,
                         mpp=_mpp,
-                        step_px=20,
+                        step_px=_step_px,
                     )
                     dialogue.append({
                         "role": "system", "step": 0,

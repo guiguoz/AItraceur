@@ -316,6 +316,16 @@ class OcadPatchScorer:
                 lng = min_lng + (px / map_w) * (max_lng - min_lng)
                 lat = max_lat - (py / map_h) * (max_lat - min_lat)
 
+            # ── Color Bouncer : filtre couleur interdit avant inférence XGBoost ─
+            _cx, _cy = 128, 128
+            _win = region.crop((_cx - 2, _cy - 2, _cx + 3, _cy + 3)).convert("RGB")
+            _rgb = np.array(_win, dtype=float).mean(axis=(0, 1))
+            _r, _g, _b = float(_rgb[0]), float(_rgb[1]), float(_rgb[2])
+            _olive = (120 <= _r <= 210) and (150 <= _g <= 220) and (_b < 80) and (_g > _r)
+            _water = (_b > 160) and (_r < 130) and (_g < 160)
+            if _olive or _water:
+                return {**cand, "score": 0.0}
+            # ──────────────────────────────────────────────────────────────────
             return {**cand, "score": self.score_patch(region, lng, lat, force_is_urban=force_is_urban)}
 
         n_workers = min(os.cpu_count() or 4, 8)

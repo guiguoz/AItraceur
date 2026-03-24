@@ -230,6 +230,7 @@ class GeneticAlgorithm:
         """
         start_time = datetime.now()
         forbidden_zones = forbidden_zones or []
+        self._current_forbidden_zones = forbidden_zones  # accessible dans _default_scoring
 
         # Initialiser la population
         self.population = self._initialize_population(
@@ -908,6 +909,14 @@ class GeneticAlgorithm:
         controls = circuit.controls
         if len(controls) < 2:
             return 0.0
+
+        # ── OOB : pénalité éliminatoire ────────────────────────────────────
+        _forbidden = getattr(self, "_current_forbidden_zones", [])
+        if _forbidden:
+            for _ctrl in controls:
+                if self._is_in_forbidden_zone(_ctrl[0], _ctrl[1], _forbidden):
+                    return -10000.0
+        # ──────────────────────────────────────────────────────────────────
 
         total_length = self._calculate_total_length(controls)
         leg_lengths = [

@@ -59,7 +59,7 @@ export const getSprintCandidates = (bounding_box) =>
  * Retourne : { controls, controleur_report, dialogue, iterations, is_valid, score }
  */
 export const generateSprint = (params) =>
-  api.post('/api/v1/generation/generate-sprint', params, { timeout: 180000 });
+  api.post('/api/v1/generation/generate-sprint', params, { timeout: 300000 });
 
 // ── Terrain runnabilité ──────────────────────────────────────────────────────
 export const getRunnabilityGrid = (bbox, resolution_m = 100) =>

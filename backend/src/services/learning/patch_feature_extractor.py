@@ -23,6 +23,8 @@ Métriques modèle patch_scorer_v2.pkl (XGBoost, 12 368 patches, multi-clubs UK)
 
 from __future__ import annotations
 
+from typing import Optional
+
 import numpy as np
 from PIL import Image
 
@@ -136,7 +138,12 @@ def _isom_fracs(pixels: np.ndarray, n: int) -> np.ndarray:
     return (counts / n).astype(np.float32)
 
 
-def extract_features(img: Image.Image, lng: float, lat: float) -> np.ndarray:
+def extract_features(
+    img: Image.Image,
+    lng: float,
+    lat: float,
+    force_is_urban: Optional[int] = None,
+) -> np.ndarray:
     """
     Extraire le vecteur 18-dim depuis un patch PIL Image et ses coordonnées géographiques.
 
@@ -146,6 +153,8 @@ def extract_features(img: Image.Image, lng: float, lat: float) -> np.ndarray:
         img: Image PIL (RGB ou autre mode, converti automatiquement)
         lng: longitude du centre du patch (degrés décimaux)
         lat: latitude du centre du patch (degrés décimaux)
+        force_is_urban: si fourni (0 ou 1), court-circuite get_is_urban_feature().
+                        Permet à l'utilisateur de forcer le contexte (Forêt=0 / Sprint=1).
 
     Returns:
         np.ndarray float32 de forme (18,)
@@ -201,8 +210,8 @@ def extract_features(img: Image.Image, lng: float, lat: float) -> np.ndarray:
     p_nz = p[p > 0]
     entropy = float(-np.sum(p_nz * np.log(p_nz)) / np.log(256))
 
-    # 7. Feature urbaine
-    is_urban = get_is_urban_feature(lng, lat)
+    # 7. Feature urbaine (forcée par l'utilisateur si force_is_urban est fourni)
+    is_urban = force_is_urban if force_is_urban is not None else get_is_urban_feature(lng, lat)
 
     return np.concatenate(
         [

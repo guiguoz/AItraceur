@@ -3553,6 +3553,7 @@ def generate_sprint_with_validation(body: dict = Body(...)):
     forbidden_zones = body.get("forbidden_zones_polygons", [])
     start_position = body.get("start_position", None)
     existing_controls = body.get("existing_controls", [])  # mode compétition
+    force_mode = body.get("force_mode", None)  # "sprint" | "forest" | None (auto)
 
     dialogue = []
     oob_polygons = list(forbidden_zones)
@@ -3621,14 +3622,15 @@ def generate_sprint_with_validation(body: dict = Body(...)):
                 _mapant_result = _fetch_mapant_bbox_image(bounding_box, zoom=15)
                 if _mapant_result is not None:
                     _map_img, _bbox_wgs84, _mpp = _mapant_result
-                    # step_px dynamique : cible ~75×75 cellules max (~5000 patchs)
-                    # pour éviter les timeouts sur les grandes images MapAnt
-                    _step_px = max(20, int(max(_map_img.width, _map_img.height) / 75))
+                    # step_px dynamique : cible ~40×40 cellules (~1600 patchs)
+                    # ThreadPoolExecutor dans score_map_image → ~2s au lieu de 44s
+                    _step_px = max(20, int(max(_map_img.width, _map_img.height) / 40))
                     heatmap_cache = _scorer_v2.build_heatmap_cache(
                         map_img=_map_img,
                         bbox=_bbox_wgs84,
                         mpp=_mpp,
                         step_px=_step_px,
+                        force_mode=force_mode,
                     )
                     dialogue.append({
                         "role": "system", "step": 0,

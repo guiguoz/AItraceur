@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import logging
 import math
+import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -210,7 +212,13 @@ class OcadPatchScorer:
     # API principale — mode image (v2)
     # ------------------------------------------------------------------
 
-    def score_patch(self, img: Image.Image, lng: float = 0.0, lat: float = 0.0) -> Optional[float]:
+    def score_patch(
+        self,
+        img: Image.Image,
+        lng: float = 0.0,
+        lat: float = 0.0,
+        force_is_urban: Optional[int] = None,
+    ) -> Optional[float]:
         """
         Score un patch PIL Image 256×256.
 
@@ -222,12 +230,14 @@ class OcadPatchScorer:
                  Taille recommandée : 256×256 (redimensionné si nécessaire).
             lng: Longitude WGS84
             lat: Latitude WGS84
+            force_is_urban: 1 (urbain) ou 0 (forêt) pour forcer la feature is_urban.
+                            None = détection automatique.
 
         Returns:
             Probabilité [0..1], ou None si l'extraction échoue.
         """
         try:
-            vec = extract_features(img, lng, lat).reshape(1, -1)
+            vec = extract_features(img, lng, lat, force_is_urban=force_is_urban).reshape(1, -1)
             return float(self._model.predict_proba(vec)[0][1])
         except Exception as exc:
             log.debug("score_patch failed: %s", exc)
@@ -240,6 +250,7 @@ class OcadPatchScorer:
         mpp: float = 0.5,
         worldfile: Optional[tuple[float, float, float, float, float, float]] = None,
         bbox: Optional[tuple[float, float, float, float]] = None,
+        force_mode: Optional[str] = None,
     ) -> List[Dict]:
         """
         Score une liste de candidats sur l'image complète de la carte.
@@ -255,6 +266,7 @@ class OcadPatchScorer:
                  Exemple : pour une carte 1:4000 rendue à 100 dpi → mpp ≈ 1.016.
             worldfile: Paramètres (A, D, B, E, C, F) pour conversion geographique (px → lng, lat).
                        Si None, cherche "worldfile" dans l'objet OcadPatchScorer s'il existe.
+            force_mode: "sprint" → is_urban=1, "forest" → is_urban=0, None → auto.
 
         Returns:
             Liste de dicts [{px, py, score, ...}] dans le même ordre que candidates.
@@ -262,61 +274,53 @@ class OcadPatchScorer:
         """
         map_w, map_h = map_img.size
         wf = worldfile or getattr(self, "worldfile", None)
+        force_is_urban: Optional[int] = {"sprint": 1, "forest": 0}.get(force_mode)  # type: ignore[arg-type]
 
         # FOV à l'entraînement : 256px × 0.5m/px = 128m de côté
         fov_m = 128.0
         crop_px = max(1, int(fov_m / mpp))   # taille du crop en pixels à cette résolution
 
-        results = []
-        for cand in candidates:
+        def _score_one(cand: Dict) -> Dict:
             px = int(cand["px"])
             py = int(cand["py"])
             r = crop_px // 2
 
-            # Coordonnées du crop (peuvent déborder)
             x0, y0 = px - r, py - r
             x1, y1 = x0 + crop_px, y0 + crop_px
 
-            # Intersection avec les limites de l'image
             ix0 = max(0, x0)
             iy0 = max(0, y0)
             ix1 = min(map_w, x1)
             iy1 = min(map_h, y1)
 
             if ix1 <= ix0 or iy1 <= iy0:
-                # Candidat entièrement hors image
-                results.append({**cand, "score": None})
-                continue
+                return {**cand, "score": None}
 
-            # Crop de la zone valide
             region = map_img.crop((ix0, iy0, ix1, iy1))
 
-            # Padding blanc si le crop déborde
             if ix0 != x0 or iy0 != y0 or ix1 != x1 or iy1 != y1:
                 padded = Image.new("RGB", (crop_px, crop_px), (255, 255, 255))
-                paste_x = ix0 - x0
-                paste_y = iy0 - y0
-                padded.paste(region.convert("RGB"), (paste_x, paste_y))
+                padded.paste(region.convert("RGB"), (ix0 - x0, iy0 - y0))
                 region = padded
 
-            # Redimensionnement vers 256×256 (taille d'entraînement)
             if crop_px != 256:
                 region = region.resize((256, 256), Image.LANCZOS)
 
-            # Conversion px/py en lng/lat géographique
             lng, lat = 0.0, 0.0
             if wf:
                 A, D, B, E, C, F = wf
                 lng = A * px + B * py + C
                 lat = D * px + E * py + F
             elif bbox:
-                # Interpolation linéaire depuis la bbox WGS84 (axe Y image inversé vs latitude)
                 min_lng, min_lat, max_lng, max_lat = bbox
                 lng = min_lng + (px / map_w) * (max_lng - min_lng)
                 lat = max_lat - (py / map_h) * (max_lat - min_lat)
 
-            score = self.score_patch(region, lng, lat)
-            results.append({**cand, "score": score})
+            return {**cand, "score": self.score_patch(region, lng, lat, force_is_urban=force_is_urban)}
+
+        n_workers = min(os.cpu_count() or 4, 8)
+        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+            results = list(executor.map(_score_one, candidates))
 
         return results
 
@@ -326,6 +330,7 @@ class OcadPatchScorer:
         bbox: tuple,
         mpp: float = 0.5,
         step_px: int = 20,
+        force_mode: Optional[str] = None,
     ) -> "HeatmapCache":
         """
         Précompute une grille de scores V2 sur l'image carte entière.
@@ -334,10 +339,11 @@ class OcadPatchScorer:
         puis construit un HeatmapCache pour les lookups O(1) du GA.
 
         Args:
-            map_img: Image PIL de la carte complète.
-            bbox:    (min_lng, min_lat, max_lng, max_lat) WGS84 correspondant à l'image.
-            mpp:     Mètres par pixel (default 0.5).
-            step_px: Pas de grille en pixels (default 20 = tous les 10m à mpp=0.5).
+            map_img:    Image PIL de la carte complète.
+            bbox:       (min_lng, min_lat, max_lng, max_lat) WGS84 correspondant à l'image.
+            mpp:        Mètres par pixel (default 0.5).
+            step_px:    Pas de grille en pixels (default 20 = tous les 10m à mpp=0.5).
+            force_mode: "sprint" → is_urban forcé à 1, "forest" → 0, None → auto.
 
         Returns:
             HeatmapCache prêt à l'emploi.
@@ -346,15 +352,16 @@ class OcadPatchScorer:
         xs = list(range(0, map_w, step_px))
         ys = list(range(0, map_h, step_px))
         candidates = [{"px": x, "py": y} for y in ys for x in xs]
+        mode_label = {"sprint": "Sprint/Urbain forcé", "forest": "Forêt forcé"}.get(force_mode or "", "Auto")
         log.info(
-            "HeatmapCache: scoring %d positions (step=%dpx, %dx%d grid)…",
-            len(candidates), step_px, len(xs), len(ys),
+            "HeatmapCache: scoring %d positions (step=%dpx, %dx%d grid, mode=%s)…",
+            len(candidates), step_px, len(xs), len(ys), mode_label,
         )
         log.info(
             "🔥 IA V3 : HeatmapCache généré et transmis à l'Algorithme Génétique ! (bbox=%s, is_urban actif)",
             bbox,
         )
-        results = self.score_map_image(map_img, candidates, mpp=mpp, bbox=bbox)
+        results = self.score_map_image(map_img, candidates, mpp=mpp, bbox=bbox, force_mode=force_mode)
         scores_flat = np.array(
             [r["score"] if r["score"] is not None else 0.0 for r in results],
             dtype=np.float32,

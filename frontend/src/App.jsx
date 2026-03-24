@@ -610,6 +610,7 @@ function App() {
           existing_controls: competitionMode
             ? getAllExistingControls().map(c => ({ lat: c.lat, lng: c.lng, circuitName: c.circuitName }))
             : [],
+          ...(activeCircuit.forceMode && activeCircuit.forceMode !== 'auto' && { force_mode: activeCircuit.forceMode }),
         }
         const res = await generateSprint(sprintParams)
         const data = res.data

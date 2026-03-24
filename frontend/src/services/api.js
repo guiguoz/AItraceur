@@ -58,8 +58,13 @@ export const getSprintCandidates = (bounding_box) =>
  * Génération sprint avec dialogue traceur↔contrôleur automatique.
  * Retourne : { controls, controleur_report, dialogue, iterations, is_valid, score }
  */
+// Retourne immédiatement {task_id, status: "processing"} — le calcul tourne en arrière-plan
 export const generateSprint = (params) =>
-  api.post('/api/v1/generation/generate-sprint', params, { timeout: 300000 });
+  api.post('/api/v1/generation/generate-sprint', params, { timeout: 15000 });
+
+// Polling: GET /sprint-status/{task_id} → {status, controls?, ...}
+export const getSprintStatus = (taskId) =>
+  api.get(`/api/v1/generation/sprint-status/${taskId}`, { timeout: 10000 });
 
 // ── Terrain runnabilité ──────────────────────────────────────────────────────
 export const getRunnabilityGrid = (bbox, resolution_m = 100) =>

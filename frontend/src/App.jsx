@@ -7,7 +7,7 @@ import TerrainPanel from './components/TerrainPanel'
 import CircuitCreationModal from './components/CircuitCreationModal'
 import CircuitSelector from './components/CircuitSelector'
 import AISuggestionPanel from './components/AISuggestionPanel'
-import { generateCircuit, getSprintCandidates, generateSprint, uploadOcdForRender, TILE_SERVICE_URL, getRoutesBetweenControls, analyzeOcadGeojson } from './services/api'
+import { generateCircuit, getSprintCandidates, generateSprint, getSprintStatus, uploadOcdForRender, TILE_SERVICE_URL, getRoutesBetweenControls, analyzeOcadGeojson } from './services/api'
 import DialogueLog from './components/DialogueLog'
 import { buildMapContext } from './services/mapContext'
 import { OcadAnalysisPanel } from './components/OcadAnalysisPanel'
@@ -325,6 +325,39 @@ const tools = [
 
 const STEPS = ['Carte', 'Circuit', 'Traçage', 'Export']
 
+/**
+ * Polling asynchrone d'une tâche generate-sprint.
+ * Résout avec le résultat quand status === "completed", rejette sur erreur ou timeout.
+ */
+async function _pollSprintStatus(taskId, onProgress) {
+  return new Promise((resolve, reject) => {
+    let polls = 0
+    const interval = setInterval(async () => {
+      polls++
+      if (polls > 75) { // 150s max (75 × 2s)
+        clearInterval(interval)
+        reject(new Error('Timeout génération sprint (150s dépassés)'))
+        return
+      }
+      try {
+        const { data } = await getSprintStatus(taskId)
+        if (data.status === 'completed') {
+          clearInterval(interval)
+          resolve(data)
+        } else if (data.status === 'error') {
+          clearInterval(interval)
+          reject(new Error(data.error || 'Erreur génération sprint'))
+        } else {
+          onProgress?.('Génération sprint en cours…')
+        }
+      } catch (err) {
+        clearInterval(interval)
+        reject(err)
+      }
+    }, 2000)
+  })
+}
+
 function App() {
   const [ocadData, setOcadData] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -612,8 +645,8 @@ function App() {
             : [],
           ...(activeCircuit.forceMode && activeCircuit.forceMode !== 'auto' && { force_mode: activeCircuit.forceMode }),
         }
-        const res = await generateSprint(sprintParams)
-        const data = res.data
+        const { data: { task_id } } = await generateSprint(sprintParams)
+        const data = await _pollSprintStatus(task_id, setProgressLabel)
         console.log('[Generate Sprint] response:', data)
         if (data.dialogue?.length) setDialogue(data.dialogue)
         if (data.controleur_report) setControleurReport(data.controleur_report)
@@ -731,14 +764,15 @@ function App() {
     try {
       let newControls
       if (isSprintCircuit) {
-        const res = await generateSprint({
+        const { data: { task_id: _tid } } = await generateSprint({
           bounding_box: bbox,
           ...circuitParams,
           target_controls: Math.ceil(missing * 1.5),
           existing_controls: activeCircuit.controls.map(c => ({ lat: c.lat, lng: c.lng, circuitName: 'current' })),
           forbidden_zones_polygons: activeCircuit.forbiddenZones ?? [],
         })
-        newControls = res.data?.controls ?? []
+        const _completionData = await _pollSprintStatus(_tid, setProgressLabel)
+        newControls = _completionData?.controls ?? []
       } else {
         const res = await generateCircuit({
           bounding_box: bbox,

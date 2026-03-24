@@ -97,6 +97,20 @@ from src.services.controleur.controleur import ControleurSprint
 from src.services.controleur.traceur_corrections import apply_corrections
 from src.models.contribution import Contribution, ControlFeature  # noqa: F401 — tables ML
 
+# ── Tâches sprint asynchrones (pattern Task-Status) ──────────────────────────
+from concurrent.futures import ThreadPoolExecutor as _SprintTPE
+
+_sprint_tasks: dict = {}          # {task_id: {"status": "processing"|"completed"|"error", "result": ...}}
+_sprint_executor = _SprintTPE(max_workers=3)
+
+
+def _cleanup_sprint_tasks(keep: int = 50) -> None:
+    """Garde seulement les <keep> dernières tâches sprint en mémoire."""
+    if len(_sprint_tasks) > keep:
+        oldest = list(_sprint_tasks.keys())[: len(_sprint_tasks) - keep]
+        for k in oldest:
+            del _sprint_tasks[k]
+
 
 # =============================================
 # Création de l'application FastAPI
@@ -3516,29 +3530,8 @@ def _fetch_mapant_bbox_image(
         return None
 
 
-@app.post(
-    "/api/v1/generation/generate-sprint",
-    summary="Génération sprint avec validation contrôleur automatique",
-    description=(
-        "Pipeline complet traceur↔contrôleur : génère un circuit sprint, "
-        "le valide selon les normes IOF/FFCO (C01–C12), applique des corrections "
-        "automatiques si nécessaire, et retourne le log du dialogue."
-    ),
-)
-def generate_sprint_with_validation(body: dict = Body(...)):
-    """
-    Boucle traceur ↔ contrôleur (max 5 itérations).
-
-    Corps attendu :
-        bounding_box: {min_x, min_y, max_x, max_y}
-        category: catégorie (ex: "elite", "junior", "training")
-        target_length_m, target_controls, winning_time_minutes
-        technical_level: "TD1"–"TD5"
-        candidate_points: [{x, y, type}, ...] (optionnel, OSM auto si absent)
-        forbidden_zones_polygons: [[[lon, lat], ...]] (optionnel)
-        start_position: [lng, lat] (optionnel)
-        max_iterations: int (défaut 5)
-    """
+def _sprint_impl(task_id: str, body: dict) -> None:
+    """Corps du pipeline sprint — appelé depuis _run_sprint_task (thread de fond)."""
     from src.services.generation.ai_generator import AIGenerator, GenerationRequest
     from src.services.terrain.osm_fetcher import extract_sprint_features
 
@@ -3831,18 +3824,60 @@ def generate_sprint_with_validation(body: dict = Body(...)):
             })
             current_controls = filtered
 
-    # ── Résultat ───────────────────────────────────────────────────────────────
+    # ── Résultat ─────────────────────────────────────────────────────────────
     final_report_dict = controleur.to_dict(final_report) if final_report else {}
     final_report_dict["iterations_used"] = len([d for d in dialogue if d["role"] == "traceur"])
 
-    return {
-        "controls": _to_xy(current_controls),
-        "controleur_report": final_report_dict,
-        "dialogue": dialogue,
-        "iterations": final_report_dict.get("iterations_used", 0),
-        "is_valid": final_report.is_valid if final_report else False,
-        "score": final_report.global_score if final_report else 0,
+    _sprint_tasks[task_id] = {
+        "status": "completed",
+        "result": {
+            "controls": _to_xy(current_controls),
+            "controleur_report": final_report_dict,
+            "dialogue": dialogue,
+            "iterations": final_report_dict.get("iterations_used", 0),
+            "is_valid": final_report.is_valid if final_report else False,
+            "score": final_report.global_score if final_report else 0,
+        }
     }
+
+
+def _run_sprint_task(task_id: str, body: dict) -> None:
+    """Wrapper try/except pour _sprint_impl — exécuté dans ThreadPoolExecutor."""
+    try:
+        _sprint_impl(task_id, body)
+    except Exception as _exc:
+        _sprint_tasks[task_id] = {
+            "status": "error",
+            "result": {"error": str(_exc), "dialogue": []}
+        }
+
+
+@app.post(
+    "/api/v1/generation/generate-sprint",
+    status_code=202,
+    summary="Génération sprint (asynchrone) — retourne task_id immédiatement",
+)
+def generate_sprint_with_validation(body: dict = Body(...)):
+    """Lance le pipeline sprint en arrière-plan et retourne un task_id."""
+    task_id = str(uuid.uuid4())
+    _sprint_tasks[task_id] = {"status": "processing", "result": None}
+    _cleanup_sprint_tasks()
+    _sprint_executor.submit(_run_sprint_task, task_id, body)
+    return {"task_id": task_id, "status": "processing"}
+
+
+@app.get(
+    "/api/v1/generation/sprint-status/{task_id}",
+    summary="Statut d'une tâche sprint asynchrone",
+)
+def get_sprint_status(task_id: str):
+    """Retourne processing / completed / error. Inclut le résultat quand completed."""
+    task = _sprint_tasks.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task["status"] == "processing":
+        return {"task_id": task_id, "status": "processing"}
+    return {"task_id": task_id, "status": task["status"], **task["result"]}
 
 
 # ── Étape 10f — Itinéraires entre deux postes ──────────────────────────────

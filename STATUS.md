@@ -9,10 +9,10 @@
 
 | Champ | Valeur |
 |-------|--------|
-| **Dernière étape complétée** | Étape 13 — OCAD-first workflow : fond OCAD seul, extraction exhaustive candidats, analyse GeoJSON, fusion OCAD+OSM |
-| **Date** | 2026-03-04 |
-| **Prochaine étape** | À définir |
-| **État global** | 🟢 OCAD-first : fond PNG OCAD (sans OSM affiché), candidats postes depuis coins/virages OCAD + fusion OSM invisible, rapport OCAD sidebar |
+| **Dernière étape complétée** | Sprint async Task-Status + force_mode terrain (urbain/forêt) + diagnostic pipeline |
+| **Date** | 2026-03-24 |
+| **Prochaine étape** | Test UI complet + déploiement prod |
+| **État global** | 🟢 Sprint asynchrone validé (39s, is_valid=True) — Pattern Task-Status opérationnel |
 
 ---
 
@@ -54,6 +54,12 @@
 - [x] **Étape 14** — Descriptions IOF/FFCO 2018 intégrées : control_descriptions.json (ISOM→colonne D), _describe_control() retourne code IOF, prompt LLM "poste sur feature descriptible", description affichée par poste dans ControlsList ✅ 2026-03-04
 - [x] **Étape 15a** — GA critère terrain_quality (10%) : attractivité IOF par poste (very_high=1.0 … low=0.15), intersection géom=1.0 forcé, cache isom_att_scores au init ✅ 2026-03-04
 - [x] **Étape 15b** — Contrôleur C13 : warning si poste sans feature IOF descriptible (colonne D), suggère jonction/coin bâtiment/dépression/bloc ✅ 2026-03-04
+- [x] **GA V2** — HeatmapCache XGBoost (MapAnt tiles → grille O(1)) + Smart Seeding + fitness multicritère ✅ 2026-03-21
+- [x] **ML V3** — Scorer 18-dim bi-mode (is_urban feat[17]) + scraping RG2 370k patches + Overpass miroirs ✅ 2026-03-23
+- [x] **force_mode** — Sélecteur terrain [Auto/Urbain/Forêt] dans CircuitCreationModal → force is_urban dans scorer V3 ✅ 2026-03-24
+- [x] **Sprint async (Task-Status)** — POST retourne task_id en <100ms, pipeline en background ThreadPool, GET /sprint-status polling 2s ✅ 2026-03-24
+- [x] **MapAnt timeout fix** — wrapper 30s sur _fetch_mapant_bbox_image, évite blocage thread background indéfini ✅ 2026-03-24
+- [x] **Diagnostic pipeline** — prints horodatés dans _sprint_impl (OSM/MapAnt/HeatmapCache/GA/Contrôleur) ✅ 2026-03-24
 
 ---
 
@@ -120,7 +126,7 @@ Test utilisateur révèle 3 problèmes critiques bloquants :
 | LIDAR IGN | ⚠️ | API IGN altimétrie intégrée (1m réel), nuage LIDAR = futur |
 | Génération de circuit (algo génétique) | ✅ | |
 | Génération de circuit (IA / GPT) | ✅ | Nécessite clé OpenAI |
-| Génération sprint avec dialogue traceur↔contrôleur | ✅ | `/generate-sprint` boucle max 5 iter. |
+| Génération sprint avec dialogue traceur↔contrôleur | ✅ | `/generate-sprint` async Task-Status — 202 + polling /sprint-status |
 | Module ControleurSprint (C01–C12 IOF/FFCO) | ✅ | Scoring 0–100, issues structurées |
 | RouteAnalyzer (A* OSM, dog-leg réel, C11 route choice) | ✅ | NetworkX, Yen's k-shortest |
 | Scoring IOF (TD/PD/dog-legs) | ✅ | Dog-leg via bearing haversine + A* OSM |

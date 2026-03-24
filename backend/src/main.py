@@ -3532,6 +3532,11 @@ def _fetch_mapant_bbox_image(
 
 def _sprint_impl(task_id: str, body: dict) -> None:
     """Corps du pipeline sprint — appelé depuis _run_sprint_task (thread de fond)."""
+    import time as _time
+    _t0 = _time.time()
+    _tag = f"[sprint {task_id[:8]}]"
+    print(f"{_tag} 🚀 début pipeline", flush=True)
+
     from src.services.generation.ai_generator import AIGenerator, GenerationRequest
     from src.services.terrain.osm_fetcher import extract_sprint_features
 
@@ -3609,15 +3614,27 @@ def _sprint_impl(task_id: str, body: dict) -> None:
     heatmap_cache = None
     if bounding_box:
         try:
+            print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ chargement scorer V2...", flush=True)
             from src.services.learning.ocad_patch_scorer import OcadPatchScorer as _OPS
             _scorer_v2 = _OPS.load()
             if _scorer_v2 is not None:
-                _mapant_result = _fetch_mapant_bbox_image(bounding_box, zoom=15)
+                print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ fetch MapAnt tiles...", flush=True)
+                import concurrent.futures as _cfs
+                with _cfs.ThreadPoolExecutor(max_workers=1) as _mex:
+                    _mapant_fut = _mex.submit(_fetch_mapant_bbox_image, bounding_box, 15)
+                    try:
+                        _mapant_result = _mapant_fut.result(timeout=30)
+                    except _cfs.TimeoutError:
+                        import logging as _log
+                        _log.getLogger(__name__).warning("MapAnt fetch timeout (>30s) — skipping heatmap cache")
+                        _mapant_result = None
+                print(f"{_tag} ⏱{_time.time()-_t0:.1f}s {'✅ MapAnt OK' if _mapant_result else '⚠️ MapAnt None/timeout'}", flush=True)
                 if _mapant_result is not None:
                     _map_img, _bbox_wgs84, _mpp = _mapant_result
                     # step_px dynamique : cible ~40×40 cellules (~1600 patchs)
                     # ThreadPoolExecutor dans score_map_image → ~2s au lieu de 44s
                     _step_px = max(20, int(max(_map_img.width, _map_img.height) / 40))
+                    print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ build_heatmap_cache (step_px={_step_px})...", flush=True)
                     heatmap_cache = _scorer_v2.build_heatmap_cache(
                         map_img=_map_img,
                         bbox=_bbox_wgs84,
@@ -3625,6 +3642,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                         step_px=_step_px,
                         force_mode=force_mode,
                     )
+                    print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ✅ HeatmapCache OK {heatmap_cache.scores.shape}", flush=True)
                     dialogue.append({
                         "role": "system", "step": 0,
                         "message": (
@@ -3634,6 +3652,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                         )
                     })
         except Exception as _hm_err:
+            print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⚠️ HeatmapCache exception: {_hm_err}", flush=True)
             dialogue.append({
                 "role": "system", "step": 0,
                 "message": f"HeatmapCache indisponible (fallback ISOM) : {_hm_err}"
@@ -3655,9 +3674,12 @@ def _sprint_impl(task_id: str, body: dict) -> None:
         heatmap_cache=heatmap_cache,
     )
 
+    print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ GA generate ({len(candidate_points)} candidats)...", flush=True)
     try:
         gen_result = generator.generate(gen_request)
+        print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ✅ GA OK ({len(gen_result[0].controls) if gen_result else 0} controls)", flush=True)
     except Exception as e:
+        print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ❌ GA exception: {e}", flush=True)
         return {"error": f"Génération initiale échouée : {e}", "dialogue": dialogue}
 
     # Convertir les postes générés (x/y → lat/lng pour le contrôleur)
@@ -3737,6 +3759,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
     final_report = None
 
     for iteration in range(1, max_iterations + 1):
+        print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ contrôleur iter {iteration}/{max_iterations}...", flush=True)
         report = controleur.validate(
             current_controls,
             oob_polygons=oob_polygons,
@@ -3828,6 +3851,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
     final_report_dict = controleur.to_dict(final_report) if final_report else {}
     final_report_dict["iterations_used"] = len([d for d in dialogue if d["role"] == "traceur"])
 
+    print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ✅ DONE is_valid={final_report.is_valid if final_report else False} score={final_report.global_score if final_report else 0:.3f}", flush=True)
     _sprint_tasks[task_id] = {
         "status": "completed",
         "result": {

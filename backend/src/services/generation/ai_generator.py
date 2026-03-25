@@ -314,11 +314,15 @@ class AIGenerator:
         result = ga.generate(start, end, request.forbidden_zones)
 
         # ── Re-ranker choix d'itinéraire (post-GA, sprint uniquement) ──────────
+        import time as _time_mod
         _route_choices_by_idx: list = [None] * len(result.circuits)
         if request.route_analyzer is not None and sprint_mode and result.circuits:
             _best_idx = 0
             _best_total = -1.0
-            for _ci, _ckt in enumerate(result.circuits[:3]):  # Top-3 suffit (Top-10 = 200s)
+            _reranker_t0 = _time_mod.time()
+            for _ci, _ckt in enumerate(result.circuits[:3]):  # Top-3 max
+                if _time_mod.time() - _reranker_t0 > 15.0:   # cap 15s total
+                    break
                 try:
                     _rc = request.route_analyzer.score_circuit_choices(_ckt.controls, k=2)
                     _route_choices_by_idx[_ci] = _rc

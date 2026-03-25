@@ -704,31 +704,21 @@ function App() {
         if (data.controleur_report) setControleurReport(data.controleur_report)
         if (!data.controls?.length) throw new Error('Aucun circuit généré')
         controls = data.controls
-        // Auto-afficher les choix d'itinéraire pour les jambes avec score > 0.3
+        // Auto-afficher les choix d'itinéraire — waypoints embarqués dans la réponse (pas d'appel Overpass)
         if (data.leg_route_choices?.length) {
-          const ordered = data.controls
-            .filter(c => ['start', 'control', 'finish'].includes(c.type))
-            .sort((a, b) => (a.type === 'finish' ? 1 : b.type === 'finish' ? -1 : (a.order ?? 0) - (b.order ?? 0)))
           const newMap = {}
-          await Promise.allSettled(
-            data.leg_route_choices
-              .filter(lrc => lrc.choice_score > 0.3)
-              .map(async (lrc) => {
-                const ca = ordered[lrc.leg_idx]
-                const cb = ordered[lrc.leg_idx + 1]
-                if (!ca || !cb) return
-                try {
-                  const res = await getRoutesBetweenControls({
-                    from: { lat: ca.lat ?? ca.y, lng: ca.lng ?? ca.x },
-                    to:   { lat: cb.lat ?? cb.y, lng: cb.lng ?? cb.x },
-                    k: 2,
-                  })
-                  if (res.data.routes?.length >= 2) {
-                    newMap[lrc.leg_idx] = { routes: res.data.routes, choiceScore: lrc.choice_score }
-                  }
-                } catch (_) { /* affichage optionnel — silencieux si Overpass échoue */ }
-              })
-          )
+          data.leg_route_choices
+            .filter(lrc => lrc.choice_score > 0.3 && lrc.waypoints_list?.length >= 2)
+            .forEach(lrc => {
+              newMap[lrc.leg_idx] = {
+                routes: lrc.waypoints_list.map((wpts, i) => ({
+                  rank: i + 1,
+                  distance_m: lrc.distances_m?.[i] ?? 0,
+                  waypoints: wpts,  // [lng, lat] — même format que routes-between
+                })),
+                choiceScore: lrc.choice_score,
+              }
+            })
           setLegRoutesMap(newMap)
         }
       } else {

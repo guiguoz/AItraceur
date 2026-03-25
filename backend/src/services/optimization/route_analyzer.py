@@ -252,10 +252,13 @@ class RouteAnalyzer:
             lng_b, lat_b = _lnglat(controls[i + 1])
             try:
                 routes = self.get_k_routes(lng_a, lat_a, lng_b, lat_b, k=k)
+                def _waypoints(r):
+                    return [[round(lng, 6), round(lat, 6)] for lng, lat in r]
+
                 if not routes:
                     leg_details.append({
                         "leg_idx": i, "n_routes": 0, "distances_m": [],
-                        "choice_score": 0.0, "similarity_ratio": 0.0,
+                        "choice_score": 0.0, "similarity_ratio": 0.0, "waypoints_list": [],
                     })
                     continue
                 if len(routes) < 2:
@@ -263,6 +266,7 @@ class RouteAnalyzer:
                         "leg_idx": i, "n_routes": 1,
                         "distances_m": [round(self.route_length_m(routes[0]), 1)],
                         "choice_score": 0.0, "similarity_ratio": 0.0,
+                        "waypoints_list": [_waypoints(routes[0])],
                     })
                     continue
                 distances = [self.route_length_m(r) for r in routes]
@@ -277,11 +281,12 @@ class RouteAnalyzer:
                     "distances_m": [round(d, 1) for d in distances],
                     "choice_score": round(choice_score, 4),
                     "similarity_ratio": round(similarity_ratio, 4),
+                    "waypoints_list": [_waypoints(r) for r in routes],
                 })
             except Exception:
                 leg_details.append({
                     "leg_idx": i, "n_routes": 0, "distances_m": [],
-                    "choice_score": 0.0, "similarity_ratio": 0.0,
+                    "choice_score": 0.0, "similarity_ratio": 0.0, "waypoints_list": [],
                 })
 
         total = sum(d["choice_score"] for d in leg_details)

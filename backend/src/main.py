@@ -3660,6 +3660,41 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                         force_mode=force_mode,
                     )
                     print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ✅ HeatmapCache OK {heatmap_cache.scores.shape}", flush=True)
+                    # ── OOBMask : rasterisation des polygones OOB OSM → plus fiable que RGB ──
+                    if oob_polygons:
+                        try:
+                            import numpy as _np_oob
+                            from PIL import Image as _PILImg, ImageDraw as _PILDraw
+                            _mb = heatmap_cache.bbox
+                            _mw, _mh = heatmap_cache.map_w, heatmap_cache.map_h
+                            _min_lng, _min_lat, _max_lng, _max_lat = _mb
+                            _mask_img = _PILImg.new("L", (_mw, _mh), 0)
+                            _draw = _PILDraw.Draw(_mask_img)
+                            def _to_px(_lng, _lat):
+                                return (
+                                    int((_lng - _min_lng) / (_max_lng - _min_lng) * _mw),
+                                    int((1.0 - (_lat - _min_lat) / (_max_lat - _min_lat)) * _mh),
+                                )
+                            for _poly in oob_polygons:
+                                _pts = [_to_px(p[0], p[1]) for p in _poly if len(p) >= 2]
+                                if len(_pts) >= 3:
+                                    _draw.polygon(_pts, fill=255)
+                            _oob_arr = _np_oob.array(_mask_img, dtype=bool)
+                            _kpx = max(10, min(40, int(15.0 / max(_mpp, 0.1))))
+                            from scipy.ndimage import binary_dilation as _bd_oob
+                            _oob_dil = _bd_oob(_oob_arr, structure=_np_oob.ones((_kpx, _kpx), dtype=bool)).astype(bool)
+                            if heatmap_cache.forbidden_mask is not None:
+                                heatmap_cache.forbidden_mask = heatmap_cache.forbidden_mask | _oob_dil
+                            else:
+                                heatmap_cache.forbidden_mask = _oob_dil
+                            print(
+                                f"OOBMask: {float(_oob_dil.mean()) * 100:.1f}% de la carte interdite "
+                                f"via {len(oob_polygons)} polygones OSM (kernel={_kpx}px)",
+                                flush=True,
+                            )
+                        except Exception as _oob_err:
+                            print(f"⚠️ OOBMask ÉCHEC: {_oob_err}", flush=True)
+                    # ────────────────────────────────────────────────────────────────────
                     dialogue.append({
                         "role": "system", "step": 0,
                         "message": (

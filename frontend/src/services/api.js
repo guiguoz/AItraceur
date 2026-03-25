@@ -66,6 +66,13 @@ export const generateSprint = (params) =>
 export const getSprintStatus = (taskId) =>
   api.get(`/api/v1/generation/sprint-status/${taskId}`, { timeout: 10000 });
 
+// Génération MD/LD async (pattern Task-Status)
+export const generateCircuitAsync = (params) =>
+  api.post('/api/v1/generation/generate-circuit', params, { timeout: 15000 });
+
+export const getCircuitStatus = (taskId) =>
+  api.get(`/api/v1/generation/circuit-status/${taskId}`, { timeout: 10000 });
+
 // ── Terrain runnabilité ──────────────────────────────────────────────────────
 export const getRunnabilityGrid = (bbox, resolution_m = 100) =>
   api.post('/api/v1/terrain/runnability-grid', { bounding_box: bbox, resolution_m }, { timeout: 60000 });

@@ -160,6 +160,13 @@ Ce projet s'est inspiré des outils et standards suivants :
 
 ---
 
-## Licence
+## ⚖️ Licence & Usage
 
-Projet à usage éducatif et de recherche.
+Ce projet est sous licence **GNU Affero General Public License v3.0 (AGPL-3.0)** — voir le fichier [LICENSE](./LICENSE).
+
+- **Open Source** : Utilisation, modification et distribution libres sous réserve de publier les modifications du code source, y compris en mode SaaS (utilisation via réseau).
+- **Usage commercial propriétaire** : Si vous souhaitez intégrer AItraceur dans un produit commercial fermé sans publier vos modifications, contactez l'auteur pour un accord de licence commerciale.
+
+AItraceur est un projet de recherche. Toute appropriation commerciale sans respect des termes de l'AGPL est interdite.
+
+Copyright (c) 2026 Guillaume Lemiègre

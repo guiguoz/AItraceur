@@ -210,6 +210,72 @@ class RouteAnalyzer:
             total += _haversine_m(route[i][1], route[i][0], route[i + 1][1], route[i + 1][0])
         return total
 
+    def score_circuit_choices(
+        self,
+        controls: list,
+        k: int = 2,
+    ) -> dict:
+        """
+        Score de choix d'itinéraire pour un circuit complet (post-GA uniquement).
+
+        controls : liste de dict {lng, lat} ou tuples (lng, lat).
+        Retourne {total_choice_score, avg_choice_score, leg_details}.
+
+        choice_score par jambe = diversity_score × similarity_bonus
+        similarity_bonus = 1.0 si (min_dist/max_dist) > 0.85, sinon ratio/0.85
+        → 1.0 = deux routes distinctes ET longueurs quasi-égales (choix non-évident)
+        """
+        def _lnglat(c):
+            if isinstance(c, dict):
+                return c["lng"], c["lat"]
+            return float(c[0]), float(c[1])
+
+        leg_details = []
+        for i in range(len(controls) - 1):
+            lng_a, lat_a = _lnglat(controls[i])
+            lng_b, lat_b = _lnglat(controls[i + 1])
+            try:
+                routes = self.get_k_routes(lng_a, lat_a, lng_b, lat_b, k=k)
+                if not routes:
+                    leg_details.append({
+                        "leg_idx": i, "n_routes": 0, "distances_m": [],
+                        "choice_score": 0.0, "similarity_ratio": 0.0,
+                    })
+                    continue
+                if len(routes) < 2:
+                    leg_details.append({
+                        "leg_idx": i, "n_routes": 1,
+                        "distances_m": [round(self.route_length_m(routes[0]), 1)],
+                        "choice_score": 0.0, "similarity_ratio": 0.0,
+                    })
+                    continue
+                distances = [self.route_length_m(r) for r in routes]
+                min_d, max_d = min(distances), max(distances)
+                similarity_ratio = (min_d / max_d) if max_d > 0 else 1.0
+                similarity_bonus = 1.0 if similarity_ratio > 0.85 else (similarity_ratio / 0.85)
+                diversity = self.route_diversity_score(lng_a, lat_a, lng_b, lat_b, k=k)
+                choice_score = diversity * similarity_bonus
+                leg_details.append({
+                    "leg_idx": i,
+                    "n_routes": len(routes),
+                    "distances_m": [round(d, 1) for d in distances],
+                    "choice_score": round(choice_score, 4),
+                    "similarity_ratio": round(similarity_ratio, 4),
+                })
+            except Exception:
+                leg_details.append({
+                    "leg_idx": i, "n_routes": 0, "distances_m": [],
+                    "choice_score": 0.0, "similarity_ratio": 0.0,
+                })
+
+        total = sum(d["choice_score"] for d in leg_details)
+        avg = total / len(leg_details) if leg_details else 0.0
+        return {
+            "total_choice_score": round(total, 4),
+            "avg_choice_score": round(avg, 4),
+            "leg_details": leg_details,
+        }
+
     # ── Infos graphe ───────────────────────────────────────────────────────────
 
     @property

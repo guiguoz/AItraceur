@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { MapViewer } from './components/MapViewer'
 import OcadUploader from './components/OcadUploader'
 import GpxImporter from './components/GpxImporter'
@@ -7,7 +7,7 @@ import TerrainPanel from './components/TerrainPanel'
 import CircuitCreationModal from './components/CircuitCreationModal'
 import CircuitSelector from './components/CircuitSelector'
 import AISuggestionPanel from './components/AISuggestionPanel'
-import { generateCircuit, getSprintCandidates, generateSprint, getSprintStatus, uploadOcdForRender, TILE_SERVICE_URL, getRoutesBetweenControls, analyzeOcadGeojson } from './services/api'
+import { generateCircuit, getSprintCandidates, generateSprint, getSprintStatus, generateCircuitAsync, getCircuitStatus, uploadOcdForRender, TILE_SERVICE_URL, getRoutesBetweenControls, analyzeOcadGeojson } from './services/api'
 import DialogueLog from './components/DialogueLog'
 import { buildMapContext } from './services/mapContext'
 import { OcadAnalysisPanel } from './components/OcadAnalysisPanel'
@@ -334,9 +334,9 @@ async function _pollSprintStatus(taskId, onProgress) {
     let polls = 0
     const interval = setInterval(async () => {
       polls++
-      if (polls > 75) { // 150s max (75 × 2s)
+      if (polls > 300) { // 600s max (300 × 2s = 10 min)
         clearInterval(interval)
-        reject(new Error('Timeout génération sprint (150s dépassés)'))
+        reject(new Error('Timeout génération sprint (10 min)'))
         return
       }
       try {
@@ -349,6 +349,35 @@ async function _pollSprintStatus(taskId, onProgress) {
           reject(new Error(data.error || 'Erreur génération sprint'))
         } else {
           onProgress?.('Génération sprint en cours…')
+        }
+      } catch (err) {
+        clearInterval(interval)
+        reject(err)
+      }
+    }, 2000)
+  })
+}
+
+async function _pollCircuitStatus(taskId, onProgress) {
+  return new Promise((resolve, reject) => {
+    let polls = 0
+    const interval = setInterval(async () => {
+      polls++
+      if (polls > 300) { // 600s max (300 × 2s = 10 min)
+        clearInterval(interval)
+        reject(new Error('Timeout génération circuit (10 min)'))
+        return
+      }
+      try {
+        const { data } = await getCircuitStatus(taskId)
+        if (data.status === 'completed') {
+          clearInterval(interval)
+          resolve(data)
+        } else if (data.status === 'error') {
+          clearInterval(interval)
+          reject(new Error(data.error || 'Erreur génération circuit'))
+        } else {
+          onProgress?.('Génération en cours…')
         }
       } catch (err) {
         clearInterval(interval)
@@ -375,6 +404,7 @@ function App() {
   const [controleurReport, setControleurReport] = useState(null)
   const [progressLabel, setProgressLabel] = useState('')
   const [routeDisplay, setRouteDisplay] = useState(null) // { legIdx, routes }
+  const [legRoutesMap, setLegRoutesMap] = useState({}) // {legIdx: {routes, choiceScore}} auto-affiché post-sprint
   const [lastBbox, setLastBbox] = useState(null) // bbox du dernier appel de génération
 
   // Leaflet map ref — used for viewport bbox when no OCAD loaded
@@ -388,6 +418,10 @@ function App() {
   // Competition mode
   const [competitionMode, setCompetitionMode] = useState(false)
   const [competitionName, setCompetitionName] = useState('')
+
+  // Contexte terrain global (remplace forceMode per-circuit dans CircuitCreationModal)
+  const [forceMode, setForceMode] = useState('auto')
+  const [detectedMode, setDetectedMode] = useState(null) // null | 'sprint' | 'forest'
 
   const getAllExistingControls = () =>
     circuits
@@ -444,6 +478,22 @@ function App() {
         .catch(err => console.warn('[OCAD analyze]', err.message))
     }
   }
+
+  // Détection auto du contexte terrain basée sur les symboles OCAD
+  useEffect(() => {
+    const features = ocadData?.geojson?.features
+    if (!features?.length) { setDetectedMode(null); return }
+    let built = 0, road = 0
+    for (const feat of features) {
+      const raw = feat.properties?.sym ?? feat.properties?.symbol
+      const n = Math.floor(typeof raw === 'number' ? raw : parseFloat(raw))
+      if (isNaN(n)) continue
+      const s = n > 10000 ? Math.floor(n / 1000) : n
+      if (s >= 521 && s <= 526) built++
+      else if (s >= 501 && s <= 504) road++
+    }
+    setDetectedMode(built > 5 || (built > 0 && road > 15) ? 'sprint' : 'forest')
+  }, [ocadData])
 
   const handleError = (errMsg) => {
     setError(errMsg)
@@ -520,6 +570,7 @@ function App() {
   }
 
   const handleDeleteControl = (controlId) => {
+    setLegRoutesMap({}) // les index de jambes changent après suppression
     updateActiveCircuit(c => {
       const filtered = c.controls.filter(ctrl => ctrl.id !== controlId)
       return { controls: filtered.map((ctrl, i) => ({ ...ctrl, order: i + 1 })) }
@@ -541,6 +592,7 @@ function App() {
     setGenerationError(null)
     setDialogue([])
     setControleurReport(null)
+    setLegRoutesMap({})
     setProgressLabel('Génération initiale…')
     try {
       // Priority: tile service bounds > OCAD GeoJSON bounds > Leaflet viewport
@@ -643,7 +695,7 @@ function App() {
           existing_controls: competitionMode
             ? getAllExistingControls().map(c => ({ lat: c.lat, lng: c.lng, circuitName: c.circuitName }))
             : [],
-          ...(activeCircuit.forceMode && activeCircuit.forceMode !== 'auto' && { force_mode: activeCircuit.forceMode }),
+          ...(forceMode !== 'auto' ? { force_mode: forceMode } : detectedMode ? { force_mode: detectedMode } : {}),
         }
         const { data: { task_id } } = await generateSprint(sprintParams)
         const data = await _pollSprintStatus(task_id, setProgressLabel)
@@ -652,10 +704,39 @@ function App() {
         if (data.controleur_report) setControleurReport(data.controleur_report)
         if (!data.controls?.length) throw new Error('Aucun circuit généré')
         controls = data.controls
+        // Auto-afficher les choix d'itinéraire pour les jambes avec score > 0.3
+        if (data.leg_route_choices?.length) {
+          const ordered = data.controls
+            .filter(c => ['start', 'control', 'finish'].includes(c.type))
+            .sort((a, b) => (a.type === 'finish' ? 1 : b.type === 'finish' ? -1 : (a.order ?? 0) - (b.order ?? 0)))
+          const newMap = {}
+          await Promise.allSettled(
+            data.leg_route_choices
+              .filter(lrc => lrc.choice_score > 0.3)
+              .map(async (lrc) => {
+                const ca = ordered[lrc.leg_idx]
+                const cb = ordered[lrc.leg_idx + 1]
+                if (!ca || !cb) return
+                try {
+                  const res = await getRoutesBetweenControls({
+                    from: { lat: ca.lat ?? ca.y, lng: ca.lng ?? ca.x },
+                    to:   { lat: cb.lat ?? cb.y, lng: cb.lng ?? cb.x },
+                    k: 2,
+                  })
+                  if (res.data.routes?.length >= 2) {
+                    newMap[lrc.leg_idx] = { routes: res.data.routes, choiceScore: lrc.choice_score }
+                  }
+                } catch (_) { /* affichage optionnel — silencieux si Overpass échoue */ }
+              })
+          )
+          setLegRoutesMap(newMap)
+        }
       } else {
-        const res = await generateCircuit(params)
-        console.log('[AI Generate] response:', res.data)
-        const best = res.data?.circuits?.[0]
+        setProgressLabel('Génération en cours…')
+        const { data: { task_id } } = await generateCircuitAsync(params)
+        const data = await _pollCircuitStatus(task_id, setProgressLabel)
+        console.log('[AI Generate] response:', data)
+        const best = data.circuits?.[0]
         console.log('[AI Generate] best circuit:', best)
         if (!best?.controls?.length) throw new Error('Aucun circuit généré')
         controls = best.controls
@@ -770,6 +851,7 @@ function App() {
           target_controls: Math.ceil(missing * 1.5),
           existing_controls: activeCircuit.controls.map(c => ({ lat: c.lat, lng: c.lng, circuitName: 'current' })),
           forbidden_zones_polygons: activeCircuit.forbiddenZones ?? [],
+          ...(forceMode !== 'auto' ? { force_mode: forceMode } : detectedMode ? { force_mode: detectedMode } : {}),
         })
         const _completionData = await _pollSprintStatus(_tid, setProgressLabel)
         newControls = _completionData?.controls ?? []
@@ -1064,6 +1146,39 @@ function App() {
               {/* OCAD Analysis Panel (13c) */}
               {ocadAnalysis && <OcadAnalysisPanel analysis={ocadAnalysis} />}
 
+              {/* Contexte terrain — widget global permanent */}
+              <div className="bg-gray-700/50 p-4 rounded-xl border border-gray-700">
+                <h2 className="text-sm font-semibold text-gray-200 mb-1">Contexte terrain</h2>
+                {detectedMode && forceMode === 'auto' ? (
+                  <p className="text-xs text-blue-400 mb-2">
+                    IA détecte : {detectedMode === 'sprint' ? '🏙 Urbain' : '🌲 Forêt'}
+                  </p>
+                ) : (
+                  <p className="text-xs text-gray-500 mb-2">
+                    L'IA détecte automatiquement. Corrigez si nécessaire :
+                  </p>
+                )}
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { value: 'auto',   label: 'Auto (IA)' },
+                    { value: 'sprint', label: '🏙 Urbain'  },
+                    { value: 'forest', label: '🌲 Forêt'   },
+                  ].map(({ value, label }) => (
+                    <button
+                      key={value}
+                      onClick={() => setForceMode(value)}
+                      className={`py-1.5 px-2 rounded-lg text-xs font-medium border transition-all ${
+                        forceMode === value
+                          ? 'bg-blue-600 border-blue-500 text-white'
+                          : 'bg-gray-800 border-gray-600 text-gray-400 hover:border-gray-500'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Active circuit panel — always visible */}
               {activeCircuit ? (
                 <>
@@ -1331,6 +1446,7 @@ function App() {
           onUpdateSuggestion={handleUpdateSuggestion}
           onMapReady={(map) => { mapRef.current = map }}
           routeDisplay={routeDisplay}
+          legRoutesMap={legRoutesMap}
           ocadMode={mapMode === 'ocad' && !!imageData}
           backgroundControls={competitionMode ? getAllExistingControls() : []}
         />

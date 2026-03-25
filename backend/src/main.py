@@ -101,6 +101,7 @@ from src.models.contribution import Contribution, ControlFeature  # noqa: F401 �
 from concurrent.futures import ThreadPoolExecutor as _SprintTPE
 
 _sprint_tasks: dict = {}          # {task_id: {"status": "processing"|"completed"|"error", "result": ...}}
+_circuit_tasks: dict = {}         # {task_id: {"status": "processing"|"completed"|"error", ...}}
 _sprint_executor = _SprintTPE(max_workers=3)
 
 
@@ -1976,29 +1977,8 @@ def get_sprint_candidates(body: dict = Body(...)):
     return extract_sprint_features(bbox)
 
 
-@app.post(
-    "/api/v1/generation/generate",
-    summary="Génère des circuits",
-    description="Génère des circuits automatiquement avec GA et/ou IA",
-)
-def generate_circuits(body: dict = Body(...)):
-    """
-    Génère des circuits automatiquement.
-    Accepte un corps JSON unique pour éviter l'ambiguïté FastAPI body/query.
-
-    Corps attendu :
-        bounding_box: {min_x, min_y, max_x, max_y}
-        category: Catégorie (H21E, D21E, etc.)
-        technical_level: Niveau technique (TD1-TD5)
-        target_length_m, target_climb_m, target_controls, winning_time_minutes
-        method: genetic | ai | hybrid
-        num_variants: int
-        map_context: str (optionnel)
-        start_position: [lng, lat] (optionnel)
-        forbidden_zones_polygons: [[[lat, lng], ...]] (optionnel)
-        required_controls: [{lat, lng}] (optionnel)
-    """
-    # Extraire tous les paramètres du corps JSON
+def _circuit_impl(body: dict) -> dict:
+    """Logique de génération MD/LD — appelée en synchrone ou depuis un thread."""
     bounding_box = body.get("bounding_box", {})
     category = body.get("category", "H21E")
     technical_level = body.get("technical_level", "TD3")
@@ -2011,19 +1991,16 @@ def generate_circuits(body: dict = Body(...)):
     num_variants = int(body.get("num_variants", 3))
     map_context = body.get("map_context")
     start_position_raw = body.get("start_position")
-    forbidden_zones_polygons = body.get("forbidden_zones_polygons") or []
+    forbidden_zones_polygons = list(body.get("forbidden_zones_polygons") or [])
     required_controls_raw = body.get("required_controls") or []
-    candidate_points = body.get("candidate_points") or []
+    candidate_points = list(body.get("candidate_points") or [])
 
-    # Mode sprint : si peu de candidats OCAD (<50), enrichir depuis OSM automatiquement
+    # Mode sprint : enrichir depuis OSM si peu de candidats OCAD
     if (circuit_type == "sprint" or technical_level in ("TD1", "TD2")) and len(candidate_points) < 50 and bounding_box:
         try:
             sprint_data = extract_sprint_features(bounding_box)
             osm_candidates = sprint_data.get("candidates", [])
-            # Merger OCAD + OSM (OCAD en priorité, OSM en complément)
-            candidate_points = candidate_points + osm_candidates
-            candidate_points = candidate_points[:600]
-            # Ajouter les bâtiments OSM comme zones OOB supplémentaires
+            candidate_points = (candidate_points + osm_candidates)[:600]
             for poly in sprint_data.get("oob_polygons", []):
                 if len(poly) >= 3:
                     forbidden_zones_polygons.append(poly)
@@ -2031,13 +2008,12 @@ def generate_circuits(body: dict = Body(...)):
         except Exception as e:
             print(f"[generate] Sprint OSM enrichment failed (non bloquant): {e}")
 
-    # Convertir les polygones en format zones interdites pour le GA
-    forbidden_zones = []
-    for polygon in forbidden_zones_polygons:
-        if isinstance(polygon, list) and len(polygon) >= 3:
-            forbidden_zones.append({"coordinates": polygon})
+    forbidden_zones = [
+        {"coordinates": polygon}
+        for polygon in forbidden_zones_polygons
+        if isinstance(polygon, list) and len(polygon) >= 3
+    ]
 
-    # Créer la requête
     request = GenerationRequest(
         bounding_box=bounding_box,
         category=category,
@@ -2054,7 +2030,6 @@ def generate_circuits(body: dict = Body(...)):
         start_position=tuple(start_position_raw) if start_position_raw and len(start_position_raw) >= 2 else None,
     )
 
-    # Générer
     generator = AIGenerator()
     circuits = generator.generate(request, method=method, num_variants=num_variants)
 
@@ -2081,6 +2056,48 @@ def generate_circuits(body: dict = Body(...)):
             for c in circuits
         ],
     }
+
+
+def _run_circuit_task(task_id: str, body: dict) -> None:
+    """Worker thread pour génération MD/LD asynchrone."""
+    try:
+        result = _circuit_impl(body)
+        _circuit_tasks[task_id] = {"status": "completed", **result}
+    except Exception as e:
+        _circuit_tasks[task_id] = {"status": "error", "error": str(e)}
+
+
+@app.post(
+    "/api/v1/generation/generate-circuit",
+    status_code=202,
+    summary="Génère un circuit MD/LD (async)",
+    description="Retourne un task_id immédiatement. Poller /circuit-status/{task_id}.",
+)
+def generate_circuit_async(body: dict = Body(...)):
+    task_id = str(uuid.uuid4())
+    _circuit_tasks[task_id] = {"status": "processing"}
+    _sprint_executor.submit(_run_circuit_task, task_id, body)
+    return {"task_id": task_id, "status": "processing"}
+
+
+@app.get(
+    "/api/v1/generation/circuit-status/{task_id}",
+    summary="Statut d'une génération MD/LD",
+)
+def get_circuit_status(task_id: str):
+    if task_id not in _circuit_tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return _circuit_tasks[task_id]
+
+
+@app.post(
+    "/api/v1/generation/generate",
+    summary="Génère des circuits",
+    description="Génère des circuits automatiquement avec GA et/ou IA",
+)
+def generate_circuits(body: dict = Body(...)):
+    """Endpoint synchrone conservé pour compatibilité."""
+    return _circuit_impl(body)
 
 
 @app.post(
@@ -3672,6 +3689,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
         forbidden_zones=oob_polygons,
         start_position=start_position,
         heatmap_cache=heatmap_cache,
+        route_analyzer=route_analyzer,   # re-ranker choix d'itinéraire sprint
     )
 
     print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ GA generate ({len(candidate_points)} candidats)...", flush=True)
@@ -3861,6 +3879,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
             "iterations": final_report_dict.get("iterations_used", 0),
             "is_valid": final_report.is_valid if final_report else False,
             "score": final_report.global_score if final_report else 0,
+            "leg_route_choices": gen_result[0].leg_route_choices if gen_result else [],
         }
     }
 

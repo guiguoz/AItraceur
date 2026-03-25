@@ -26,10 +26,9 @@ export default function CircuitCreationModal({ isOpen, onClose, onCreateCircuit,
   const [sex, setSex] = useState('H')
   const [category, setCategory] = useState('21E')
   const [color, setColor] = useState('Vert')
-  const [forceMode, setForceMode] = useState('auto')
 
   useEffect(() => {
-    if (isOpen) { setType('md'); setSex('H'); setCategory('21E'); setColor('Vert'); setForceMode('auto') }
+    if (isOpen) { setType('md'); setSex('H'); setCategory('21E'); setColor('Vert') }
   }, [isOpen])
 
   if (!isOpen) return null
@@ -140,33 +139,6 @@ export default function CircuitCreationModal({ isOpen, onClose, onCreateCircuit,
             </div>
           )}
 
-          {/* Contexte terrain — sprint uniquement */}
-          {type === 'sprint' && (
-            <div>
-              <label className="text-xs font-medium text-gray-400 uppercase tracking-wider block mb-1">Contexte terrain</label>
-              <p className="text-xs text-gray-500 mb-2">L'IA détecte automatiquement le contexte. Corrigez si nécessaire :</p>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { value: 'auto',   label: 'Auto (IA)' },
-                  { value: 'sprint', label: '🏙 Urbain' },
-                  { value: 'forest', label: '🌲 Forêt' },
-                ].map(({ value, label }) => (
-                  <button
-                    key={value}
-                    onClick={() => setForceMode(value)}
-                    className={`py-2 rounded-lg text-xs font-medium transition-all ${
-                      forceMode === value
-                        ? 'bg-blue-600 text-white border border-blue-500'
-                        : 'bg-gray-700 text-gray-300 border border-gray-600 hover:border-gray-500'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* Résumé */}
           <div className="bg-blue-900/20 border border-blue-700/30 rounded-xl p-3 text-center">
             <p className="text-xs text-gray-400 mb-1">Circuit</p>
@@ -184,7 +156,7 @@ export default function CircuitCreationModal({ isOpen, onClose, onCreateCircuit,
             Annuler
           </button>
           <button
-            onClick={() => onCreateCircuit({ name, type, sex: isCompetitive ? sex : null, category: isCompetitive ? category : null, color: !isCompetitive ? color : null, forceMode: type === 'sprint' ? forceMode : undefined })}
+            onClick={() => onCreateCircuit({ name, type, sex: isCompetitive ? sex : null, category: isCompetitive ? category : null, color: !isCompetitive ? color : null })}
             className="flex-1 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold transition-colors"
           >
             Créer

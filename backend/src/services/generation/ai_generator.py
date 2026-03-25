@@ -46,6 +46,8 @@ class GenerationRequest:
     candidate_points: List[Dict] = field(default_factory=list)  # [{x, y, isom}, ...]
     map_context: Optional[str] = None  # ISOM terrain summary from OCAD GeoJSON
     heatmap_cache: Optional[HeatmapCache] = field(default=None, repr=False)
+    route_analyzer: Optional[object] = field(default=None, repr=False)
+    # RouteAnalyzer OSM — si fourni, active le re-ranker choix d'itinéraire sprint.
 
 
 @dataclass
@@ -60,6 +62,8 @@ class GeneratedCircuit:
     score: float
     generation_method: str  # "genetic", "ai", "hybrid"
     description: str = ""
+    leg_route_choices: list = field(default_factory=list)
+    # [{leg_idx, n_routes, distances_m, choice_score, similarity_ratio}, ...]
 
 
 # =============================================
@@ -309,6 +313,25 @@ class AIGenerator:
         # Générer
         result = ga.generate(start, end, request.forbidden_zones)
 
+        # ── Re-ranker choix d'itinéraire (post-GA, sprint uniquement) ──────────
+        _route_choices_by_idx: list = [None] * len(result.circuits)
+        if request.route_analyzer is not None and sprint_mode and result.circuits:
+            _best_idx = 0
+            _best_total = -1.0
+            for _ci, _ckt in enumerate(result.circuits[:10]):
+                try:
+                    _rc = request.route_analyzer.score_circuit_choices(_ckt.controls, k=2)
+                    _route_choices_by_idx[_ci] = _rc
+                    if _rc["total_choice_score"] > _best_total:
+                        _best_total = _rc["total_choice_score"]
+                        _best_idx = _ci
+                except Exception:
+                    pass
+            if _best_idx > 0:
+                result.circuits.insert(0, result.circuits.pop(_best_idx))
+                _route_choices_by_idx.insert(0, _route_choices_by_idx.pop(_best_idx))
+        # ────────────────────────────────────────────────────────────────────────
+
         # Convertir en circuits générés
         circuits = []
 
@@ -333,7 +356,31 @@ class AIGenerator:
                     }
                 )
 
-            total_length = self._calculate_length(circuit.controls)
+            # Distance réelle via RouteAnalyzer pour le circuit gagnant (Mission 3)
+            if request.route_analyzer is not None and i == 0:
+                real_dist = 0.0
+                for _li in range(len(circuit.controls) - 1):
+                    _ra, _rb = circuit.controls[_li], circuit.controls[_li + 1]
+                    try:
+                        _route = request.route_analyzer.find_optimal_route(
+                            _ra[0], _ra[1], _rb[0], _rb[1]
+                        )
+                        real_dist += (
+                            request.route_analyzer.route_length_m(_route)
+                            if _route
+                            else self._calculate_length([_ra, _rb])
+                        )
+                    except Exception:
+                        real_dist += self._calculate_length([_ra, _rb])
+                total_length = real_dist
+            else:
+                total_length = self._calculate_length(circuit.controls)
+
+            _leg_choices = (
+                _route_choices_by_idx[i]["leg_details"]
+                if i < len(_route_choices_by_idx) and _route_choices_by_idx[i]
+                else []
+            )
 
             generated = GeneratedCircuit(
                 id=f"genetic_{i + 1}",
@@ -344,6 +391,7 @@ class AIGenerator:
                 score=circuit.fitness,
                 generation_method="genetic",
                 description=f"Circuit généré par algorithme génétique (génération {circuit.generation})",
+                leg_route_choices=_leg_choices,
             )
             circuits.append(generated)
 

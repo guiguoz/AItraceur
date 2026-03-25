@@ -183,6 +183,7 @@ export function MapViewer({
   onUpdateSuggestion,
   onMapReady = null,
   routeDisplay = null,
+  legRoutesMap = {},  // {legIdx: {routes, choiceScore}} — choix auto post-sprint
   ocadMode = false,  // true → masque OSM, affiche uniquement PNG OCAD
   backgroundControls = [],  // mode compétition — postes des autres circuits
 }) {
@@ -225,10 +226,23 @@ export function MapViewer({
     return L.latLngBounds([minLat, minLng], [maxLat, maxLng]);
   }, [ocadData]);
 
-  // Ordered positions for the course polyline
-  const orderedPositions = [...controls]
+  // Ordered positions for the course polyline — includes currentSuggestion to preview last leg.
+  // During ai_suggesting: exclude existing finish (may have small order from previous circuit)
+  // so it doesn't appear in the middle of the polyline. currentSuggestion is appended last.
+  // finish is always sorted last regardless of its order field.
+  const baseForLine = currentSuggestion
+    ? controls.filter(c => c.type !== 'finish')
+    : controls
+  const allForLine = currentSuggestion
+    ? [...baseForLine, { ...currentSuggestion, order: baseForLine.length + 1 }]
+    : controls
+  const orderedPositions = allForLine
     .filter(c => ['start', 'control', 'finish'].includes(c.type))
-    .sort((a, b) => a.order - b.order)
+    .sort((a, b) => {
+      if (a.type === 'finish' && b.type !== 'finish') return 1
+      if (b.type === 'finish' && a.type !== 'finish') return -1
+      return a.order - b.order
+    })
     .map(c => [c.lat, c.lng]);
 
   return (
@@ -369,6 +383,33 @@ export function MapViewer({
             </Polyline>
           );
         })}
+
+        {/* Choix d'itinéraires automatiques post-sprint (polylines pointillées par jambe) */}
+        {Object.entries(legRoutesMap).map(([legIdxStr, legDisplay]) =>
+          legDisplay.routes?.map((route, i) => {
+            const style = ROUTE_STYLES[i] || ROUTE_STYLES[ROUTE_STYLES.length - 1];
+            const positions = route.waypoints.map(([lng, lat]) => [lat, lng]);
+            return (
+              <Polyline
+                key={`choice-leg${legIdxStr}-r${i}`}
+                positions={positions}
+                pathOptions={{
+                  color: style.color,
+                  weight: style.weight,
+                  opacity: style.opacity * 0.8,
+                  ...(style.dashArray ? { dashArray: style.dashArray } : {}),
+                }}
+              >
+                <Popup>
+                  <div className="text-xs">
+                    <strong>Jambe {+legIdxStr + 1} — Route #{route.rank}</strong><br />
+                    {Math.round(route.distance_m)} m
+                  </div>
+                </Popup>
+              </Polyline>
+            );
+          })
+        )}
 
         {/* AI suggestion — draggable purple marker */}
         {currentSuggestion && (

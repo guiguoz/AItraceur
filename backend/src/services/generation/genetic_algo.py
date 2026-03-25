@@ -308,7 +308,7 @@ class GeneticAlgorithm:
         self._top_candidates: List[Tuple[float, float]] = []
         if self.config.heatmap_cache is not None:
             self._top_candidates = self.config.heatmap_cache.get_top_candidates(
-                top_percent=0.20
+                top_percent=0.40
             )
 
         population = []
@@ -781,11 +781,17 @@ class GeneticAlgorithm:
         W_ANGLE = 1.0    # multiplicateur × 20 par dog-leg → éliminatoire
         W_RHYTHM = 15.0
 
+        # Pénalité quadratique si trop peu de postes par rapport à la cible
+        n_postes = len(controls) - 2  # hors départ et arrivée
+        deficit = max(0, config.target_controls - 2 - n_postes)
+        density_penalty = deficit ** 2 * 50.0 if deficit > 0 else 0.0
+
         return (
             W_AI * ai_score
             - W_DIST * dist_penalty
             - W_ANGLE * angle_penalty
             + W_RHYTHM * rhythm
+            - density_penalty
         )
 
     def _terrain_quality_score_isom(self, controls: List[Tuple[float, float]]) -> float:
@@ -915,6 +921,14 @@ class GeneticAlgorithm:
         if _forbidden:
             for _ctrl in controls:
                 if self._is_in_forbidden_zone(_ctrl[0], _ctrl[1], _forbidden):
+                    return -10000.0
+        # ── HeatmapCache : éliminer les postes en zones non-attractives ───
+        # Score ≤ 0.01 = forêt lente (vert olive), eau, zone privée → interdit
+        # O(1) par poste via lookup grille (remplace vérification polygonale lente)
+        if config.heatmap_cache is not None:
+            for _ctrl in controls[1:-1]:  # hors départ et arrivée
+                if (config.heatmap_cache.query(_ctrl[0], _ctrl[1]) <= 0.01
+                        or config.heatmap_cache.is_forbidden(_ctrl[0], _ctrl[1])):
                     return -10000.0
         # ──────────────────────────────────────────────────────────────────
 

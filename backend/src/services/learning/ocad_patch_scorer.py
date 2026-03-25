@@ -62,6 +62,7 @@ class HeatmapCache:
     step_px: int
     map_w: int
     map_h: int
+    forbidden_mask: Optional[np.ndarray] = None  # (H_img, W_img) bool — zones interdites dilatées
 
     def query(self, lng: float, lat: float) -> float:
         """
@@ -96,6 +97,19 @@ class HeatmapCache:
             + self.scores[y1, x0] * (1 - fx) * fy
             + self.scores[y1, x1] * fx * fy
         )
+
+    def is_forbidden(self, lng: float, lat: float) -> bool:
+        """True si (lng, lat) tombe dans la zone interdite dilatée (vert olive, eau + bâtiments absorbés)."""
+        if self.forbidden_mask is None:
+            return False
+        min_lng, min_lat, max_lng, max_lat = self.bbox
+        if max_lng == min_lng or max_lat == min_lat:
+            return False
+        px = int((lng - min_lng) / (max_lng - min_lng) * self.map_w)
+        py = int((1.0 - (lat - min_lat) / (max_lat - min_lat)) * self.map_h)
+        px = max(0, min(self.map_w - 1, px))
+        py = max(0, min(self.map_h - 1, py))
+        return bool(self.forbidden_mask[py, px])
 
     def get_top_candidates(
         self, top_percent: float = 0.20
@@ -381,12 +395,32 @@ class OcadPatchScorer:
             "HeatmapCache: done — mean=%.3f, max=%.3f",
             float(scores_grid.mean()), float(scores_grid.max()),
         )
+        # ── Forbidden mask : vert olive + eau + dilatation → absorbe bâtiments enclavés ──
+        from scipy.ndimage import binary_dilation
+        _img_arr = np.array(map_img.convert("RGB"), dtype=np.float32)
+        _r_ch, _g_ch, _b_ch = _img_arr[:, :, 0], _img_arr[:, :, 1], _img_arr[:, :, 2]
+        _olive_px = (
+            (_r_ch >= 120) & (_r_ch <= 210) &
+            (_g_ch >= 150) & (_g_ch <= 220) &
+            (_b_ch < 80) & (_g_ch > _r_ch)
+        )
+        _water_px = (_b_ch > 160) & (_r_ch < 130) & (_g_ch < 160)
+        _raw_mask = _olive_px | _water_px
+        _kernel_px = max(15, int(30.0 / mpp))  # ~30m rayon pour absorber les bâtiments privés
+        _struct = np.ones((_kernel_px, _kernel_px), dtype=bool)
+        _forbidden_mask = binary_dilation(_raw_mask, structure=_struct)
+        log.info(
+            "ForbiddenMask: %.1f%% de la carte interdite (kernel=%dpx)",
+            float(_forbidden_mask.mean()) * 100, _kernel_px,
+        )
+        # ─────────────────────────────────────────────────────────────────────────────────
         return HeatmapCache(
             scores=scores_grid,
             bbox=bbox,
             step_px=step_px,
             map_w=map_w,
             map_h=map_h,
+            forbidden_mask=_forbidden_mask,
         )
 
     # ------------------------------------------------------------------

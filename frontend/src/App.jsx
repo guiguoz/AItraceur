@@ -422,6 +422,8 @@ function App() {
   // Contexte terrain global (remplace forceMode per-circuit dans CircuitCreationModal)
   const [forceMode, setForceMode] = useState('auto')
   const [detectedMode, setDetectedMode] = useState(null) // null | 'sprint' | 'forest'
+  const [ocadMapId, setOcadMapId] = useState(null)   // mapId retourné par le tile service
+  const [ocadBounds, setOcadBounds] = useState(null) // { southWest:[lat,lng], northEast:[lat,lng] }
 
   const getAllExistingControls = () =>
     circuits
@@ -455,7 +457,7 @@ function App() {
       setRenderLoading(true)
       uploadOcdForRender(data.rawFile)
         .then((res) => {
-          const { imageUrl, bounds } = res.data
+          const { imageUrl, bounds, mapId } = res.data
           if (imageUrl && bounds?.southWest && bounds?.northEast) {
             setImageData({
               url: `${TILE_SERVICE_URL}${imageUrl}`,
@@ -465,6 +467,10 @@ function App() {
               ],
             })
             setMapMode('ocad')
+          }
+          if (mapId) {
+            setOcadMapId(mapId)
+            setOcadBounds(bounds || null)
           }
         })
         .catch(err => console.warn('[Render] Service unavailable:', err.message))
@@ -696,6 +702,11 @@ function App() {
             ? getAllExistingControls().map(c => ({ lat: c.lat, lng: c.lng, circuitName: c.circuitName }))
             : [],
           ...(forceMode !== 'auto' ? { force_mode: forceMode } : detectedMode ? { force_mode: detectedMode } : {}),
+          ...(ocadMapId && ocadBounds ? {
+            map_id: ocadMapId,
+            ocad_sw: ocadBounds.southWest,
+            ocad_ne: ocadBounds.northEast,
+          } : {}),
         }
         const { data: { task_id } } = await generateSprint(sprintParams)
         const data = await _pollSprintStatus(task_id, setProgressLabel)

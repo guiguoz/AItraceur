@@ -3,7 +3,7 @@ const cors = require('cors')
 const multer = require('multer')
 const path = require('path')
 const fs = require('fs')
-const { readOcad } = require('ocad2geojson')
+const { readOcad, ocadToGeoJson } = require('ocad2geojson')
 const OcadTiler = require('ocad-tiler')
 const { renderSvg } = require('ocad2tiles')
 const { XMLSerializer } = require('xmldom')
@@ -84,6 +84,33 @@ app.use('/renders', express.static(RENDER_DIR, {
 }))
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }))
+
+// OOB symbols : 709000 = ISSprOM Out of Bounds, 527000 = ISOM Out of Bounds
+// symNum format in ocad2geojson: integer symbol number × 1000 (e.g. sym 709 → 709000)
+const OOB_SYMS = [709000, 527000, 709001, 527001, 709002, 527002]
+
+app.get('/map/:mapId/forbidden-zones', async (req, res) => {
+  const { mapId } = req.params
+  const ocdPath = path.join(UPLOAD_DIR, `${mapId}.ocd`)
+  if (!fs.existsSync(ocdPath)) {
+    return res.status(404).json({ error: 'map not found' })
+  }
+  try {
+    // Ensure Lambert-93 is defined for CRS conversion
+    proj4.defs('EPSG:2154', '+proj=lcc +lat_0=46.5 +lon_0=3 +lat_1=49 +lat_2=44 +x_0=700000 +y_0=6600000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs +type=crs')
+    const ocadFile = await readOcad(ocdPath)
+    const geojson = ocadToGeoJson(ocadFile, {
+      includeSymbols: OOB_SYMS,
+      applyCrs: true,
+      generateSymbolElements: false,
+    })
+    console.log(`[forbidden-zones] ${mapId}: ${geojson.features.length} OOB features`)
+    res.json(geojson)
+  } catch (err) {
+    console.error('[forbidden-zones] Error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
 
 function convertBoundsToWgs84(extent, crs) {
   // extent = [minX, minY, maxX, maxY] in native CRS

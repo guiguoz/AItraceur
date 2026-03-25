@@ -534,7 +534,7 @@ class OSMFetcher:
 # =============================================
 # Sprint features — extraction Overpass sans dépendance externe
 # =============================================
-def extract_sprint_features(bbox_dict: dict) -> dict:
+def extract_sprint_features(bbox_dict: dict, include_buildings: bool = True) -> dict:
     """
     Extrait les candidats sprint (intersections de rues + coins de bâtiments)
     et les polygones OOB (bâtiments) depuis Overpass API.
@@ -544,6 +544,8 @@ def extract_sprint_features(bbox_dict: dict) -> dict:
 
     Args:
         bbox_dict: {min_x, min_y, max_x, max_y} en WGS84
+        include_buildings: si False, skip la requête bâtiments (économise ~50s
+            sur les bbox denses) — utiliser quand zones OOB déjà issues d'OCAD.
 
     Returns:
         {
@@ -556,13 +558,20 @@ def extract_sprint_features(bbox_dict: dict) -> dict:
 
     b = f"{bbox_dict['min_y']},{bbox_dict['min_x']},{bbox_dict['max_y']},{bbox_dict['max_x']}"
 
-    # Requête Overpass : voies piétonnes + bâtiments
-    # "out body geom" retourne la géométrie de chaque way (liste lat/lon)
     walk_tags = "residential|service|unclassified|tertiary|secondary|primary|pedestrian|path|footway|steps|living_street|alley"
-    query = f"""[out:json][timeout:90];
+    if include_buildings:
+        # Requête complète : voies piétonnes + bâtiments
+        query = f"""[out:json][timeout:90];
 (
   way["highway"~"^({walk_tags})$"]({b});
   way["building"]({b});
+);
+out body geom;"""
+    else:
+        # Requête allégée : voies piétonnes seulement (zones OOB depuis OCAD)
+        query = f"""[out:json][timeout:60];
+(
+  way["highway"~"^({walk_tags})$"]({b});
 );
 out body geom;"""
 

@@ -3569,21 +3569,39 @@ def _sprint_impl(task_id: str, body: dict) -> None:
     start_position = body.get("start_position", None)
     existing_controls = body.get("existing_controls", [])  # mode compétition
     force_mode = body.get("force_mode", None)  # "sprint" | "forest" | None (auto)
+    map_id = body.get("map_id", None)        # mapId du tile service (PNG OCAD rendu)
+    ocad_sw = body.get("ocad_sw", None)      # [lat, lng] coin SW de la carte OCAD
+    ocad_ne = body.get("ocad_ne", None)      # [lat, lng] coin NE de la carte OCAD
 
     dialogue = []
     oob_polygons = list(forbidden_zones)
     route_analyzer = None  # construit après OSM si highway_ways disponibles
+    ocad_oob_fetched = False  # True si zones OOB récupérées depuis vecteurs OCAD
 
-    # ── Étape 1 : Enrichissement OSM — toujours (fusion OCAD + OSM) ───────────
+    # ── Étape 1a : Zones OOB depuis vecteurs OCAD (priorité sur bâtiments OSM) ─
+    if map_id:
+        try:
+            from src.services.learning.ocad_pipeline import fetch_ocad_forbidden_zones as _fetch_fz
+            _ocad_fz = _fetch_fz(map_id, timeout=10)
+            if _ocad_fz:
+                oob_polygons = _ocad_fz  # remplace les zones frontend (plus précis)
+                ocad_oob_fetched = True
+                print(f"{_tag} ✅ OCAD forbidden zones: {len(oob_polygons)} polygones (vecteurs)", flush=True)
+        except Exception as _fz_err:
+            print(f"{_tag} ⚠️ OCAD forbidden zones ÉCHEC: {_fz_err}", flush=True)
+
+    # ── Étape 1b : Enrichissement OSM — toujours (fusion OCAD + OSM) ──────────
     # Les candidats OCAD arrivent via body["candidate_points"] ; on fusionne
     # avec les candidats OSM (intersections piétonnes Overpass) quel que soit
     # leur nombre, pour combiner les deux sources de connaissance terrain.
+    # Si zones OOB déjà issues d'OCAD → skip la requête bâtiments Overpass.
     ocad_candidates_count = len(candidate_points)
     if bounding_box:
         try:
-            osm_result = extract_sprint_features(bounding_box)
+            osm_result = extract_sprint_features(bounding_box, include_buildings=not ocad_oob_fetched)
             osm_candidates = osm_result.get("candidates") or []
-            oob_polygons = oob_polygons + (osm_result.get("oob_polygons") or [])
+            if not ocad_oob_fetched:
+                oob_polygons = oob_polygons + (osm_result.get("oob_polygons") or [])
 
             # Fusion OCAD + OSM : dédupliquer les points trop proches (~10m ≈ 0.00009°)
             DEDUP_THRESH = 0.00009
@@ -3624,28 +3642,53 @@ def _sprint_impl(task_id: str, body: dict) -> None:
     elif not candidate_points:
         dialogue.append({"role": "system", "step": 0, "message": "Aucun candidat ni bounding_box — génération aléatoire"})
 
-    # ── Étape 1b : Construction HeatmapCache V2 (optionnel) ────────────────────
-    # Si MapAnt est disponible pour la bbox → assemble une image ISOM rasterisée,
-    # puis précompute une grille de scores V2 pour le Smart Seeding + fitness terrain.
+    # ── Étape 1c : Construction HeatmapCache V2 (optionnel) ────────────────────
+    # Branche OCAD : image PNG depuis le tile service (priorité si map_id fourni)
+    # Branche MapAnt : fallback si pas de map_id (forêt/LD/MD sans .ocd uploadé)
     # Fallback silencieux → heatmap_cache = None → comportement ISOM identique à avant.
     heatmap_cache = None
-    if bounding_box:
+    if bounding_box or map_id:
         try:
             print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ chargement scorer V2...", flush=True)
             from src.services.learning.ocad_patch_scorer import OcadPatchScorer as _OPS
             _scorer_v2 = _OPS.load()
             if _scorer_v2 is not None:
-                print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ fetch MapAnt tiles...", flush=True)
-                import concurrent.futures as _cfs
-                with _cfs.ThreadPoolExecutor(max_workers=1) as _mex:
-                    _mapant_fut = _mex.submit(_fetch_mapant_bbox_image, bounding_box, 15)
+                _mapant_result = None
+                if map_id and ocad_sw and ocad_ne:
+                    # ── Branche OCAD : PNG tile service → normalize ──────────────
                     try:
-                        _mapant_result = _mapant_fut.result(timeout=30)
-                    except _cfs.TimeoutError:
-                        import logging as _log
-                        _log.getLogger(__name__).warning("MapAnt fetch timeout (>30s) — skipping heatmap cache")
-                        _mapant_result = None
-                print(f"{_tag} ⏱{_time.time()-_t0:.1f}s {'✅ MapAnt OK' if _mapant_result else '⚠️ MapAnt None/timeout'}", flush=True)
+                        print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ fetch OCAD PNG...", flush=True)
+                        from src.services.learning.ocad_pipeline import fetch_ocad_image as _fetch_ocad
+                        import math as _math
+                        _map_img = _fetch_ocad(map_id, timeout=10)
+                        # bbox WGS84 depuis les paramètres frontend
+                        _sw, _ne = ocad_sw, ocad_ne  # [lat, lng]
+                        _bbox_wgs84 = (_sw[1], _sw[0], _ne[1], _ne[0])  # (min_lng, min_lat, max_lng, max_lat)
+                        # mpp = distance haversine / largeur image
+                        import math as _m2
+                        _lat_c = (_sw[0] + _ne[0]) / 2
+                        _lng_delta = abs(_ne[1] - _sw[1])
+                        _width_m = _m2.radians(_lng_delta) * 6371000 * _m2.cos(_m2.radians(_lat_c))
+                        _mpp = _width_m / _map_img.width if _map_img.width > 0 else 0.5
+                        _mapant_result = (_map_img, _bbox_wgs84, _mpp)
+                        print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ✅ OCAD PNG ({_map_img.width}×{_map_img.height}px, mpp={_mpp:.2f}m)", flush=True)
+                    except Exception as _ocad_err:
+                        print(f"{_tag} ⚠️ OCAD PNG ÉCHEC: {_ocad_err} → fallback MapAnt", flush=True)
+
+                if _mapant_result is None and bounding_box:
+                    # ── Branche MapAnt (fallback) ────────────────────────────────
+                    print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ fetch MapAnt tiles...", flush=True)
+                    import concurrent.futures as _cfs
+                    with _cfs.ThreadPoolExecutor(max_workers=1) as _mex:
+                        _mapant_fut = _mex.submit(_fetch_mapant_bbox_image, bounding_box, 15)
+                        try:
+                            _mapant_result = _mapant_fut.result(timeout=30)
+                        except _cfs.TimeoutError:
+                            import logging as _log
+                            _log.getLogger(__name__).warning("MapAnt fetch timeout (>30s) — skipping heatmap cache")
+                            _mapant_result = None
+                    print(f"{_tag} ⏱{_time.time()-_t0:.1f}s {'✅ MapAnt OK' if _mapant_result else '⚠️ MapAnt None/timeout'}", flush=True)
+
                 if _mapant_result is not None:
                     _map_img, _bbox_wgs84, _mpp = _mapant_result
                     # step_px dynamique : cible ~40×40 cellules (~1600 patchs)

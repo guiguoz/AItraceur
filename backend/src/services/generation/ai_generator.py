@@ -324,7 +324,10 @@ class AIGenerator:
                 if _time_mod.time() - _reranker_t0 > 15.0:   # cap 15s total
                     break
                 try:
-                    _rc = request.route_analyzer.score_circuit_choices(_ckt.controls, k=2)
+                    _rc = request.route_analyzer.score_circuit_choices(
+                        _ckt.controls, k=2,
+                        t_deadline=_reranker_t0 + 15.0,  # deadline partagée entre tous les circuits
+                    )
                     _route_choices_by_idx[_ci] = _rc
                     if _rc["total_choice_score"] > _best_total:
                         _best_total = _rc["total_choice_score"]

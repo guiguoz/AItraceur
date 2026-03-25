@@ -230,6 +230,7 @@ class RouteAnalyzer:
         self,
         controls: list,
         k: int = 2,
+        t_deadline: float = None,
     ) -> dict:
         """
         Score de choix d'itinéraire pour un circuit complet (post-GA uniquement).
@@ -246,8 +247,11 @@ class RouteAnalyzer:
                 return c["lng"], c["lat"]
             return float(c[0]), float(c[1])
 
+        import time as _t
         leg_details = []
         for i in range(len(controls) - 1):
+            if t_deadline is not None and _t.time() > t_deadline:
+                break  # budget épuisé — on arrête les jambes restantes
             lng_a, lat_a = _lnglat(controls[i])
             lng_b, lat_b = _lnglat(controls[i + 1])
             try:

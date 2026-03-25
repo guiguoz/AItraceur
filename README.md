@@ -11,14 +11,16 @@
 - **Sprint asynchrone** : POST retourne `task_id` en <100ms, pipeline en arrière-plan (~35s), polling GET `/sprint-status`
 - **Contexte terrain manuel** : sélecteur [Auto / Urbain / Forêt] pour forcer le mode détection IA
 - **Fitness multicritère V2** : IA Score (HeatmapCache XGBoost), pénalité distance, détection dog-legs, bonus rythme
-- **HeatmapCache** : grille de scores V2 précomputée depuis tuiles MapAnt (O(1) lookups GA), Smart Seeding population initiale
+- **Pipeline OCAD natif** : le fichier `.ocd` uploadé alimente directement l'IA — zones interdites extraites des vecteurs (sym 709/527 ISSprOM/ISOM), image rasterisée normalisée vers la distribution MapAnt d'entraînement
+- **HeatmapCache** : grille de scores V2 précomputée (O(1) lookups GA), Smart Seeding population initiale — source : OCAD tile service (priorité) ou MapAnt (fallback forêt/LD)
+- **Forbidden mask vectoriel** : polygones OOB extraits directement depuis les symboles OCAD (100 % fiable) ; requête Overpass bâtiments skippée → gain ~50s
 - **Contrôleur IOF/FFCO** : validation automatique des règles (dog-legs, jambes C01–C12, TD1-5/PD1-5)
 - **Boucle traceur ↔ contrôleur** : dialogue IA avec corrections automatiques (jusqu'à 5 itérations)
-- **Analyse de routes** : NetworkX A*, diversité des itinéraires, détection dog-legs
-- **Scorer XGBoost V3** : 18-dim bi-mode (`is_urban` feat[17]), `patch_scorer_v2.pkl` — 370k patches RG2 (88 clubs UK)
-- **Carte OCAD** : rendu tuilé des fichiers `.ocd` (optionnel)
-- **Terrain OSM** : enrichissement automatique depuis Overpass API
-- **Export** : IOF XML 3.0, GPX, PDF, KML/KMZ
+- **Analyse de routes** : NetworkX A*, diversité des itinéraires (Jaccard), détection dog-legs, Re-Ranker Top-3 (budget 15s)
+- **Scorer XGBoost V3** : 18-dim bi-mode (`is_urban` feat[17]), `patch_scorer_v2.pkl` — 370k patches RG2 (88 clubs UK), entraîné sur images MapAnt
+- **Carte OCAD** : rendu haute-fidélité des fichiers `.ocd` via tile service Node.js
+- **Terrain OSM** : enrichissement automatique depuis Overpass API (highways pour RouteAnalyzer)
+- **Export** : IOF XML 3.0, GPX, PDF, KML/KMZ — à importer dans OCAD pour le tracé final
 - **RAG local** : 22 PDF IOF/FFCO indexés, chaîne LLM (OpenAI → fallback local)
 
 ---
@@ -55,7 +57,7 @@ npm install
 npm run dev
 ```
 
-### Tile Service (optionnel, pour cartes OCAD)
+### Tile Service (requis pour cartes OCAD)
 ```bash
 cd backend/tile-service
 npm install
@@ -136,13 +138,23 @@ cd backend && python scripts/train_control_scorer.py --phase xgboost
 
 Le Recall supérieur (+4% vs V2) signifie moins de postes légitimes manqués. L'AUC légèrement inférieure reflète la diversité accrue du dataset (forêt + score + sprint).
 
-### 4. Intégration : HeatmapCache
+### 4. Intégration : HeatmapCache + Pipeline OCAD
 
 À l'appel de `/generate-sprint`, le backend :
-1. Récupère l'image de carte MapAnt (`_fetch_mapant_bbox_image`)
-2. Précompute une grille de scores V3 (`scorer.build_heatmap_cache(img, bbox, mpp)`)
-3. Interpole `lng/lat` depuis la `bbox` WGS84 pour activer la feature `is_urban`
-4. Passe le `HeatmapCache` à l'algorithme génétique → lookups O(1) pendant l'évolution
+1. **Si `.ocd` uploadé (`map_id` fourni)** :
+   - Extrait les zones OOB depuis les vecteurs OCAD (`GET /map/:mapId/forbidden-zones`, sym 709/527) → `forbidden_mask` fiable à 100%
+   - Récupère le PNG pleine-carte rendu par le tile service (`GET /renders/{mapId}.png`)
+   - Normalise les couleurs OCAD → distribution MapAnt (`style_normalizer.py`, `match_histograms`)
+   - Skip la requête Overpass bâtiments (zones OOB déjà connues) → gain ~50s
+2. **Sinon (fallback forêt/LD/MD)** : récupère l'image MapAnt (`_fetch_mapant_bbox_image`)
+3. Précompute une grille de scores V3 (`scorer.build_heatmap_cache(img, bbox, mpp)`)
+4. Interpole `lng/lat` depuis la `bbox` WGS84 pour activer la feature `is_urban`
+5. Passe le `HeatmapCache` à l'algorithme génétique → lookups O(1) pendant l'évolution
+
+**Séparation entraînement / inférence :**
+- `train_control_scorer.py` — entraîné exclusivement sur patches MapAnt/RG2 (source de vérité terrain uniforme)
+- `ocad_pipeline.py` — adapte les cartes OCAD pour l'inférence (normalisation histogramme → domaine MapAnt)
+- `style_normalizer.py` — `match_histograms` RGB pour aligner la distribution de couleurs
 
 ---
 

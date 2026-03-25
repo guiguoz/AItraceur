@@ -391,28 +391,34 @@ class OcadPatchScorer:
             dtype=np.float32,
         )
         scores_grid = scores_flat.reshape(len(ys), len(xs))
-        log.info(
-            "HeatmapCache: done — mean=%.3f, max=%.3f",
-            float(scores_grid.mean()), float(scores_grid.max()),
+        print(
+            f"HeatmapCache: done — mean={float(scores_grid.mean()):.3f}, max={float(scores_grid.max()):.3f}",
+            flush=True,
         )
         # ── Forbidden mask : vert olive + eau + dilatation → absorbe bâtiments enclavés ──
-        from scipy.ndimage import binary_dilation
-        _img_arr = np.array(map_img.convert("RGB"), dtype=np.float32)
-        _r_ch, _g_ch, _b_ch = _img_arr[:, :, 0], _img_arr[:, :, 1], _img_arr[:, :, 2]
-        _olive_px = (
-            (_r_ch >= 120) & (_r_ch <= 210) &
-            (_g_ch >= 150) & (_g_ch <= 220) &
-            (_b_ch < 80) & (_g_ch > _r_ch)
-        )
-        _water_px = (_b_ch > 160) & (_r_ch < 130) & (_g_ch < 160)
-        _raw_mask = _olive_px | _water_px
-        _kernel_px = max(15, int(30.0 / mpp))  # ~30m rayon pour absorber les bâtiments privés
-        _struct = np.ones((_kernel_px, _kernel_px), dtype=bool)
-        _forbidden_mask = binary_dilation(_raw_mask, structure=_struct)
-        log.info(
-            "ForbiddenMask: %.1f%% de la carte interdite (kernel=%dpx)",
-            float(_forbidden_mask.mean()) * 100, _kernel_px,
-        )
+        _forbidden_mask = None
+        try:
+            from scipy.ndimage import binary_dilation
+            _img_arr = np.array(map_img.convert("RGB"), dtype=np.float32)
+            _r_ch, _g_ch, _b_ch = _img_arr[:, :, 0], _img_arr[:, :, 1], _img_arr[:, :, 2]
+            _olive_px = (
+                (_r_ch >= 120) & (_r_ch <= 210) &
+                (_g_ch >= 150) & (_g_ch <= 220) &
+                (_b_ch < 80) & (_g_ch > _r_ch)
+            )
+            _water_px = (_b_ch > 160) & (_r_ch < 130) & (_g_ch < 160)
+            _raw_mask = _olive_px | _water_px
+            _kernel_px = max(15, min(60, int(30.0 / mpp)))  # cap 60px max (~30m à mpp≥0.5)
+            _struct = np.ones((_kernel_px, _kernel_px), dtype=bool)
+            _forbidden_mask = binary_dilation(_raw_mask, structure=_struct).astype(bool)
+            print(
+                f"ForbiddenMask: {float(_forbidden_mask.mean()) * 100:.1f}% de la carte interdite "
+                f"(kernel={_kernel_px}px, image {map_img.width}×{map_img.height}px)",
+                flush=True,
+            )
+        except Exception as _fm_err:
+            print(f"⚠️ ForbiddenMask ÉCHEC scipy: {_fm_err} — masque désactivé", flush=True)
+            _forbidden_mask = None
         # ─────────────────────────────────────────────────────────────────────────────────
         return HeatmapCache(
             scores=scores_grid,

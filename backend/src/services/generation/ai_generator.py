@@ -318,7 +318,7 @@ class AIGenerator:
         if request.route_analyzer is not None and sprint_mode and result.circuits:
             _best_idx = 0
             _best_total = -1.0
-            for _ci, _ckt in enumerate(result.circuits[:10]):
+            for _ci, _ckt in enumerate(result.circuits[:3]):  # Top-3 suffit (Top-10 = 200s)
                 try:
                     _rc = request.route_analyzer.score_circuit_choices(_ckt.controls, k=2)
                     _route_choices_by_idx[_ci] = _rc

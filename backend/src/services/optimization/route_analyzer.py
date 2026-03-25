@@ -210,6 +210,22 @@ class RouteAnalyzer:
             total += _haversine_m(route[i][1], route[i][0], route[i + 1][1], route[i + 1][0])
         return total
 
+    def _jaccard_from_routes(self, routes: list) -> float:
+        """Diversité Jaccard depuis des routes déjà calculées (zéro appel nx supplémentaire)."""
+        if len(routes) < 2:
+            return 0.0
+        def _edge_set(p):
+            return frozenset(frozenset([p[i], p[i + 1]]) for i in range(len(p) - 1))
+        edge_sets = [_edge_set(p) for p in routes]
+        divs = []
+        for i in range(len(edge_sets)):
+            for j in range(i + 1, len(edge_sets)):
+                union = len(edge_sets[i] | edge_sets[j])
+                inter = len(edge_sets[i] & edge_sets[j])
+                if union > 0:
+                    divs.append(1.0 - inter / union)
+        return sum(divs) / len(divs) if divs else 0.0
+
     def score_circuit_choices(
         self,
         controls: list,
@@ -253,7 +269,7 @@ class RouteAnalyzer:
                 min_d, max_d = min(distances), max(distances)
                 similarity_ratio = (min_d / max_d) if max_d > 0 else 1.0
                 similarity_bonus = 1.0 if similarity_ratio > 0.85 else (similarity_ratio / 0.85)
-                diversity = self.route_diversity_score(lng_a, lat_a, lng_b, lat_b, k=k)
+                diversity = self._jaccard_from_routes(routes)  # pré-calculé, zéro appel nx supplémentaire
                 choice_score = diversity * similarity_bonus
                 leg_details.append({
                     "leg_idx": i,

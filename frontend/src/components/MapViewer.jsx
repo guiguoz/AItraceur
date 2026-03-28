@@ -233,8 +233,17 @@ export function MapViewer({
   const baseForLine = currentSuggestion
     ? controls.filter(c => c.type !== 'finish')
     : controls
+  // Re-append user-placed finish after currentSuggestion so the last leg is drawn.
+  // (finish was removed from baseForLine to avoid stale order, but must come last.)
+  const userFinish = currentSuggestion
+    ? controls.find(c => c.type === 'finish')
+    : null
   const allForLine = currentSuggestion
-    ? [...baseForLine, { ...currentSuggestion, order: baseForLine.length + 1 }]
+    ? [
+        ...baseForLine,
+        { ...currentSuggestion, order: baseForLine.length + 1 },
+        ...(userFinish ? [{ ...userFinish, order: baseForLine.length + 2 }] : [])
+      ]
     : controls
   const orderedPositions = allForLine
     .filter(c => ['start', 'control', 'finish'].includes(c.type))

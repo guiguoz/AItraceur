@@ -143,8 +143,27 @@ class AIGenerator:
         self,
         request: GenerationRequest,
         num_variants: int = 3,
+        method: Optional[str] = None,
     ) -> List[GeneratedCircuit]:
-        """Génère des circuits via l'algorithme génétique."""
+        """Génère des circuits via l'algorithme génétique.
+
+        Args:
+            method: Méthode de génération ("sa", "ga", ou None → défaut GA).
+                    Toute autre valeur déclenche un avertissement et tombe sur GA.
+        """
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+
+        _VALID_METHODS = {"sa", "ga", None}
+        if method not in _VALID_METHODS:
+            _log.warning(
+                "AIGenerator.generate() : méthode '%s' inconnue, retour sur GA par défaut.", method
+            )
+            method = None
+
+        if method:
+            _log.debug("AIGenerator.generate() : méthode demandée = %s", method)
+
         return self._generate_genetic(request, num_variants)
 
     def _generate_genetic(

@@ -80,6 +80,13 @@ class GenerationConfig:
     # Si None : fallback ISOM attractiveness (comportement existant, aucune régression).
     heatmap_cache: Optional[HeatmapCache] = field(default=None, repr=False)
 
+    # FFCORulesEngine — source de vérité des seuils et pondérations (optionnel).
+    # Si None : valeurs historiques hardcodées (aucune régression).
+    rules_engine: Optional[object] = field(default=None, repr=False)
+
+    # Timeout en secondes pour la boucle évolutionnaire (évite les boucles infinies)
+    timeout_seconds: float = 90.0
+
 
 @dataclass
 class GenerationResult:
@@ -133,11 +140,35 @@ class GeneticAlgorithm:
         # Seuils calibrés depuis placement_rules.json (Étape 11b)
         self._placement_rules = self._load_placement_rules()
 
+        # Seuils et pondérations depuis FFCORulesEngine (si fourni)
+        self._ga_weights = None
+        self._thresholds = None
+        if self.config.rules_engine is not None:
+            _ct = self.config.circuit_type or "forest"
+            _td = self.config.technical_level or 3
+            self._ga_weights = self.config.rules_engine.get_ga_weights(_ct, _td)
+            self._thresholds = self.config.rules_engine.get_fitness_thresholds(_ct, _td)
+
         # Scores d'attractivité IOF par code ISOM (Étape 14 — control_descriptions.json)
         self._isom_att_scores = self._load_isom_attractiveness()
 
         # Visual terrain scorer (XGBoost, AUC=0.85 — Phase C)
         self._patch_scorer = _PATCH_SCORER_CLASS.load() if _PATCH_SCORER_CLASS else None
+
+        # ── OCAD KDTree (Phase 2 — Ancrage Vectoriel) ──────────────────────
+        # Index spatial O(log N) pour ancrage strict sur entités ISOM réelles.
+        # Construit uniquement si ≥20 candidate_points portent un code isom.
+        # Si scipy absent ou trop peu de features → _ocad_tree = None
+        # (comportement identique à Phase 1, aucune régression).
+        self._ocad_pts: list = [cp for cp in self.config.candidate_points if cp.get("isom")]
+        self._ocad_tree = None
+        if len(self._ocad_pts) >= 20:
+            try:
+                from scipy.spatial import KDTree as _KDTree
+                _kd_coords = np.array([[cp["x"], cp["y"]] for cp in self._ocad_pts])
+                self._ocad_tree = _KDTree(_kd_coords)
+            except Exception:
+                self._ocad_tree = None
 
     def _load_placement_rules(self) -> dict:
         """Charge les seuils IOF/FFCO depuis placement_rules.json selon circuit_type et technical_level."""
@@ -211,6 +242,18 @@ class GeneticAlgorithm:
                 best = (cp["x"], cp["y"])
         return best
 
+    def _nearest_ocad(self, x: float, y: float) -> tuple:
+        """Retourne (cp_dict, dist_m) du feature OCAD ISOM le plus proche via KDTree.
+
+        Si KDTree non disponible → (None, inf).
+        dist_m : approximation haversine simplifiée (err < 1% pour dist < 500m, lat < 65°).
+        """
+        if self._ocad_tree is None:
+            return None, float("inf")
+        dist_deg, idx = self._ocad_tree.query([x, y])
+        dist_m = dist_deg * 111_000  # 1° ≈ 111 km (équateur)
+        return self._ocad_pts[idx], dist_m
+
     def generate(
         self,
         start_pos: Tuple[float, float],
@@ -228,7 +271,9 @@ class GeneticAlgorithm:
         Returns:
             GenerationResult avec les circuits générés
         """
+        import time as _time_ga
         start_time = datetime.now()
+        _t0_ga = _time_ga.time()
         forbidden_zones = forbidden_zones or []
         self._current_forbidden_zones = forbidden_zones  # accessible dans _default_scoring
 
@@ -248,6 +293,10 @@ class GeneticAlgorithm:
         # Boucle évolutionnaire
         for gen in range(self.config.generations):
             self.generation = gen + 1
+
+            # Timeout : retourner le meilleur trouvé plutôt que boucler à l'infini
+            if _time_ga.time() - _t0_ga > self.config.timeout_seconds:
+                break
 
             # Sélection
             parents = self._select_parents()
@@ -385,8 +434,12 @@ class GeneticAlgorithm:
             if self._top_candidates and random.random() < 0.40:
                 nx, ny = random.choice(self._top_candidates)
 
-            # Snap vers le candidate_point OCAD le plus proche (60% des cas)
-            # → ancre les postes sur des éléments terrain dès l'initialisation
+            # Snap vers feature OCAD ISOM (90% si KDTree, sinon 60% O(n))
+            # → ancre les postes sur des éléments terrain réels dès l'initialisation
+            elif self._ocad_tree is not None and random.random() < 0.90:
+                _cp, _ = self._nearest_ocad(nx, ny)
+                if _cp:
+                    nx, ny = _cp["x"], _cp["y"]
             elif random.random() < 0.60:
                 cp = self._find_nearest_cp(nx, ny, target_leg_m * 0.5)
                 if cp:
@@ -618,6 +671,11 @@ class GeneticAlgorithm:
         delta_m = random.uniform(-leg_m * 0.12, leg_m * 0.12)
         x = controls[idx][0] + delta_m / 72600
         y = controls[idx][1] + delta_m / 111000
+        # 60% snap vers feature OCAD ISOM (affine le placement après le déplacement)
+        if self._ocad_tree is not None and random.random() < 0.60:
+            _cp, _ = self._nearest_ocad(x, y)
+            if _cp:
+                x, y = _cp["x"], _cp["y"]
         if not self._is_in_forbidden_zone(x, y, forbidden_zones):
             controls[idx] = (x, y)
         return controls
@@ -688,8 +746,12 @@ class GeneticAlgorithm:
         delta_m = random.uniform(-leg_m * 0.25, leg_m * 0.25)
         x = controls[idx][0] + delta_m / 72600
         y = controls[idx][1] + delta_m / 111000
-        # 40% snap vers feature OCAD attractif le plus proche
-        if random.random() < 0.40:
+        # Snap vers feature OCAD ISOM (80% si KDTree, sinon 40% O(n))
+        if self._ocad_tree is not None and random.random() < 0.80:
+            _cp, _ = self._nearest_ocad(x, y)
+            if _cp:
+                x, y = _cp["x"], _cp["y"]
+        elif random.random() < 0.40:
             cp = self._find_nearest_cp(x, y, leg_m * 2.0)
             if cp:
                 x, y = cp
@@ -776,15 +838,24 @@ class GeneticAlgorithm:
             rhythm = 0.0
 
         # ── Score final (à maximiser) ───────────────────────────────────────
-        W_AI = 30.0
-        W_DIST = 40.0    # poids fort — respect de la distance cible
-        W_ANGLE = 1.0    # multiplicateur × 20 par dog-leg → éliminatoire
-        W_RHYTHM = 15.0
+        # Seuils depuis FFCORulesEngine si disponible, sinon valeurs historiques
+        if self._thresholds is not None:
+            W_AI = self._thresholds.w_ai
+            W_DIST = self._thresholds.w_dist
+            W_ANGLE = self._thresholds.w_angle
+            W_RHYTHM = self._thresholds.w_rhythm
+            _density_mult = self._thresholds.density_penalty_mult
+        else:
+            W_AI = 30.0
+            W_DIST = 40.0    # poids fort — respect de la distance cible
+            W_ANGLE = 1.0    # multiplicateur × 20 par dog-leg → éliminatoire
+            W_RHYTHM = 15.0
+            _density_mult = 50.0
 
         # Pénalité quadratique si trop peu de postes par rapport à la cible
         n_postes = len(controls) - 2  # hors départ et arrivée
         deficit = max(0, config.target_controls - 2 - n_postes)
-        density_penalty = deficit ** 2 * 50.0 if deficit > 0 else 0.0
+        density_penalty = deficit ** 2 * _density_mult if deficit > 0 else 0.0
 
         return (
             W_AI * ai_score
@@ -814,23 +885,51 @@ class GeneticAlgorithm:
         if not self.config.candidate_points or len(controls) < 3:
             return 50.0  # Neutre si pas de candidats
 
+        # Rayon de pénalité : poste trop loin d'une entité ISOM → score effondré
+        # Sprint : 40m (carte 1:4000, précision fine)  Forêt : 80m (carte 1:10000)
+        PENALTY_RADIUS_M = 40.0 if self.config.sprint_mode else 80.0
         ATT_RADIUS_M = 60.0
         ML_RADIUS_M = 64.0
         scores = []
+
         for pos in controls[1:-1]:  # Exclure départ et arrivée
-            # --- Score ISOM attractiveness (rule-based) ---
-            best_att = None
-            best_d = ATT_RADIUS_M
-            for cp in self.config.candidate_points:
-                d = self._haversine_m(pos, (cp["x"], cp["y"]))
-                if d < best_d:
-                    best_d = d
-                    if cp.get("_intersection"):
-                        best_att = 1.0
-                    else:
-                        isom = cp.get("isom")
-                        best_att = self._isom_att_scores.get(isom, 0.45) if isom else 0.45
-            att = best_att if best_att is not None else 0.15
+
+            if self._ocad_tree is not None:
+                # ── Chemin KDTree O(log N) — Phase 2 ───────────────────────
+                _near_cp, _near_d = self._nearest_ocad(pos[0], pos[1])
+
+                if _near_d > PENALTY_RADIUS_M:
+                    # Poste dans le vide cartographique : pénalité × 0.10
+                    ml_raw = self._patch_scorer.score_position(
+                        pos[0], pos[1], self.config.candidate_points, ML_RADIUS_M
+                    ) if self._patch_scorer else None
+                    scores.append(0.10 * (ml_raw if ml_raw is not None else 0.30))
+                    continue
+
+                # Feature dans le rayon : attractivité depuis le dict frontend
+                # ou depuis _isom_att_scores (control_descriptions.json)
+                if _near_cp.get("_intersection"):
+                    att = 1.0
+                else:
+                    isom = _near_cp.get("isom")
+                    att = _near_cp.get(
+                        "attractiveness",
+                        self._isom_att_scores.get(isom, 0.45) if isom else 0.45,
+                    )
+            else:
+                # ── Fallback O(N) — pas d'OCAD chargé (OSM-only, rétrocompat) ─
+                best_att = None
+                best_d = ATT_RADIUS_M
+                for cp in self.config.candidate_points:
+                    d = self._haversine_m(pos, (cp["x"], cp["y"]))
+                    if d < best_d:
+                        best_d = d
+                        if cp.get("_intersection"):
+                            best_att = 1.0
+                        else:
+                            isom = cp.get("isom")
+                            best_att = self._isom_att_scores.get(isom, 0.45) if isom else 0.45
+                att = best_att if best_att is not None else 0.15
 
             # --- Score ML visuel (data-driven, blend quand disponible) ---
             if self._patch_scorer is not None:
@@ -1073,6 +1172,20 @@ class GeneticAlgorithm:
             # Pondération sprint : dénivelé remplacé par jambe_sprint + terrain_quality + cluster
             cluster_weight = 0.08 if cluster_radius > 0 else 0.0
             base_weight_adj = 1.0 - cluster_weight
+            _w = self._ga_weights
+            if _w is not None:
+                return (
+                    (length_score       * _w.w_length
+                    + sprint_leg_score  * _w.w_sprint_leg
+                    + td_score          * _w.w_td
+                    + angle_score       * _w.w_angle
+                    + equity_score      * _w.w_equity
+                    + safety_score      * _w.w_safety
+                    + terrain_score     * _w.w_terrain
+                    + monotony_score    * _w.w_monotony
+                    + alternation_score * _w.w_alternation) * base_weight_adj
+                    + cluster_bonus * cluster_weight
+                )
             return (
                 (length_score       * 0.22
                 + sprint_leg_score  * 0.15
@@ -1086,6 +1199,19 @@ class GeneticAlgorithm:
                 + cluster_bonus * cluster_weight
             )
 
+        _w = self._ga_weights
+        if _w is not None:
+            return (
+                length_score       * _w.w_length
+                + climb_score      * _w.w_climb
+                + td_score         * _w.w_td
+                + angle_score      * _w.w_angle
+                + equity_score     * _w.w_equity
+                + safety_score     * _w.w_safety
+                + terrain_score    * _w.w_terrain
+                + monotony_score   * _w.w_monotony
+                + alternation_score * _w.w_alternation
+            )
         return (
             length_score       * 0.18
             + climb_score      * 0.10
@@ -1147,8 +1273,21 @@ class GeneticAlgorithm:
         return min(1.0, variance / 2)  # Normaliser
 
     def _check_early_stop(self) -> bool:
-        """Arrêt si le meilleur fitness n'a pas progressé depuis 20 générations."""
+        """Arrêt si le meilleur fitness n'a pas progressé depuis 20 générations.
+        Exception : ne pas stopper si la distance est < 85% de la cible (GA pas convergé)."""
         current_best = self.population[0].fitness if self.population else 0.0
+
+        # Ne pas stopper si le circuit est encore trop court
+        if (self.best_solution is not None
+                and self.config.target_length_m > 0
+                and len(self.best_solution.controls) >= 2):
+            actual = self._calculate_total_length(self.best_solution.controls)
+            if actual < self.config.target_length_m * 0.85:
+                # Réinitialiser la stagnation — forcer la continuation
+                self._stagnation_count = 0
+                self._last_best_fitness = current_best
+                return False
+
         if abs(current_best - self._last_best_fitness) < 0.01:
             self._stagnation_count += 1
         else:

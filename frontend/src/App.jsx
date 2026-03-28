@@ -12,13 +12,13 @@ import DialogueLog from './components/DialogueLog'
 import { buildMapContext } from './services/mapContext'
 import { OcadAnalysisPanel } from './components/OcadAnalysisPanel'
 
-// IOF/FFCO reference params — auto-computed per circuit type/sex/category
-const CIRCUIT_BASE_PARAMS = {
+// IOF/FFCO reference params — fallback hardcodé (remplacé par API au démarrage)
+const _FALLBACK_BASE = {
   sprint: { target_length_m: 2200, winning_time_minutes: 12, technical_level: 'TD3', target_controls: 12 },
   md:     { target_length_m: 8000, winning_time_minutes: 30, technical_level: 'TD4', target_controls: 18 },
   ld:     { target_length_m: 14000, winning_time_minutes: 60, technical_level: 'TD4', target_controls: 25 },
 }
-const COLOR_PARAMS = {
+const _FALLBACK_COLOR = {
   Jaune:  { target_length_m: 1500, technical_level: 'TD1', target_controls: 8 },
   Orange: { target_length_m: 2000, technical_level: 'TD2', target_controls: 10 },
   Vert:   { target_length_m: 2500, technical_level: 'TD2', target_controls: 10 },
@@ -26,19 +26,46 @@ const COLOR_PARAMS = {
   Violet: { target_length_m: 5000, technical_level: 'TD4', target_controls: 15 },
   Noir:   { target_length_m: 7000, technical_level: 'TD5', target_controls: 20 },
 }
-const AGE_FACTOR = {
+const _FALLBACK_AGE = {
   '10': 0.38, '12': 0.48, '14': 0.62, '16': 0.78, '18': 0.88,
   '20': 0.93, '21': 0.97, '21E': 1.0,
   '35': 0.88, '40': 0.82, '45': 0.76, '50': 0.70, '55': 0.65,
   '60': 0.60, '65': 0.54, '70': 0.48, '75': 0.44, '80': 0.40,
 }
 
+// Cache module-level chargé depuis GET /api/v1/categories au démarrage
+let _ffcoApiCache = null
+
 function getCircuitParams(circuit) {
-  if (circuit.type === 'couleur') {
-    return { ...(COLOR_PARAMS[circuit.color] ?? COLOR_PARAMS.Vert), category: 'Couleur' }
+  // ── Données officielles FFCO depuis l'API (si chargées) ──────────────────
+  if (_ffcoApiCache) {
+    if (circuit.type === 'couleur') {
+      const colorData = _ffcoApiCache.couleur?.[circuit.color]
+      if (colorData) return {
+        target_length_m: Math.round((colorData.min_m + colorData.max_m) / 2 / 100) * 100,
+        technical_level: colorData.td,
+        target_controls: colorData.target_controls,
+        winning_time_minutes: Math.round((colorData.winning_min[0] + colorData.winning_min[1]) / 2),
+        category: `Couleur-${circuit.color}`,
+      }
+    } else {
+      const category = `${circuit.sex}${circuit.category}`
+      const catData = _ffcoApiCache[circuit.type]?.[category]
+      if (catData) return {
+        target_length_m: Math.round((catData.min_m + catData.max_m) / 2 / 100) * 100,
+        technical_level: catData.td,
+        target_controls: catData.target_controls,
+        winning_time_minutes: Math.round((catData.winning_min[0] + catData.winning_min[1]) / 2),
+        category,
+      }
+    }
   }
-  const base = CIRCUIT_BASE_PARAMS[circuit.type] ?? CIRCUIT_BASE_PARAMS.md
-  const ageFactor = AGE_FACTOR[circuit.category] ?? 1.0
+  // ── Fallback hardcodé (tant que l'API n'est pas chargée ou catégorie inconnue) ──
+  if (circuit.type === 'couleur') {
+    return { ...(_FALLBACK_COLOR[circuit.color] ?? _FALLBACK_COLOR.Vert), category: 'Couleur' }
+  }
+  const base = _FALLBACK_BASE[circuit.type] ?? _FALLBACK_BASE.md
+  const ageFactor = _FALLBACK_AGE[circuit.category] ?? 1.0
   const sexFactor = circuit.sex === 'D' ? 0.78 : 1.0
   const factor = ageFactor * sexFactor
   return {
@@ -237,12 +264,39 @@ function findPathIntersections(lines, isom, maxFeatures = 200) {
       for (let ai = 0; ai < a.length - 1; ai++) {
         for (let bi = 0; bi < b.length - 1; bi++) {
           const pt = segmentIntersect(a[ai], a[ai+1], b[bi], b[bi+1])
-          if (pt) pts.push({ x: pt[0], y: pt[1], isom, _intersection: true })
+          if (pt) pts.push({ x: pt[0], y: pt[1], isom, _intersection: true, attractiveness: 0.85 })
         }
       }
     }
   }
   return pts
+}
+
+// Attractivité sémantique ISOM 2017 / ISSprOM 2019 par code symbole.
+// Source : backend/src/data/ocad_semantics.json (valeurs arrondies).
+// Transmis au backend dans candidate_points.attractiveness — le GA l'utilise
+// directement sans recharger ocad_semantics.json.
+const ISOM_ATT = {
+  // 1.0 — entités ponctuelles idéales IOF (rocher, dépression, butte…)
+  107: 1.0, 108: 1.0,            // tertre, butte rocheuse
+  109: 1.0, 110: 1.0, 111: 1.0, // dépression (grand/petit/trou)
+  118: 1.0, 119: 1.0,            // rocher isolé, groupe de rochers
+  112: 0.95, 103: 0.95,          // creux allongé, selle / col
+  105: 0.95, 101: 0.90,          // sommet colline, sommet de butte
+  // 0.8 — topographie secondaire, hydrographie ponctuelle
+  106: 0.80, 114: 0.80, 116: 0.80, 113: 0.75, // talus, ravin, excavation, terrasse
+  120: 0.80,                     // falaise / paroi
+  209: 0.80, 210: 0.75, 211: 0.70, // fontaine, coude de rivière, coude de ruisseau
+  201: 0.70, 202: 0.70,          // bord de lac, bord de marécage
+  212: 0.65,                     // extrémité de fossé
+  // 0.7 — réseau de chemins (intersections > endpoints > coudes)
+  401: 0.70, 402: 0.70, 403: 0.65, 404: 0.65, 405: 0.60, 406: 0.55,
+  529: 0.75,                     // carrefour de chemins pavés (sprint)
+  // 0.6 — lisières, angles de végétation
+  301: 0.60, 302: 0.60, 303: 0.60, 304: 0.55, 305: 0.55, 306: 0.55,
+  308: 0.65,                     // arbre remarquable
+  // 0.5 — bâti, clôtures (sprint uniquement pratiquement)
+  501: 0.55, 502: 0.50, 516: 0.50, 521: 0.50, 522: 0.50,
 }
 
 function extractCandidatePoints(geojson, max = 600, sprintMode = false) {
@@ -260,15 +314,16 @@ function extractCandidatePoints(geojson, max = 600, sprintMode = false) {
     if (!attractiveCodes.has(isom)) continue
     const geom = f.geometry
     if (!geom) continue
+    const att = ISOM_ATT[isom] ?? 0.5
 
     if (geom.type === 'Point') {
-      pts.push({ x: geom.coordinates[0], y: geom.coordinates[1], isom })
+      pts.push({ x: geom.coordinates[0], y: geom.coordinates[1], isom, attractiveness: att })
 
     } else if (geom.type === 'Polygon' && buildingCodes.has(isom)) {
       // Building corners — all polygon vertices
       const ring = geom.coordinates[0]
       for (let i = 0; i < ring.length - 1; i++) {
-        pts.push({ x: ring[i][0], y: ring[i][1], isom })
+        pts.push({ x: ring[i][0], y: ring[i][1], isom, attractiveness: att })
       }
 
     } else if (geom.type === 'LineString' && pathCodes.has(isom)) {
@@ -279,16 +334,16 @@ function extractCandidatePoints(geojson, max = 600, sprintMode = false) {
       for (let i = 1; i < coords.length - 1; i++) {
         const angle = computeAngleDeg(coords[i-1], coords[i], coords[i+1])
         if (angle < 150) {
-          pts.push({ x: coords[i][0], y: coords[i][1], isom })
+          pts.push({ x: coords[i][0], y: coords[i][1], isom, attractiveness: att })
         }
       }
       // Endpoints (potential T-junctions, dead-ends)
-      pts.push({ x: coords[0][0], y: coords[0][1], isom })
-      pts.push({ x: coords[coords.length-1][0], y: coords[coords.length-1][1], isom })
+      pts.push({ x: coords[0][0], y: coords[0][1], isom, attractiveness: att })
+      pts.push({ x: coords[coords.length-1][0], y: coords[coords.length-1][1], isom, attractiveness: att })
 
     } else {
       const c = computeGeoCentroid(geom)
-      if (c) pts.push({ x: c[0], y: c[1], isom })
+      if (c) pts.push({ x: c[0], y: c[1], isom, attractiveness: att })
     }
   }
 
@@ -484,6 +539,15 @@ function App() {
         .catch(err => console.warn('[OCAD analyze]', err.message))
     }
   }
+
+  // Chargement des tables FFCO officielles depuis l'API (au démarrage)
+  useEffect(() => {
+    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+    fetch(`${apiBase}/api/v1/categories`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) _ffcoApiCache = data })
+      .catch(() => {}) // Fallback silencieux sur les constantes hardcodées
+  }, [])
 
   // Détection auto du contexte terrain basée sur les symboles OCAD
   useEffect(() => {

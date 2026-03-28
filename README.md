@@ -14,8 +14,11 @@
 - **Pipeline OCAD natif** : le fichier `.ocd` uploadé alimente directement l'IA — zones interdites extraites des vecteurs (sym 709/527 ISSprOM/ISOM), image rasterisée normalisée vers la distribution MapAnt d'entraînement
 - **HeatmapCache** : grille de scores V2 précomputée (O(1) lookups GA), Smart Seeding population initiale — source : OCAD tile service (priorité) ou MapAnt (fallback forêt/LD)
 - **Forbidden mask vectoriel** : polygones OOB extraits directement depuis les symboles OCAD (100 % fiable) ; requête Overpass bâtiments skippée → gain ~50s
+- **Ancrage vectoriel ISOM Phase 2** : postes ancrés sur les features OCAD réelles via `scipy.spatial.KDTree` (O(log N)) — pénalité si poste trop loin (rayon 40 m sprint / 80 m forêt), attractivité sémantique `ISOM_ATT` transmise depuis le frontend
 - **Contrôleur IOF/FFCO** : validation automatique des règles (dog-legs, jambes C01–C12, TD1-5/PD1-5)
 - **Boucle traceur ↔ contrôleur** : dialogue IA avec corrections automatiques (jusqu'à 5 itérations)
+- **FFCORulesEngine** : source de vérité unique pour les seuils FFCO/IOF — distances, TD, temps gagnants par catégorie exposés via `GET /api/v1/categories` ; seuils injectés dans le GA (remplace les constantes hardcodées)
+- **Détection circuit impossible** : score GA < -5000 → erreur explicite ; distance < 70 % cible → `warning` dans la réponse
 - **Analyse de routes** : NetworkX A*, diversité des itinéraires (Jaccard), détection dog-legs, Re-Ranker Top-3 (budget 15s)
 - **Scorer XGBoost V3** : 18-dim bi-mode (`is_urban` feat[17]), `patch_scorer_v2.pkl` — 370k patches RG2 (88 clubs UK), entraîné sur images MapAnt
 - **Carte OCAD** : rendu haute-fidélité des fichiers `.ocd` via tile service Node.js
@@ -155,6 +158,55 @@ Le Recall supérieur (+4% vs V2) signifie moins de postes légitimes manqués. L
 - `train_control_scorer.py` — entraîné exclusivement sur patches MapAnt/RG2 (source de vérité terrain uniforme)
 - `ocad_pipeline.py` — adapte les cartes OCAD pour l'inférence (normalisation histogramme → domaine MapAnt)
 - `style_normalizer.py` — `match_histograms` RGB pour aligner la distribution de couleurs
+
+---
+
+## Moteur `aitraceur` — Bibliothèque core (standalone)
+
+Le répertoire `backend/src/aitraceur/` est une bibliothèque Python autonome (~7 500 lignes) qui encapsule tout le pipeline de génération de tracés en dehors de FastAPI.
+
+### Modules
+
+| Package | Rôle |
+|---------|------|
+| `controls/` | `ControlCandidate`, enrichissement, parseur OCAD, carte symboles |
+| `matrix/` | `CostMatrix` (Tobler A* parallèle), `LegCache` (thread-safe), `SpatialFilter` |
+| `model/` | `Leg`, `Course` — objets métier immuables |
+| `navigation/` | `TerrainMovementCost`, `ElevationProvider`, modèle Tobler, graph OSM |
+| `generation/` | `GeneticAlgorithm`, SA (recuit simulé), constructif (greedy NN), local_opt |
+| `scoring/` | `score_course()`, `CourseScoreBreakdown`, anti-patterns, flow, variety |
+| `calibration/` | `CalibrationEngine` L-BFGS-B (11 paramètres, régularisation L2) |
+| `profiles.py` | `ScoringWeights`, 4 profils (forêt Blanc→Noir, sprint urbain) |
+
+### Scripts standalone (sans API)
+
+```bash
+cd backend
+
+# Générer des candidats de test
+python scripts/generate_test_candidates.py --num 20 --output data/candidates.json
+
+# Pipeline SA complet (recuit simulé + export GeoJSON)
+python scripts/run_generator.py --candidates data/candidates.json --output output/course.geojson
+
+# Tests visuels terrain 3D (Tobler — génère 3 PNG)
+python scripts/run_visual_tests.py
+
+# Visualiser un chemin A* (PNG headless)
+python scripts/visualize_leg.py --map path/to/elev.tif --from 50,50 --to 450,450
+```
+
+**Résultats typiques `run_generator.py` (20 candidats synthétiques plats) :**
+- Score : 81/100 (Grade B), early stop iter 127/2 000
+- Export : 29 features GeoJSON (15 postes + 14 jambes avec métriques 3D)
+
+**Résultats `run_visual_tests.py` (GeoTIFF synthétiques) :**
+
+| Scénario | Détour A* | Dénivelé |
+|----------|-----------|----------|
+| Colline gaussienne | +21.7 % | 10.3 m |
+| Mur végétation (passage) | +28.5 % | — |
+| Falaise 133 % pente | +146.9 % | — |
 
 ---
 

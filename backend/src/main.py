@@ -2153,6 +2153,22 @@ def score_circuit(
     }
 
 
+@app.get(
+    "/api/v1/categories",
+    summary="Tables officielles FFCO/IOF par type de circuit",
+    description="Retourne ffco_categories.json — distances, TD, temps gagnants par catégorie.",
+)
+def get_categories():
+    """Expose les tables FFCO officielles pour le frontend (remplace les constantes hardcodées)."""
+    try:
+        from src.services.rules.ffco_rules_engine import get_engine as _get_engine
+        engine = _get_engine()
+        return engine._categories
+    except Exception as exc:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=f"Erreur chargement catégories : {exc}")
+
+
 @app.post(
     "/api/v1/generation/terrain-analyze",
     summary="Analyse terrain + évaluation ffco-iof-v7",
@@ -3754,6 +3770,14 @@ def _sprint_impl(task_id: str, body: dict) -> None:
             })
 
     # ── Étape 2 : Génération initiale ──────────────────────────────────────────
+    # FFCORulesEngine : source de vérité unique pour les seuils IOF/FFCO
+    try:
+        from src.services.rules.ffco_rules_engine import get_engine as _get_engine
+        _rules_engine = _get_engine()
+    except Exception as _re_err:
+        print(f"{_tag} ⚠️ FFCORulesEngine non chargé : {_re_err}", flush=True)
+        _rules_engine = None
+
     generator = AIGenerator()
     gen_request = GenerationRequest(
         bounding_box=bounding_box,
@@ -3768,6 +3792,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
         start_position=start_position,
         heatmap_cache=heatmap_cache,
         route_analyzer=route_analyzer,   # re-ranker choix d'itinéraire sprint
+        rules_engine=_rules_engine,
     )
 
     print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ GA generate ({len(candidate_points)} candidats)...", flush=True)
@@ -3804,8 +3829,43 @@ def _sprint_impl(task_id: str, body: dict) -> None:
 
     if not gen_result:
         return {"error": "Génération initiale : aucun circuit produit", "dialogue": dialogue}
+
     best_circuit = gen_result[0]
     best_controls = best_circuit.controls if hasattr(best_circuit, "controls") else (best_circuit.get("controls", []) if isinstance(best_circuit, dict) else [])
+
+    # ── Détection circuit impossible / incomplet ────────────────────────────────
+    _generation_warning = None
+    _distance_ratio = 1.0
+    if best_controls and target_length_m > 0:
+        _actual_len = sum(
+            math.sqrt(
+                ((best_controls[i+1].get("x", 0) - best_controls[i].get("x", 0)) * 72600) ** 2 +
+                ((best_controls[i+1].get("y", 0) - best_controls[i].get("y", 0)) * 111000) ** 2
+            )
+            for i in range(len(best_controls) - 1)
+        ) if len(best_controls) >= 2 else 0.0
+        _distance_ratio = round(_actual_len / target_length_m, 3)
+
+        if best_circuit.score < -5000:
+            # Toutes les positions sont en zones interdites — bbox trop petite ou mal configurée
+            _sprint_tasks[task_id] = {
+                "status": "error",
+                "message": (
+                    f"Circuit impossible : la zone est trop petite ou entièrement en zone interdite "
+                    f"pour générer un circuit de {target_length_m:.0f}m. "
+                    f"Réduisez la distance cible ou agrandissez la zone."
+                ),
+            }
+            return
+        elif _distance_ratio < 0.70:
+            _generation_warning = (
+                f"Distance partielle : {_actual_len:.0f}m générés sur {target_length_m:.0f}m "
+                f"demandés ({_distance_ratio*100:.0f}%). "
+                f"Zone géographique probablement insuffisante pour cette catégorie."
+            )
+            print(f"{_tag} ⚠️ {_generation_warning}", flush=True)
+    # ────────────────────────────────────────────────────────────────────────────
+
     best_latlng = _to_latlng(best_controls)
 
     # ── Mode compétition : snapping sur les postes des circuits existants ──────
@@ -3958,6 +4018,8 @@ def _sprint_impl(task_id: str, body: dict) -> None:
             "is_valid": final_report.is_valid if final_report else False,
             "score": final_report.global_score if final_report else 0,
             "leg_route_choices": gen_result[0].leg_route_choices if gen_result else [],
+            "warning": _generation_warning,         # None si OK, message si distance partielle
+            "distance_ratio": _distance_ratio,      # ratio distance_réelle / distance_cible
         }
     }
 

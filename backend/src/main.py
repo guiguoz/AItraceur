@@ -3666,8 +3666,9 @@ def _sprint_impl(task_id: str, body: dict) -> None:
     if bounding_box or map_id:
         try:
             print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ chargement scorer V2...", flush=True)
-            from src.services.learning.ocad_patch_scorer import OcadPatchScorer as _OPS
+            from src.services.learning.ocad_patch_scorer import OcadPatchScorer as _OPS, CnnPatchScorer as _CPS
             _scorer_v2 = _OPS.load()
+            _cnn_scorer = _CPS.load()
             if _scorer_v2 is not None:
                 _mapant_result = None
                 if map_id and ocad_sw and ocad_ne:
@@ -3717,6 +3718,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                         mpp=_mpp,
                         step_px=_step_px,
                         force_mode=force_mode,
+                        cnn_scorer=_cnn_scorer,
                     )
                     print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ✅ HeatmapCache OK {heatmap_cache.scores.shape}", flush=True)
                     # ── OOBMask : rasterisation des polygones OOB OSM → plus fiable que RGB ──

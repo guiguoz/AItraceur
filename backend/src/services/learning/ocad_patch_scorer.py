@@ -355,12 +355,13 @@ class OcadPatchScorer:
         mpp: float = 0.5,
         step_px: int = 20,
         force_mode: Optional[str] = None,
+        cnn_scorer: Optional["CnnPatchScorer"] = None,
     ) -> "HeatmapCache":
         """
-        Précompute une grille de scores V2 sur l'image carte entière.
+        Précompute une grille de scores sur l'image carte entière.
 
-        Appelle score_map_image() sur une grille régulière de positions,
-        puis construit un HeatmapCache pour les lookups O(1) du GA.
+        Si cnn_scorer est fourni, utilise l'inférence CNN batch (ONNX) ;
+        sinon fallback XGBoost via score_map_image().
 
         Args:
             map_img:    Image PIL de la carte complète.
@@ -368,28 +369,43 @@ class OcadPatchScorer:
             mpp:        Mètres par pixel (default 0.5).
             step_px:    Pas de grille en pixels (default 20 = tous les 10m à mpp=0.5).
             force_mode: "sprint" → is_urban forcé à 1, "forest" → 0, None → auto.
+            cnn_scorer: CnnPatchScorer instance (ONNX) ou None → XGBoost.
 
         Returns:
             HeatmapCache prêt à l'emploi.
         """
+        import time as _time
         map_w, map_h = map_img.size
         xs = list(range(0, map_w, step_px))
         ys = list(range(0, map_h, step_px))
         candidates = [{"px": x, "py": y} for y in ys for x in xs]
         mode_label = {"sprint": "Sprint/Urbain forcé", "forest": "Forêt forcé"}.get(force_mode or "", "Auto")
+        scorer_label = "CNN ONNX" if cnn_scorer is not None else "XGBoost V3"
         log.info(
-            "HeatmapCache: scoring %d positions (step=%dpx, %dx%d grid, mode=%s)…",
-            len(candidates), step_px, len(xs), len(ys), mode_label,
+            "HeatmapCache: scoring %d positions (step=%dpx, %dx%d grid, mode=%s, scorer=%s)…",
+            len(candidates), step_px, len(xs), len(ys), mode_label, scorer_label,
         )
-        log.info(
-            "🔥 IA V3 : HeatmapCache généré et transmis à l'Algorithme Génétique ! (bbox=%s, is_urban actif)",
-            bbox,
-        )
-        results = self.score_map_image(map_img, candidates, mpp=mpp, bbox=bbox, force_mode=force_mode)
-        scores_flat = np.array(
-            [r["score"] if r["score"] is not None else 0.0 for r in results],
-            dtype=np.float32,
-        )
+
+        _t0 = _time.monotonic()
+
+        if cnn_scorer is not None:
+            # ── Branche CNN : extraction patches + inférence batch ONNX ───────
+            patches = [
+                CnnPatchScorer.crop_patch(map_img, c["px"], c["py"], mpp)
+                for c in candidates
+            ]
+            scores_flat = cnn_scorer.score_batch(patches)
+            scores_flat = scores_flat.astype(np.float32)
+        else:
+            # ── Branche XGBoost (comportement historique) ─────────────────────
+            results = self.score_map_image(map_img, candidates, mpp=mpp, bbox=bbox, force_mode=force_mode)
+            scores_flat = np.array(
+                [r["score"] if r["score"] is not None else 0.0 for r in results],
+                dtype=np.float32,
+            )
+
+        _elapsed = _time.monotonic() - _t0
+        log.info("HeatmapCache: %s scoring %d patches → %.2fs", scorer_label, len(candidates), _elapsed)
         scores_grid = scores_flat.reshape(len(ys), len(xs))
         print(
             f"HeatmapCache: done — mean={float(scores_grid.mean()):.3f}, max={float(scores_grid.max()):.3f}",
@@ -540,3 +556,127 @@ class OcadPatchScorer:
             if s is not None:
                 scores.append(s)
         return sum(scores) / len(scores) if scores else 0.45
+
+
+# ---------------------------------------------------------------------------
+# CnnPatchScorer — Inférence MobileNetV3-Small via ONNX (prod, pas de PyTorch)
+# ---------------------------------------------------------------------------
+
+class CnnPatchScorer:
+    """
+    Scorer CNN basé sur MobileNetV3-Small exporté en ONNX.
+
+    Utilisé à la place de OcadPatchScorer (XGBoost) dans build_heatmap_cache()
+    quand le fichier control_scorer_cnn.onnx est disponible.
+
+    Avantage vs XGBoost : voit directement la structure spatiale de la carte
+    (intersections, lisières, rochers…) sans features manuelles.
+    AUC attendu : ~0.87–0.91 vs 0.807 XGBoost V3.
+
+    Pas de dépendance PyTorch à runtime — onnxruntime seulement.
+    """
+
+    _MODEL_RELATIVE = Path("data") / "models" / "control_scorer_cnn.onnx"
+    _IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+    _IMAGENET_STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+
+    # FOV identique à OcadPatchScorer (128m) — crop puis resize 224 pour MobileNetV3
+    _FOV_M: float = 128.0
+    _TARGET_PX: int = 224
+
+    def __init__(self, session: object) -> None:
+        self._session = session  # onnxruntime.InferenceSession
+
+    # ------------------------------------------------------------------
+    # Factory
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def load(cls, base_dir: Optional[Path] = None) -> Optional["CnnPatchScorer"]:
+        """
+        Charge le modèle ONNX depuis data/models/control_scorer_cnn.onnx.
+
+        Returns None si onnxruntime non installé ou modèle absent (fallback XGBoost).
+        """
+        try:
+            import onnxruntime as ort  # type: ignore[import]
+        except ImportError:
+            log.debug("CnnPatchScorer: onnxruntime non installé — fallback XGBoost")
+            return None
+
+        model_path = (base_dir or Path(__file__).parents[3]) / cls._MODEL_RELATIVE
+        if not model_path.exists():
+            log.debug("CnnPatchScorer: modèle absent (%s) — fallback XGBoost", model_path)
+            return None
+
+        session = ort.InferenceSession(
+            str(model_path),
+            providers=["CPUExecutionProvider"],
+        )
+        log.info("CnnPatchScorer: chargé %s (MobileNetV3-Small ONNX)", model_path.name)
+        return cls(session)
+
+    # ------------------------------------------------------------------
+    # Crop helper (statique — réutilisable depuis build_heatmap_cache)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def crop_patch(map_img: Image.Image, px: int, py: int, mpp: float) -> Image.Image:
+        """
+        Extrait un patch 224×224 centré sur (px, py) couvrant FOV_M=128m.
+
+        Identique au crop de OcadPatchScorer mais resize en 224×224 BILINEAR
+        (MobileNetV3 attend 224×224 ; BILINEAR préserve les symboles IOF vs NEAREST).
+        """
+        map_w, map_h = map_img.size
+        crop_px = max(1, int(CnnPatchScorer._FOV_M / mpp))
+        r = crop_px // 2
+        x0, y0 = px - r, py - r
+        x1, y1 = x0 + crop_px, y0 + crop_px
+
+        ix0, iy0 = max(0, x0), max(0, y0)
+        ix1, iy1 = min(map_w, x1), min(map_h, y1)
+
+        if ix1 <= ix0 or iy1 <= iy0:
+            return Image.new("RGB", (CnnPatchScorer._TARGET_PX, CnnPatchScorer._TARGET_PX), (255, 255, 255))
+
+        region = map_img.crop((ix0, iy0, ix1, iy1))
+
+        if ix0 != x0 or iy0 != y0 or ix1 != x1 or iy1 != y1:
+            padded = Image.new("RGB", (crop_px, crop_px), (255, 255, 255))
+            padded.paste(region.convert("RGB"), (ix0 - x0, iy0 - y0))
+            region = padded
+
+        return region.resize(
+            (CnnPatchScorer._TARGET_PX, CnnPatchScorer._TARGET_PX),
+            resample=Image.Resampling.BILINEAR,
+        )
+
+    # ------------------------------------------------------------------
+    # Inférence batch
+    # ------------------------------------------------------------------
+
+    def score_batch(self, patches: List[Image.Image]) -> np.ndarray:
+        """
+        Score une liste de patches PIL via inférence ONNX batch.
+
+        Returns:
+            np.ndarray shape (N,) — probabilités [0, 1].
+        """
+        from scipy.special import expit  # sigmoid numeriquement stable (no overflow)
+
+        _BATCH = 64  # optimal CPU ONNX : ~3-5s pour 1600 patches
+        results: list[np.ndarray] = []
+
+        for i in range(0, len(patches), _BATCH):
+            chunk = patches[i : i + _BATCH]
+            tensors = []
+            for img in chunk:
+                arr = np.array(img.convert("RGB"), dtype=np.float32) / 255.0
+                arr = (arr - self._IMAGENET_MEAN) / self._IMAGENET_STD
+                tensors.append(arr.transpose(2, 0, 1))  # HWC → CHW
+            batch = np.stack(tensors, axis=0)  # (N, 3, 224, 224)
+            logits = self._session.run(["output"], {"input": batch})[0]  # (N, 1)
+            results.append(expit(logits).ravel())
+
+        return np.concatenate(results)

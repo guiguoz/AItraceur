@@ -5,8 +5,13 @@ Usage:
     # Phase 1 — XGBoost (rapide, CPU only)
     python train_control_scorer.py --phase xgboost
 
-    # Phase 2 — CNN ResNet18 (GPU recommandé)
+    # Phase 2 — CNN MobileNetV3-Small + export ONNX (GPU recommandé)
     python train_control_scorer.py --phase cnn --epochs 30 --batch-size 32
+
+    # Merge RG2 + Vikazimut
+    python train_control_scorer.py --phase cnn \
+        --dataset-dir data/rg2/dataset \
+        --extra-dataset-dir output/vikazimut_patches
 
     # Auto (xgboost si torch absent, sinon cnn)
     python train_control_scorer.py
@@ -17,8 +22,9 @@ Input:
     data/rg2/dataset/metadata.csv
 
 Output:
-    data/models/control_scorer_v1.pkl  (xgboost)
-    data/models/control_scorer_v1.pt   (cnn)
+    data/models/patch_scorer_v2.pkl         (xgboost)
+    data/models/control_scorer_cnn.onnx     (cnn — inference prod)
+    data/models/best_model.pth              (cnn — checkpoint PyTorch)
 """
 
 from __future__ import annotations
@@ -242,8 +248,9 @@ def train_cnn(
     output_dir: Path,
     epochs: int = 30,
     batch_size: int = 32,
+    extra_dataset_dirs: Optional[list] = None,
 ) -> Path:
-    """Phase 2 — ResNet18 fine-tuning on 256×256 RGB patches."""
+    """Phase 2 — MobileNetV3-Small fine-tuning + export ONNX."""
     try:
         import torch
         import torch.nn as nn
@@ -255,15 +262,14 @@ def train_cnn(
         sys.exit(1)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    log.info("=== Phase 2 — CNN ResNet18 === (device: %s)", device)
+    log.info("=== Phase 2 — CNN MobileNetV3-Small + ONNX === (device: %s)", device)
 
     # ------------------------------------------------------------------
-    # Dataset
+    # Dataset — supporte les chemins absolus (merge multi-datasets)
     # ------------------------------------------------------------------
     class ControlPatchDataset(Dataset):
-        def __init__(self, df: pd.DataFrame, dataset_dir: Path, transform=None):
+        def __init__(self, df: pd.DataFrame, transform=None):
             self.df = df.reset_index(drop=True)
-            self.dataset_dir = dataset_dir
             self.transform = transform
 
         def __len__(self) -> int:
@@ -271,18 +277,18 @@ def train_cnn(
 
         def __getitem__(self, idx: int):
             row = self.df.iloc[idx]
-            img_path = self.dataset_dir / row["img_path"]
-            img = Image.open(img_path).convert("RGB")
+            # img_path est absolu après merge (voir chargement ci-dessous)
+            img = Image.open(row["img_path"]).convert("RGB")
             label = float(row["label"])
             if self.transform:
                 img = self.transform(img)
             return img, torch.tensor(label, dtype=torch.float32)
 
-    # Augmentation — orienteering maps are rotation-invariant
+    # Augmentation — cartes CO rotation-invariantes + resize 224 pour MobileNetV3
     train_transform = transforms.Compose([
+        transforms.Resize((224, 224), interpolation=transforms.InterpolationMode.BILINEAR),
         transforms.RandomHorizontalFlip(),
         transforms.RandomVerticalFlip(),
-        # Random 90° multiples (orienteering: nord = convention arbitraire)
         transforms.RandomApply([transforms.RandomRotation(degrees=(90, 90))], p=0.33),
         transforms.RandomApply([transforms.RandomRotation(degrees=(180, 180))], p=0.33),
         transforms.RandomApply([transforms.RandomRotation(degrees=(270, 270))], p=0.33),
@@ -292,44 +298,55 @@ def train_cnn(
     ])
 
     val_transform = transforms.Compose([
+        transforms.Resize((224, 224), interpolation=transforms.InterpolationMode.BILINEAR),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
 
-    # Load metadata
-    metadata_csv = dataset_dir / "metadata.csv"
-    if not metadata_csv.exists():
-        log.error("metadata.csv not found at %s", metadata_csv)
-        sys.exit(1)
+    # ------------------------------------------------------------------
+    # Chargement + merge datasets (RG2 + Vikazimut éventuellement)
+    # ------------------------------------------------------------------
+    def _load_csv(ddir: Path) -> pd.DataFrame:
+        csv = ddir / "metadata.csv"
+        if not csv.exists():
+            log.error("metadata.csv non trouvé : %s", csv)
+            sys.exit(1)
+        _df = pd.read_csv(csv)
+        if "lat" not in _df.columns:
+            _df["lat"] = 0.0
+        if "lon" not in _df.columns:
+            _df["lon"] = 0.0
+        _df = _df.dropna(subset=["img_path", "label"])
+        _df = _df.drop_duplicates(subset=["img_path"])
+        _df["label"] = _df["label"].astype(int)
+        # Résoudre les chemins relatifs en absolus (nécessaire pour merge)
+        _df["img_path"] = _df["img_path"].apply(
+            lambda p: str(ddir / p) if not Path(p).is_absolute() else p
+        )
+        # Filtrer les patches inexistants
+        _df = _df[_df["img_path"].apply(lambda p: Path(p).exists())]
+        log.info("  %s : %d patches (%d pos, %d neg)",
+                 ddir.name, len(_df), (_df["label"] == 1).sum(), (_df["label"] == 0).sum())
+        return _df
 
-    df = pd.read_csv(metadata_csv)
+    all_dfs = [_load_csv(dataset_dir)]
+    for extra in (extra_dataset_dirs or []):
+        all_dfs.append(_load_csv(Path(extra)))
 
-    # --- FIX RÉTROCOMPATIBILITÉ ANCIEN DATASET ---
-    if "lat" not in df.columns:
-        df["lat"] = 0.0
-    if "lon" not in df.columns:
-        df["lon"] = 0.0
-    # ---------------------------------------------
-
-    df = df.dropna(subset=["img_path", "label"])
-    df = df.drop_duplicates(subset=["img_path"])
-    df["label"] = df["label"].astype(int)
-
-    # Keep only patches that exist on disk
-    df = df[df["img_path"].apply(lambda p: (dataset_dir / p).exists())]
-    log.info("Valid patches: %d (%d pos, %d neg)",
+    df = pd.concat(all_dfs, ignore_index=True)
+    log.info("Dataset fusionné : %d patches (%d pos, %d neg)",
              len(df), (df["label"] == 1).sum(), (df["label"] == 0).sum())
 
     if len(df) < 100:
-        log.error("Not enough patches (%d). Run scrape_rg2.py --generate-dataset first.", len(df))
+        log.error("Pas assez de patches (%d).", len(df))
         sys.exit(1)
 
     # Stratified split
     from sklearn.model_selection import train_test_split
     df_train, df_val = train_test_split(df, test_size=0.2, random_state=42, stratify=df["label"])
 
-    train_ds = ControlPatchDataset(df_train, dataset_dir, transform=train_transform)
-    val_ds = ControlPatchDataset(df_val, dataset_dir, transform=val_transform)
+    train_ds = ControlPatchDataset(df_train, transform=train_transform)
+    val_ds = ControlPatchDataset(df_val, transform=val_transform)
 
     # Weighted sampler to handle class imbalance during training
     n_pos = (df_train["label"] == 1).sum()
@@ -344,14 +361,22 @@ def train_cnn(
                             num_workers=0, pin_memory=(device.type == "cuda"))
 
     # ------------------------------------------------------------------
-    # Model — ResNet18, freeze everything except layer4 + fc
+    # Model — MobileNetV3-Small, dégeler features[-2:] + classifier
     # ------------------------------------------------------------------
     def build_model() -> nn.Module:
-        model = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
-        for name, param in model.named_parameters():
-            if not (name.startswith("layer4") or name.startswith("fc")):
-                param.requires_grad = False
-        model.fc = nn.Linear(model.fc.in_features, 1)
+        model = models.mobilenet_v3_small(
+            weights=models.MobileNet_V3_Small_Weights.IMAGENET1K_V1
+        )
+        # Geler tout
+        for param in model.parameters():
+            param.requires_grad = False
+        # Dégeler les 2 derniers blocs features + classifier
+        for param in (list(model.features[-2].parameters()) +
+                      list(model.features[-1].parameters()) +
+                      list(model.classifier.parameters())):
+            param.requires_grad = True
+        # Remplacer la tête (1000 classes → 1 sortie binaire)
+        model.classifier[3] = nn.Linear(1024, 1)
         return model
 
     model = build_model().to(device)
@@ -428,8 +453,8 @@ def train_cnn(
             torch.save(model.state_dict(), best_path)
             log.info("  → Best model saved (val_loss=%.4f)", val_loss)
 
-    # Save final model
-    out_path = output_dir / "control_scorer_v1.pt"
+    # Save final model (checkpoint PyTorch)
+    out_path = output_dir / "control_scorer_cnn.pt"
     torch.save(model.state_dict(), out_path)
     log.info("Final model saved: %s", out_path)
     log.info("Best model saved : %s", best_path)
@@ -442,7 +467,27 @@ def train_cnn(
     log.info("  Best F1        : %.4f", best_epoch["f1"])
     log.info("  Best Recall    : %.4f", best_epoch["recall"])
 
-    return out_path
+    # ------------------------------------------------------------------
+    # Export ONNX depuis le meilleur checkpoint
+    # ------------------------------------------------------------------
+    best_model = build_model().to(device)
+    best_model.load_state_dict(torch.load(best_path, map_location=device))
+    best_model.eval()
+
+    onnx_path = output_dir / "control_scorer_cnn.onnx"
+    dummy = torch.randn(1, 3, 224, 224, device=device)
+    torch.onnx.export(
+        best_model,
+        dummy,
+        str(onnx_path),
+        input_names=["input"],
+        output_names=["output"],
+        dynamic_axes={"input": {0: "batch"}, "output": {0: "batch"}},
+        opset_version=17,
+    )
+    log.info("ONNX exporté : %s  (prod inference via onnxruntime)", onnx_path)
+
+    return onnx_path
 
 
 # ---------------------------------------------------------------------------
@@ -458,19 +503,19 @@ def score_patch_xgboost(img: Image.Image, lng: float, lat: float, model_path: Pa
 
 
 def score_patch_cnn(img: Image.Image, model_path: Path) -> float:
-    """Score a 256×256 patch with the CNN model. Returns probability [0..1]."""
+    """Score a patch with the MobileNetV3-Small model (.pt). Returns probability [0..1]."""
     import torch
     import torch.nn as nn
     from torchvision import models, transforms
 
     transform = transforms.Compose([
-        transforms.Resize((256, 256)),
+        transforms.Resize((224, 224), interpolation=transforms.InterpolationMode.BILINEAR),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
 
-    net = models.resnet18(weights=None)
-    net.fc = nn.Linear(net.fc.in_features, 1)
+    net = models.mobilenet_v3_small(weights=None)
+    net.classifier[3] = nn.Linear(1024, 1)
     net.load_state_dict(torch.load(model_path, map_location="cpu"))
     net.eval()
 
@@ -541,6 +586,11 @@ def main():
         default="patch_scorer_v2",
         help="Nom du fichier modèle sans extension (default: patch_scorer_v2)",
     )
+    parser.add_argument(
+        "--extra-dataset-dir",
+        default=None,
+        help="Dataset supplémentaire à fusionner (ex: output/vikazimut_patches)",
+    )
     args = parser.parse_args()
 
     dataset_dir, output_dir = _resolve_paths(args.dataset_dir, args.output_dir)
@@ -553,15 +603,18 @@ def main():
         try:
             import torch  # noqa: F401
             phase = "cnn"
-            log.info("torch found → using CNN (ResNet18)")
+            log.info("torch found → CNN MobileNetV3-Small + ONNX export")
         except ImportError:
             phase = "xgboost"
-            log.info("torch not found → using XGBoost baseline")
+            log.info("torch non trouvé → XGBoost baseline")
+
+    extra_dirs = [Path(args.extra_dataset_dir)] if args.extra_dataset_dir else None
 
     if phase == "xgboost":
         train_xgboost(dataset_dir, output_dir, output_name=args.output)
     else:
-        train_cnn(dataset_dir, output_dir, epochs=args.epochs, batch_size=args.batch_size)
+        train_cnn(dataset_dir, output_dir, epochs=args.epochs, batch_size=args.batch_size,
+                  extra_dataset_dirs=extra_dirs)
 
 
 if __name__ == "__main__":

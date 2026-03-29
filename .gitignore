@@ -105,3 +105,15 @@ poppler/
 tools/
 backend/data/models/best_model.pth
 *.pth
+
+# Vikazimut dataset (volumineuse — >500MB localement)
+vikazimut/parcours/
+vikazimut/traces/
+vikazimut/maps/
+vikazimut/index.json
+vikazimut/stats.json
+
+# Sorties scripts
+backend/output/
+backend/tests/output/
+backend/data/candidates.json

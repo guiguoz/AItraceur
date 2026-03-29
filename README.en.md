@@ -7,16 +7,23 @@
 ## Features
 
 - **Automatic course generation** for sprint (urban) and forest disciplines via multi-objective genetic algorithm
+- **Async sprint** : POST returns `task_id` in <100ms, background pipeline (~35s), GET `/sprint-status` polling
+- **Terrain mode selector** : [Auto / Urban / Forest] to override AI detection
 - **V2 multicriteria fitness** : AI Score (HeatmapCache XGBoost), distance penalty, dog-leg detection, rhythm bonus
-- **HeatmapCache** : V2 score grid precomputed from MapAnt tiles (O(1) GA lookups), Smart Seeding of initial population
+- **Native OCAD pipeline** : `.ocd` file feeds the AI directly — forbidden zones from OCAD vectors (sym 709/527), rasterized image normalized toward MapAnt training distribution
+- **HeatmapCache** : V3 score grid precomputed (O(1) GA lookups), Smart Seeding — source: OCAD tile service (priority) or MapAnt (forest/LD fallback)
+- **ISOM vector anchoring Phase 2** : controls snapped to real OCAD features via `scipy.spatial.KDTree` (O(log N)), penalty if control > 40m (sprint) / 80m (forest) from any feature
 - **IOF/FFCO Controller** : automated rule validation (dog-legs, legs C01–C12, TD1-5/PD1-5)
 - **Course setter ↔ controller loop** : AI dialogue with automatic corrections (up to 5 iterations)
-- **Route analysis** : NetworkX A*, route diversity scoring, dog-leg detection
-- **XGBoost V2 Scorer** : `patch_scorer_v2.pkl` (AUC=0.835) — visual quality scoring of control placements
-- **OCAD map** : tile rendering of `.ocd` files (optional)
+- **FFCORulesEngine** : single source of truth for FFCO/IOF thresholds — distances, TD, winning times per category, exposed via `GET /api/v1/categories`
+- **Impossible course detection** : GA fitness < -5000 → explicit error; distance < 70% of target → `warning` + `distance_ratio` displayed in UI (orange banner)
+- **Route analysis** : NetworkX A*, route diversity (Jaccard), dog-leg detection, Top-3 re-ranker (15s budget) ; 🔍 button per leg → k colored polylines on map (blue/orange/red)
+- **DialogueLog** : visual panel showing course setter↔controller exchanges with IOF/FFCO score per iteration
+- **XGBoost V3 Scorer** : 18-dim bi-mode, `patch_scorer_v2.pkl` (AUC=0.807, Recall=0.789) — 370k RG2 patches (88 UK clubs)
+- **OCAD map** : high-fidelity rendering of `.ocd` files via Node.js tile service
 - **OSM terrain** : automatic enrichment from Overpass API
 - **Export** : IOF XML 3.0, GPX, PDF, KML/KMZ
-- **Local RAG** : 22 IOF/FFCO PDFs indexed, LLM chain (OpenAI → local fallback)
+- **Local RAG** : 22 IOF/FFCO PDFs indexed, LLM chain (OpenAI → local Ollama fallback)
 
 ---
 
@@ -133,13 +140,32 @@ cd backend && python scripts/train_control_scorer.py --phase xgboost
 
 The higher Recall (+4% vs V2) means fewer legitimate controls are missed. The slightly lower AUC reflects the broader dataset diversity (forest + score + sprint disciplines).
 
-### 4. Integration: HeatmapCache
+### 4. Integration: HeatmapCache + OCAD Pipeline
 
 When `/generate-sprint` is called, the backend:
-1. Fetches the MapAnt map image (`_fetch_mapant_bbox_image`)
-2. Precomputes a V3 score grid (`scorer.build_heatmap_cache(img, bbox, mpp)`)
-3. Interpolates `lng/lat` from the WGS84 `bbox` to activate the `is_urban` feature
-4. Passes the `HeatmapCache` to the genetic algorithm → O(1) lookups during evolution
+1. **If `.ocd` uploaded (`map_id` provided)**: extracts forbidden zones from OCAD vectors (sym 709/527), fetches the full-map PNG rendered by the tile service, normalizes colors OCAD→MapAnt (`style_normalizer.py`, `match_histograms`)
+2. **Otherwise (forest/LD/MD fallback)**: fetches MapAnt tiles (`_fetch_mapant_bbox_image`, 30s timeout)
+3. Precomputes a V3 score grid (`scorer.build_heatmap_cache(img, bbox, mpp)`)
+4. Interpolates `lng/lat` from the WGS84 `bbox` to activate the `is_urban` feature
+5. Passes the `HeatmapCache` to the genetic algorithm → O(1) lookups during evolution
+
+---
+
+## Vikazimut Dataset
+
+3,486 French orienteering courses downloaded from [Vikazimut.fr](https://vikazimut.vikazim.fr) — anonymized, open data.
+
+| Type | Count |
+|------|-------|
+| IOF XML 3.0 courses + KML georeferencing | 3,486 |
+| Runner GPS traces (GPX) | 13,264 |
+| Georeferenced map images (JPG) | 4,405 |
+| **Foot-O retained** (after VTT/MTBO filter) | **2,851** |
+| Disciplines | urbano (895), foresto (1,089), mtbo (348 excluded), skio (15) |
+
+The `backend/scripts/index_vikazimut.py` script parses IOF XML 3.0, filters VTT-O courses (discipline, course_type, distance > 20 km) and produces `vikazimut/index.json`.
+
+Planned use: XGBoost training patches on French maps, real runnability heatmaps from GPX traces.
 
 ---
 
@@ -157,6 +183,11 @@ This project draws on the following tools and standards:
 
 ---
 
-## License
+## License & Usage
 
-Educational and research use project.
+This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)** — see [LICENSE](./LICENSE).
+
+- **Open Source**: Free to use, modify, and distribute provided all source modifications are published, including SaaS deployments.
+- **Commercial proprietary use**: Contact the author for a commercial license if you wish to embed AItraceur in a closed product without publishing modifications.
+
+Copyright (c) 2026 Guillaume Lemiègre

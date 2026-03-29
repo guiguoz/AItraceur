@@ -19,7 +19,9 @@
 - **Boucle traceur ↔ contrôleur** : dialogue IA avec corrections automatiques (jusqu'à 5 itérations)
 - **FFCORulesEngine** : source de vérité unique pour les seuils FFCO/IOF — distances, TD, temps gagnants par catégorie exposés via `GET /api/v1/categories` ; seuils injectés dans le GA (remplace les constantes hardcodées)
 - **Détection circuit impossible** : score GA < -5000 → erreur explicite ; distance < 70 % cible → `warning` dans la réponse
-- **Analyse de routes** : NetworkX A*, diversité des itinéraires (Jaccard), détection dog-legs, Re-Ranker Top-3 (budget 15s)
+- **Analyse de routes** : NetworkX A*, diversité des itinéraires (Jaccard), détection dog-legs, Re-Ranker Top-3 (budget 15s) ; bouton 🔍 par jambe → k polylines colorées sur la carte (bleu/orange/rouge)
+- **DialogueLog** : panneau visuel des échanges traceur↔contrôleur avec score IOF/FFCO par itération
+- **Avertissement génération** : si circuit < 70 % de la distance cible → `warning` + `distance_ratio` affichés dans l'interface (fond orange)
 - **Scorer XGBoost V3** : 18-dim bi-mode (`is_urban` feat[17]), `patch_scorer_v2.pkl` — 370k patches RG2 (88 clubs UK), entraîné sur images MapAnt
 - **Carte OCAD** : rendu haute-fidélité des fichiers `.ocd` via tile service Node.js
 - **Terrain OSM** : enrichissement automatique depuis Overpass API (highways pour RouteAnalyzer)
@@ -194,6 +196,10 @@ python scripts/run_visual_tests.py
 
 # Visualiser un chemin A* (PNG headless)
 python scripts/visualize_leg.py --map path/to/elev.tif --from 50,50 --to 450,450
+
+# Indexer le dataset Vikazimut (3486 parcours XML/KML + GPX)
+python scripts/index_vikazimut.py
+python scripts/index_vikazimut.py --check-speed   # flag traces VTT suspectes (~5 min)
 ```
 
 **Résultats typiques `run_generator.py` (20 candidats synthétiques plats) :**
@@ -207,6 +213,24 @@ python scripts/visualize_leg.py --map path/to/elev.tif --from 50,50 --to 450,450
 | Colline gaussienne | +21.7 % | 10.3 m |
 | Mur végétation (passage) | +28.5 % | — |
 | Falaise 133 % pente | +146.9 % | — |
+
+---
+
+## Dataset Vikazimut
+
+3 486 parcours de course d'orientation français téléchargés depuis [Vikazimut.fr](https://vikazimut.vikazim.fr) — données anonymisées, libres de droit.
+
+| Type | Quantité |
+|------|---------|
+| Parcours XML IOF 3.0 + KML géoréférencement | 3 486 |
+| Traces GPX coureurs | 13 264 |
+| Cartes JPG géoréférencées | 4 405 |
+| **Foot-O conservés** (après filtre VTT/MTBO) | **2 851** |
+| Disciplines | urbano (895), foresto (1089), mtbo (348 exclus), skio (15) |
+
+Le script `backend/scripts/index_vikazimut.py` parse les XML IOF 3.0, filtre les parcours VTT-O (discipline, course_type, distance > 20 km) et produit `vikazimut/index.json`.
+
+Usage prévu : patches d'entraînement XGBoost sur cartes françaises, heatmaps de pénétrabilité réelle depuis les traces GPX.
 
 ---
 

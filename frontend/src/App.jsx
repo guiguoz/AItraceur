@@ -457,6 +457,8 @@ function App() {
   const [generationError, setGenerationError] = useState(null)
   const [dialogue, setDialogue] = useState([])
   const [controleurReport, setControleurReport] = useState(null)
+  const [sprintWarning, setSprintWarning] = useState(null)      // { message, distanceRatio }
+  const [sprintDistanceRatio, setSprintDistanceRatio] = useState(null)
   const [progressLabel, setProgressLabel] = useState('')
   const [routeDisplay, setRouteDisplay] = useState(null) // { legIdx, routes }
   const [legRoutesMap, setLegRoutesMap] = useState({}) // {legIdx: {routes, choiceScore}} auto-affiché post-sprint
@@ -662,6 +664,8 @@ function App() {
     setGenerationError(null)
     setDialogue([])
     setControleurReport(null)
+    setSprintWarning(null)
+    setSprintDistanceRatio(null)
     setLegRoutesMap({})
     setProgressLabel('Génération initiale…')
     try {
@@ -777,6 +781,8 @@ function App() {
         console.log('[Generate Sprint] response:', data)
         if (data.dialogue?.length) setDialogue(data.dialogue)
         if (data.controleur_report) setControleurReport(data.controleur_report)
+        if (data.warning) setSprintWarning(data.warning)
+        if (data.distance_ratio != null) setSprintDistanceRatio(data.distance_ratio)
         if (!data.controls?.length) throw new Error('Aucun circuit généré')
         controls = data.controls
         // Auto-afficher les choix d'itinéraire — waypoints embarqués dans la réponse (pas d'appel Overpass)
@@ -1431,6 +1437,8 @@ function App() {
                       controleurReport={controleurReport}
                       isGenerating={isGenerating && activeCircuit?.type === 'sprint'}
                       progressLabel={progressLabel}
+                      warning={sprintWarning}
+                      distanceRatio={sprintDistanceRatio}
                     />
 
                     <button

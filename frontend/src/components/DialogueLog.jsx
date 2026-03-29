@@ -3,7 +3,7 @@
  * pendant et après la génération sprint avec validation IOF/FFCO.
  */
 
-export default function DialogueLog({ dialogue, controleurReport, isGenerating, progressLabel }) {
+export default function DialogueLog({ dialogue, controleurReport, isGenerating, progressLabel, warning, distanceRatio }) {
   if (!dialogue?.length && !isGenerating) return null
 
   return (
@@ -30,13 +30,21 @@ export default function DialogueLog({ dialogue, controleurReport, isGenerating, 
       {!isGenerating && controleurReport && (
         <ControleurSummary report={controleurReport} />
       )}
+
+      {/* ── Avertissement distance partielle ──────────────────────────────────
+          Affiché uniquement si le backend signale que la distance générée
+          est inférieure à ~70 % de la distance cible (champ `warning`).
+          `distanceRatio` est un float [0–1] converti en % arrondi à 1 décimale.
+      ───────────────────────────────────────────────────────────────────────── */}
+      {!isGenerating && warning && (
+        <GenerationWarning warning={warning} distanceRatio={distanceRatio} />
+      )}
     </div>
   )
 }
 
 function DialogueEntry({ entry }) {
   const isTraceur = entry.role === 'traceur'
-  const isControleur = entry.role === 'controleur'
   const isSystem = entry.role === 'system'
 
   if (isSystem) {
@@ -94,6 +102,38 @@ function ControleurSummary({ report }) {
           {issue.code} P{issue.control_index + 1} — {issue.message}
         </div>
       ))}
+    </div>
+  )
+}
+
+/**
+ * GenerationWarning — Bandeau d'avertissement distance partielle.
+ *
+ * Rendu uniquement si `warning` est non-null (rendu conditionnel dans DialogueLog).
+ * `distanceRatio` null/undefined → la ligne de ratio n'est pas affichée.
+ */
+function GenerationWarning({ warning, distanceRatio }) {
+  const ratioLabel = distanceRatio != null
+    ? `${(distanceRatio * 100).toFixed(1)} %`
+    : null
+
+  return (
+    <div className="mt-2 pt-2 border-t border-orange-700/40">
+      <div className="flex items-start gap-2 bg-orange-900/30 border border-orange-600/40 rounded-lg px-3 py-2">
+        <span className="text-base flex-shrink-0 mt-0.5">⚠️</span>
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-orange-400 mb-0.5">
+            Avertissement génération
+          </p>
+          <p className="text-xs text-orange-200 leading-relaxed break-words">{warning}</p>
+          {/* Ratio distance réelle / distance cible en % */}
+          {ratioLabel && (
+            <p className="text-[10px] text-orange-400/80 mt-1">
+              Distance couverte : <span className="font-semibold text-orange-300">{ratioLabel}</span> de l'objectif
+            </p>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

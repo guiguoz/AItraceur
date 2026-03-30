@@ -43,13 +43,16 @@ scikit-learn>=1.4.0
 scikit-image>=0.21.0
 joblib>=1.3.0
 
-# === ML Training visuel — train_control_scorer.py (optionnel) ===
+# === ML Inference prod (backend FastAPI) ===
+onnxruntime>=1.17.0    # Inference CNN ONNX sans PyTorch — pip install onnxruntime
+
+# === ML Training visuel — train_control_scorer.py (optionnel, GPU recommandé) ===
 # Installation : pip install xgboost torch torchvision scipy opencv-python
-# Non requis pour le backend FastAPI (import optionnel dans le script)
+# Non requis pour le backend FastAPI
 xgboost>=2.0.0
 torch>=2.1.0
 torchvision>=0.16.0
-scipy>=1.11.0          # Harris corner detection + entropy dans extract_features()
+scipy>=1.11.0          # Harris corner detection + entropy + scipy.special.expit (sigmoid stable)
 
 # === Testing ===
 pytest>=7.4.0

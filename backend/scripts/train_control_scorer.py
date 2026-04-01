@@ -243,14 +243,104 @@ def train_xgboost(dataset_dir: Path, output_dir: Path, output_name: str = "patch
 # Phase 2 — CNN ResNet18 (PyTorch)
 # ---------------------------------------------------------------------------
 
+# Globals partagés avec ControlPatchDataset (nécessaire pour multiprocessing Windows)
+_DATASET_IN_CHANNELS: int = 3
+_DATASET_SRTM_DATA = None
+_DATASET_MEAN_3CH = [0.485, 0.456, 0.406]
+_DATASET_STD_3CH  = [0.229, 0.224, 0.225]
+_DATASET_MEAN_5CH = [0.485, 0.456, 0.406, 0.5,  0.1 ]
+_DATASET_STD_5CH  = [0.229, 0.224, 0.225, 0.25, 0.15]
+
+
+class ControlPatchDataset:
+    """Dataset patches CO — picklable pour multiprocessing Windows (num_workers>0)."""
+
+    def __init__(self, df: pd.DataFrame, transform=None):
+        self.df = df.reset_index(drop=True)
+        self.transform = transform
+
+    def __len__(self) -> int:
+        return len(self.df)
+
+    def __getitem__(self, idx: int):
+        import torch
+        from torchvision import transforms as _transforms
+        row = self.df.iloc[idx]
+        img = Image.open(row["img_path"]).convert("RGB")
+        label = float(row["label"])
+
+        if _DATASET_IN_CHANNELS == 5 and _DATASET_SRTM_DATA is not None:
+            lat   = float(row.get("lat",   0.0) or 0.0)
+            lon   = float(row.get("lon",   0.0) or 0.0)
+            fov_m = float(row.get("fov_m", 128.0) or 128.0)
+            if self.transform:
+                rgb_t = self.transform(img)
+            else:
+                rgb_t = _transforms.Compose([
+                    _transforms.Resize((224, 224), interpolation=_transforms.InterpolationMode.BILINEAR),
+                    _transforms.ToTensor(),
+                    _transforms.Normalize(mean=_DATASET_MEAN_3CH, std=_DATASET_STD_3CH),
+                ])(img)
+            if lat != 0.0 and lon != 0.0:
+                elev, slope = _get_dem_channels_fast(lat, lon, fov_m, _DATASET_SRTM_DATA)
+            else:
+                elev = slope = np.zeros((224, 224), dtype=np.float32)
+            elev_n  = (elev  - _DATASET_MEAN_5CH[3]) / _DATASET_STD_5CH[3]
+            slope_n = (slope - _DATASET_MEAN_5CH[4]) / _DATASET_STD_5CH[4]
+            dem_t = torch.from_numpy(np.stack([elev_n, slope_n], axis=0).astype(np.float32))
+            tensor = torch.cat([rgb_t, dem_t], dim=0)
+        else:
+            if self.transform:
+                tensor = self.transform(img)
+            else:
+                tensor = _transforms.Compose([
+                    _transforms.Resize((224, 224), interpolation=_transforms.InterpolationMode.BILINEAR),
+                    _transforms.ToTensor(),
+                    _transforms.Normalize(mean=_DATASET_MEAN_3CH, std=_DATASET_STD_3CH),
+                ])(img)
+        return tensor, torch.tensor(label, dtype=torch.float32)
+
+
+def _get_dem_channels_fast(lat: float, lon: float, fov_m: float,
+                           srtm_data: object, out_px: int = 224):
+    """
+    Retourne (elev_norm, slope_norm) float32 (out_px, out_px).
+
+    Stratégie vectorisée : grille 16×16 d'appels SRTM puis resize bilinéaire.
+    Coût : ~256 appels au lieu de 224×224.
+    """
+    import math as _math
+    half_lat = (fov_m / 2.0) / 111320.0
+    half_lon = (fov_m / 2.0) / (111320.0 * _math.cos(_math.radians(lat)))
+    SAMPLE = 16
+    lats = np.linspace(lat + half_lat, lat - half_lat, SAMPLE)
+    lons = np.linspace(lon - half_lon, lon + half_lon, SAMPLE)
+    grid = np.zeros((SAMPLE, SAMPLE), dtype=np.float32)
+    for i, la in enumerate(lats):
+        for j, lo in enumerate(lons):
+            try:
+                grid[i, j] = srtm_data.get_elevation(la, lo) or 0.0
+            except (ValueError, Exception):
+                grid[i, j] = 0.0
+    grid_img = Image.fromarray(grid).resize((out_px, out_px), Image.BILINEAR)
+    elev = np.array(grid_img, dtype=np.float32)
+    elev_norm = np.clip(elev / 3000.0, 0.0, 1.0)
+    gy, gx = np.gradient(elev)
+    cell_m = 30.0 * out_px / SAMPLE
+    slope_deg = np.degrees(np.arctan(np.sqrt(gx**2 + gy**2) / cell_m))
+    slope_norm = np.clip(slope_deg / 45.0, 0.0, 1.0)
+    return elev_norm, slope_norm
+
+
 def train_cnn(
     dataset_dir: Path,
     output_dir: Path,
     epochs: int = 30,
     batch_size: int = 32,
     extra_dataset_dirs: Optional[list] = None,
+    resume: bool = False,
 ) -> Path:
-    """Phase 2 — MobileNetV3-Small fine-tuning + export ONNX."""
+    """Phase 2 — MobileNetV3-Small 5 canaux (RGB+DEM) fine-tuning + export ONNX."""
     try:
         import torch
         import torch.nn as nn
@@ -261,30 +351,31 @@ def train_cnn(
         log.error("Missing package: %s. Run: pip install torch torchvision", e)
         sys.exit(1)
 
+    # Chargement SRTM (facultatif — fallback 3 canaux si absent)
+    global _DATASET_SRTM_DATA, _DATASET_IN_CHANNELS
+    try:
+        import srtm  # type: ignore[import]
+        import tempfile as _tmpmod
+        _srtm_cache = _tmpmod.gettempdir() + "/srtm_cache"
+        import os as _os; _os.makedirs(_srtm_cache, exist_ok=True)
+        _DATASET_SRTM_DATA = srtm.SrtmService(data_dir=_srtm_cache)
+        log.info("SRTM chargé — entraînement 5 canaux (RGB + altitude + pente)")
+    except ImportError:
+        log.warning("srtm.py absent (pip install srtm.py) — entraînement 3 canaux RGB uniquement")
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log.info("=== Phase 2 — CNN MobileNetV3-Small + ONNX === (device: %s)", device)
 
     # ------------------------------------------------------------------
     # Dataset — supporte les chemins absolus (merge multi-datasets)
     # ------------------------------------------------------------------
-    class ControlPatchDataset(Dataset):
-        def __init__(self, df: pd.DataFrame, transform=None):
-            self.df = df.reset_index(drop=True)
-            self.transform = transform
+    _DATASET_IN_CHANNELS = 5 if _DATASET_SRTM_DATA is not None else 3
+    IN_CHANNELS = _DATASET_IN_CHANNELS  # alias local pour build_model
 
-        def __len__(self) -> int:
-            return len(self.df)
-
-        def __getitem__(self, idx: int):
-            row = self.df.iloc[idx]
-            # img_path est absolu après merge (voir chargement ci-dessous)
-            img = Image.open(row["img_path"]).convert("RGB")
-            label = float(row["label"])
-            if self.transform:
-                img = self.transform(img)
-            return img, torch.tensor(label, dtype=torch.float32)
+    # ControlPatchDataset définie au niveau module (requis pour multiprocessing Windows)
 
     # Augmentation — cartes CO rotation-invariantes + resize 224 pour MobileNetV3
+    # NOTE : ColorJitter uniquement sur RGB (appliqué avant concat DEM)
     train_transform = transforms.Compose([
         transforms.Resize((224, 224), interpolation=transforms.InterpolationMode.BILINEAR),
         transforms.RandomHorizontalFlip(),
@@ -294,13 +385,13 @@ def train_cnn(
         transforms.RandomApply([transforms.RandomRotation(degrees=(270, 270))], p=0.33),
         transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        transforms.Normalize(mean=_DATASET_MEAN_3CH, std=_DATASET_STD_3CH),
     ])
 
     val_transform = transforms.Compose([
         transforms.Resize((224, 224), interpolation=transforms.InterpolationMode.BILINEAR),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        transforms.Normalize(mean=_DATASET_MEAN_3CH, std=_DATASET_STD_3CH),
     ])
 
     # ------------------------------------------------------------------
@@ -356,9 +447,11 @@ def train_cnn(
     sampler = WeightedRandomSampler(sample_weights, num_samples=len(sample_weights), replacement=True)
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, sampler=sampler,
-                              num_workers=0, pin_memory=(device.type == "cuda"))
+                              num_workers=4, pin_memory=(device.type == "cuda"),
+                              persistent_workers=True)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False,
-                            num_workers=0, pin_memory=(device.type == "cuda"))
+                            num_workers=4, pin_memory=(device.type == "cuda"),
+                            persistent_workers=True)
 
     # ------------------------------------------------------------------
     # Model — MobileNetV3-Small, dégeler features[-2:] + classifier
@@ -367,13 +460,31 @@ def train_cnn(
         model = models.mobilenet_v3_small(
             weights=models.MobileNet_V3_Small_Weights.IMAGENET1K_V1
         )
+        if IN_CHANNELS != 3:
+            # Remplacer le 1er conv (3→16) par (IN_CHANNELS→16), initialiser les poids DEM
+            old_conv = model.features[0][0]
+            new_conv = nn.Conv2d(
+                IN_CHANNELS, old_conv.out_channels,
+                kernel_size=old_conv.kernel_size, stride=old_conv.stride,
+                padding=old_conv.padding, bias=False,
+            )
+            with torch.no_grad():
+                new_conv.weight[:, :3] = old_conv.weight
+                # Canaux DEM initialisés à la moyenne des poids RGB (transfert doux)
+                mean_rgb = old_conv.weight.mean(dim=1, keepdim=True)
+                for c in range(3, IN_CHANNELS):
+                    new_conv.weight[:, c:c+1] = mean_rgb
+            model.features[0][0] = new_conv
         # Geler tout
         for param in model.parameters():
             param.requires_grad = False
-        # Dégeler les 2 derniers blocs features + classifier
-        for param in (list(model.features[-2].parameters()) +
-                      list(model.features[-1].parameters()) +
-                      list(model.classifier.parameters())):
+        # Dégeler les 2 derniers blocs features + classifier (+ 1er conv si 5ch)
+        unfreeze = (list(model.features[-2].parameters()) +
+                    list(model.features[-1].parameters()) +
+                    list(model.classifier.parameters()))
+        if IN_CHANNELS != 3:
+            unfreeze += list(model.features[0].parameters())
+        for param in unfreeze:
             param.requires_grad = True
         # Remplacer la tête (1000 classes → 1 sortie binaire)
         model.classifier[3] = nn.Linear(1024, 1)
@@ -394,17 +505,36 @@ def train_cnn(
     )
 
     # ------------------------------------------------------------------
+    # Resume support
+    # ------------------------------------------------------------------
+    resume_path = output_dir / "checkpoint_resume.pth"
+    start_epoch = 1
+    best_val_loss_resume = float("inf")
+    history_resume: list = []
+    if resume and resume_path.exists():
+        ckpt = torch.load(resume_path, map_location=device)
+        model.load_state_dict(ckpt["model"])
+        optimizer.load_state_dict(ckpt["optimizer"])
+        scheduler.load_state_dict(ckpt["scheduler"])
+        start_epoch = ckpt["epoch"] + 1
+        best_val_loss_resume = ckpt.get("best_val_loss", float("inf"))
+        history_resume = ckpt.get("history", [])
+        log.info("Reprise depuis epoch %d (best_val_loss=%.4f)", start_epoch, best_val_loss_resume)
+    elif resume:
+        log.warning("--resume demandé mais checkpoint_resume.pth introuvable — démarrage from scratch")
+
+    # ------------------------------------------------------------------
     # Training loop
     # ------------------------------------------------------------------
     output_dir.mkdir(parents=True, exist_ok=True)
     best_path = output_dir / "best_model.pth"
-    best_val_loss = float("inf")
-    history =[]
+    best_val_loss = best_val_loss_resume
+    history = history_resume
 
     log.info("Training for %d epochs (train=%d val=%d batch=%d)...",
              epochs, len(train_ds), len(val_ds), batch_size)
 
-    for epoch in range(1, epochs + 1):
+    for epoch in range(start_epoch, epochs + 1):
         # --- Train ---
         model.train()
         train_loss = 0.0
@@ -421,7 +551,7 @@ def train_cnn(
         # --- Validate ---
         model.eval()
         val_loss = 0.0
-        all_preds, all_probs, all_labels = [], [],[]
+        all_preds, all_probs, all_labels = [], [], []
         with torch.no_grad():
             for imgs, labels in val_loader:
                 imgs, labels = imgs.to(device), labels.to(device)
@@ -444,7 +574,7 @@ def train_cnn(
             epoch, epochs, train_loss, val_loss, acc, f1, rec,
         )
         history.append({"epoch": epoch, "train_loss": train_loss, "val_loss": val_loss,
-                         "acc": acc, "f1": f1, "recall": rec})
+                        "acc": acc, "f1": f1, "recall": rec})
 
         scheduler.step(val_loss)
 
@@ -452,6 +582,17 @@ def train_cnn(
             best_val_loss = val_loss
             torch.save(model.state_dict(), best_path)
             log.info("  → Best model saved (val_loss=%.4f)", val_loss)
+
+        # Checkpoint resume après chaque epoch
+        torch.save({
+            "epoch": epoch,
+            "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "scheduler": scheduler.state_dict(),
+            "best_val_loss": best_val_loss,
+            "history": history,
+        }, resume_path)
+        log.info("  → Checkpoint saved (epoch %d)", epoch)
 
     # Save final model (checkpoint PyTorch)
     out_path = output_dir / "control_scorer_cnn.pt"
@@ -475,7 +616,7 @@ def train_cnn(
     best_model.eval()
 
     onnx_path = output_dir / "control_scorer_cnn.onnx"
-    dummy = torch.randn(1, 3, 224, 224, device=device)
+    dummy = torch.randn(1, IN_CHANNELS, 224, 224, device=device)
     torch.onnx.export(
         best_model,
         dummy,
@@ -483,9 +624,9 @@ def train_cnn(
         input_names=["input"],
         output_names=["output"],
         dynamic_axes={"input": {0: "batch"}, "output": {0: "batch"}},
-        opset_version=17,
+        opset_version=12,
     )
-    log.info("ONNX exporté : %s  (prod inference via onnxruntime)", onnx_path)
+    log.info("ONNX exporté : %s  (%d canaux, prod inference via onnxruntime)", onnx_path, IN_CHANNELS)
 
     return onnx_path
 
@@ -591,6 +732,11 @@ def main():
         default=None,
         help="Dataset supplémentaire à fusionner (ex: output/vikazimut_patches)",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Reprendre depuis checkpoint_resume.pth si disponible",
+    )
     args = parser.parse_args()
 
     dataset_dir, output_dir = _resolve_paths(args.dataset_dir, args.output_dir)
@@ -614,7 +760,7 @@ def main():
         train_xgboost(dataset_dir, output_dir, output_name=args.output)
     else:
         train_cnn(dataset_dir, output_dir, epochs=args.epochs, batch_size=args.batch_size,
-                  extra_dataset_dirs=extra_dirs)
+                  extra_dataset_dirs=extra_dirs, resume=args.resume)
 
 
 if __name__ == "__main__":

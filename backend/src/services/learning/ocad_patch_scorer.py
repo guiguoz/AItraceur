@@ -390,11 +390,29 @@ class OcadPatchScorer:
 
         if cnn_scorer is not None:
             # ── Branche CNN : extraction patches + inférence batch ONNX ───────
-            patches = [
-                CnnPatchScorer.crop_patch(map_img, c["px"], c["py"], mpp)
-                for c in candidates
-            ]
-            scores_flat = cnn_scorer.score_batch(patches)
+            # Stratégie "Dalle Globale" : construire les maps DEM une seule fois
+            dem_elev = dem_slope = None
+            if cnn_scorer._in_channels == 5 and cnn_scorer._srtm is not None and bbox is not None:
+                try:
+                    import time as _t2
+                    _td0 = _t2.monotonic()
+                    dem_elev, dem_slope = _build_dem_tiles(bbox, map_w, map_h, cnn_scorer._srtm)
+                    log.info("HeatmapCache: DEM tiles construit en %.2fs", _t2.monotonic() - _td0)
+                except Exception as exc:
+                    log.warning("HeatmapCache: DEM tiles échoué (%s) → canaux DEM=0", exc)
+
+            patches_with_dem = []
+            for c in candidates:
+                px, py = int(c["px"]), int(c["py"])
+                patch = CnnPatchScorer.crop_patch(map_img, px, py, mpp)
+                if dem_elev is not None:
+                    r = max(1, int(CnnPatchScorer._FOV_M / mpp) // 2)
+                    e_crop = dem_elev[max(0, py - r):py + r, max(0, px - r):px + r]
+                    s_crop = dem_slope[max(0, py - r):py + r, max(0, px - r):px + r]
+                else:
+                    e_crop = s_crop = None
+                patches_with_dem.append((patch, e_crop, s_crop))
+            scores_flat = cnn_scorer.score_batch(patches_with_dem)
             scores_flat = scores_flat.astype(np.float32)
         else:
             # ── Branche XGBoost (comportement historique) ─────────────────────
@@ -559,6 +577,52 @@ class OcadPatchScorer:
 
 
 # ---------------------------------------------------------------------------
+# DEM helper — Dalle globale SRTM pour heatmap
+# ---------------------------------------------------------------------------
+
+def _build_dem_tiles(
+    bbox_wgs84: tuple,
+    map_w: int,
+    map_h: int,
+    srtm_data: object,
+    sample: int = 64,
+) -> tuple:
+    """
+    Construit elevation_map et slope_map pour toute la bbox carte.
+
+    Stratégie vectorisée : 64×64 appels SRTM une fois, resize bilinéaire vers
+    (map_h, map_w). Coût : ~4096 appels au lieu de N_patches × 256.
+
+    Args:
+        bbox_wgs84: (min_lon, min_lat, max_lon, max_lat)
+        map_w, map_h: dimensions de l'image carte en pixels
+        srtm_data: instance srtm.get_data()
+        sample: résolution de la grille SRTM (64 suffisant pour 128m FOV)
+
+    Returns:
+        (elev_norm, slope_norm) — deux np.ndarray float32 (map_h, map_w) ∈ [0,1]
+    """
+    min_lon, min_lat, max_lon, max_lat = bbox_wgs84
+    lats = np.linspace(max_lat, min_lat, sample)
+    lons = np.linspace(min_lon, max_lon, sample)
+    grid = np.zeros((sample, sample), dtype=np.float32)
+    for i, la in enumerate(lats):
+        for j, lo in enumerate(lons):
+            grid[i, j] = srtm_data.get_elevation(float(la), float(lo)) or 0.0
+
+    gy, gx = np.gradient(grid)
+    # cell_m = largeur réelle en mètres d'une cellule de la grille SRTM
+    cell_m = 111320.0 * (max_lat - min_lat) / sample
+    slope_deg = np.degrees(np.arctan(np.sqrt(gx**2 + gy**2) / max(cell_m, 1.0)))
+
+    elev_img  = Image.fromarray(grid).resize((map_w, map_h), Image.Resampling.BILINEAR)
+    slope_img = Image.fromarray(slope_deg.astype(np.float32)).resize((map_w, map_h), Image.Resampling.BILINEAR)
+    elev_norm  = np.clip(np.array(elev_img,  dtype=np.float32) / 3000.0, 0.0, 1.0)
+    slope_norm = np.clip(np.array(slope_img, dtype=np.float32) / 45.0,   0.0, 1.0)
+    return elev_norm, slope_norm  # (map_h, map_w) chacun
+
+
+# ---------------------------------------------------------------------------
 # CnnPatchScorer — Inférence MobileNetV3-Small via ONNX (prod, pas de PyTorch)
 # ---------------------------------------------------------------------------
 
@@ -577,15 +641,26 @@ class CnnPatchScorer:
     """
 
     _MODEL_RELATIVE = Path("data") / "models" / "control_scorer_cnn.onnx"
-    _IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-    _IMAGENET_STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+    # Normalisation RGB (canaux 0-2)
+    _MEAN_3 = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+    _STD_3  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+    # Normalisation 5 canaux (RGB + altitude + pente)
+    _MEAN_5 = np.array([0.485, 0.456, 0.406, 0.5,  0.1 ], dtype=np.float32)
+    _STD_5  = np.array([0.229, 0.224, 0.225, 0.25, 0.15], dtype=np.float32)
 
     # FOV identique à OcadPatchScorer (128m) — crop puis resize 224 pour MobileNetV3
     _FOV_M: float = 128.0
     _TARGET_PX: int = 224
 
-    def __init__(self, session: object) -> None:
-        self._session = session  # onnxruntime.InferenceSession
+    def __init__(self, session: object, srtm_data: object = None) -> None:
+        self._session = session   # onnxruntime.InferenceSession
+        self._srtm = srtm_data    # srtm.get_data() ou None (fallback 3ch)
+        # Détecter le nombre de canaux attendus par le modèle ONNX
+        try:
+            in_shape = session.get_inputs()[0].shape  # [batch, C, 224, 224]
+            self._in_channels = int(in_shape[1]) if len(in_shape) >= 2 else 3
+        except Exception:
+            self._in_channels = 3
 
     # ------------------------------------------------------------------
     # Factory
@@ -613,8 +688,24 @@ class CnnPatchScorer:
             str(model_path),
             providers=["CPUExecutionProvider"],
         )
-        log.info("CnnPatchScorer: chargé %s (MobileNetV3-Small ONNX)", model_path.name)
-        return cls(session)
+        # Charger SRTM pour les modèles 5 canaux
+        srtm_data = None
+        try:
+            in_shape = session.get_inputs()[0].shape
+            in_ch = int(in_shape[1]) if len(in_shape) >= 2 else 3
+        except Exception:
+            in_ch = 3
+        if in_ch == 5:
+            try:
+                import srtm, tempfile, os  # type: ignore[import]
+                _srtm_cache = os.path.join(tempfile.gettempdir(), "srtm_cache")
+                os.makedirs(_srtm_cache, exist_ok=True)
+                srtm_data = srtm.SrtmService(data_dir=_srtm_cache)
+                log.info("CnnPatchScorer: srtm.py chargé (DEM 5 canaux actif)")
+            except ImportError:
+                log.warning("CnnPatchScorer: srtm.py absent (pip install srtm.py) → canaux DEM=0")
+        log.info("CnnPatchScorer: chargé %s (MobileNetV3-Small ONNX, %dch)", model_path.name, in_ch)
+        return cls(session, srtm_data)
 
     # ------------------------------------------------------------------
     # Crop helper (statique — réutilisable depuis build_heatmap_cache)
@@ -656,9 +747,13 @@ class CnnPatchScorer:
     # Inférence batch
     # ------------------------------------------------------------------
 
-    def score_batch(self, patches: List[Image.Image]) -> np.ndarray:
+    def score_batch(self, patches) -> np.ndarray:
         """
-        Score une liste de patches PIL via inférence ONNX batch.
+        Score une liste de patches via inférence ONNX batch.
+
+        Args:
+            patches: list de PIL.Image (3 canaux) OU list de (PIL.Image, elev_crop, slope_crop)
+                     où elev_crop/slope_crop sont des np.ndarray float32 ∈ [0,1] ou None.
 
         Returns:
             np.ndarray shape (N,) — probabilités [0, 1].
@@ -667,15 +762,44 @@ class CnnPatchScorer:
 
         _BATCH = 64  # optimal CPU ONNX : ~3-5s pour 1600 patches
         results: list[np.ndarray] = []
+        use_5ch = self._in_channels == 5
 
         for i in range(0, len(patches), _BATCH):
             chunk = patches[i : i + _BATCH]
             tensors = []
-            for img in chunk:
-                arr = np.array(img.convert("RGB"), dtype=np.float32) / 255.0
-                arr = (arr - self._IMAGENET_MEAN) / self._IMAGENET_STD
-                tensors.append(arr.transpose(2, 0, 1))  # HWC → CHW
-            batch = np.stack(tensors, axis=0)  # (N, 3, 224, 224)
+            for item in chunk:
+                # Accepter les deux formes d'entrée
+                if isinstance(item, tuple):
+                    img, e_crop, s_crop = item
+                else:
+                    img, e_crop, s_crop = item, None, None
+
+                arr = np.array(img.convert("RGB"), dtype=np.float32) / 255.0  # (224,224,3)
+
+                if use_5ch:
+                    # Canaux DEM : resize si fournis, sinon zéros
+                    if e_crop is not None and s_crop is not None and e_crop.size > 0:
+                        e224 = np.array(
+                            Image.fromarray(e_crop).resize(
+                                (self._TARGET_PX, self._TARGET_PX), Image.Resampling.BILINEAR
+                            ), dtype=np.float32
+                        )
+                        s224 = np.array(
+                            Image.fromarray(s_crop).resize(
+                                (self._TARGET_PX, self._TARGET_PX), Image.Resampling.BILINEAR
+                            ), dtype=np.float32
+                        )
+                    else:
+                        e224 = np.zeros((self._TARGET_PX, self._TARGET_PX), dtype=np.float32)
+                        s224 = np.zeros((self._TARGET_PX, self._TARGET_PX), dtype=np.float32)
+                    arr5 = np.concatenate([arr, e224[..., None], s224[..., None]], axis=-1)  # (224,224,5)
+                    arr5 = (arr5 - self._MEAN_5) / self._STD_5
+                    tensors.append(arr5.transpose(2, 0, 1))  # (5,224,224)
+                else:
+                    arr3 = (arr - self._MEAN_3) / self._STD_3
+                    tensors.append(arr3.transpose(2, 0, 1))  # (3,224,224)
+
+            batch = np.stack(tensors, axis=0)  # (N, C, 224, 224)
             logits = self._session.run(["output"], {"input": batch})[0]  # (N, 1)
             results.append(expit(logits).ravel())
 

@@ -87,79 +87,88 @@ Copier `backend/.env.example` en `backend/.env` et configurer :
 
 ---
 
-## Pipeline ML — Scorer de postes (XGBoost V3)
+## Pipeline ML — Scorer de postes (CNN V4)
 
 ### Vue d'ensemble
 
-Le composant `patch_scorer_v2.pkl` est un classificateur XGBoost entraîné pour évaluer visuellement la qualité d'un emplacement de poste à partir d'une tuile de carte CO.
+Le scorer visuel évalue la qualité d'un emplacement de poste à partir d'une tuile de carte CO.
+- **Prod** : `control_scorer_cnn.onnx` — MobileNetV3-Small (3 canaux RGB), inférence ONNX Runtime
+- **Fallback** : `patch_scorer_v2.pkl` — XGBoost 18-dim (si `.onnx` absent)
 
-### 1. Scraping du dataset (RG2)
+### 1. Datasets
 
-Le script `backend/scripts/scrape_rg2.py` collecte automatiquement des postes géoréférencés depuis les clubs d'orientation utilisant [RouteGadget 2](https://www.routegadget.co.uk) :
-
+#### RG2 (226k patches, 88 clubs UK)
 ```bash
 cd backend && python scripts/scrape_rg2.py
 ```
+- 88 instances RouteGadget 2 actives → **226 295 patches** (75k pos / 150k neg)
+- Patches PNG 256×256 extraits depuis tuiles MapAnt
 
-**Résultats (session 2026-03-23) :**
-- 102 instances RG2 sondées, 88 avec des données exploitables
-- **370 213 postes positifs** (WGS84, géoréférencés)
-- **740 378 non-postes** (points négatifs générés aléatoirement)
-- Métadonnées : `lat`, `lon`, `course_type` (sprint/score/forest...), `mpp`, `event_name`
+#### Vikazimut (201k patches, 2 851 parcours France)
+```bash
+cd backend
+python scripts/index_vikazimut.py       # filtre foot-O → vikazimut/index.json
+python scripts/extract_vikazimut_patches.py --resume  # → vikazimut/patches/
+```
+- **201 902 patches** (70k pos / 131k neg), cartes JPG géoréférencées
+- `--resume` reprend depuis le dernier parcours traité
 
-Chaque poste génère un **patch PNG 256×256** extrait depuis les tuiles MapAnt au bon niveau de zoom.
+**Dataset fusionné : 428 197 patches** (146k pos / 282k neg)
 
-### 2. Extraction de features (18-dim)
-
-Module `backend/src/services/learning/patch_feature_extractor.py` :
-
-| Dimension | Feature | Description |
-|-----------|---------|-------------|
-| [0:7] | ISOM global | Fraction de pixels par couleur ISOM (brun/vert dense/vert clair/jaune/bleu/noir/blanc) sur le patch 256×256 |
-| [7:14] | ISOM centre | Mêmes 7 couleurs sur le crop central 64×64 (zone du poste) |
-| [14] | `edge_density` | Fraction pixels gradient Sobel > 20 (complexité géométrique) |
-| [15] | `corner_density` | Fraction pixels réponse Harris > 1% du max (intersections, angles) |
-| [16] | `entropy` | Entropie Shannon normalisée [0,1] (richesse visuelle) |
-| [17] | `is_urban` | 1 si coordonnées dans une zone urbaine dense (bbox hardcodées UK/FR), 0 sinon |
-
-### 3. Entraînement XGBoost V3 (bi-mode)
+### 2. Entraînement CNN V4 (MobileNetV3-Small)
 
 ```bash
-cd backend && python scripts/train_control_scorer.py --phase xgboost
+# Lancement (Python 3.13 + PyTorch CUDA)
+py -3.13 backend/scripts/train_control_scorer.py \
+  --phase cnn --epochs 30 --batch-size 128 \
+  --dataset-dir backend/data/rg2/dataset/ \
+  --extra-dataset-dir vikazimut/patches/
+
+# Reprendre après interruption
+py -3.13 backend/scripts/train_control_scorer.py \
+  --phase cnn --epochs 30 --batch-size 128 \
+  --dataset-dir backend/data/rg2/dataset/ \
+  --extra-dataset-dir vikazimut/patches/ \
+  --resume
 ```
 
-**Paramètres clés :**
-- `n_estimators=300`, `max_depth=6`, `scale_pos_weight=2.0` (déséquilibre 1:2)
-- **Sample weighting** : patches `course_type=sprint` → poids 2.0×, autres → 1.0× (biais vers sprint urbain)
-- Extraction parallèle (6 workers) via `ProcessPoolExecutor`
+**Architecture :**
+- MobileNetV3-Small pré-entraîné ImageNet → fine-tuning (2 derniers blocs + classifier)
+- Tête remplacée : 1024 → 1 (classification binaire, BCEWithLogitsLoss)
+- `WeightedRandomSampler` pour équilibrer pos/neg + pondération sprint 2×
+- Checkpoint automatique après chaque epoch (`checkpoint_resume.pth`) → interruptible
 
-**Métriques V3 (238k patches, 88 clubs) :**
+**Métriques epoch 1 (référence) :**
 | Métrique | Valeur |
 |---------|--------|
-| AUC-ROC | 0.807 |
-| F1 | 0.645 |
-| Precision | 0.545 |
-| Recall | **0.789** |
+| val_loss | 0.5875 |
+| Accuracy | 73.9% |
+| F1 | 0.710 |
+| Recall | **0.934** |
 
-Le Recall supérieur (+4% vs V2) signifie moins de postes légitimes manqués. L'AUC légèrement inférieure reflète la diversité accrue du dataset (forêt + score + sprint).
+### 3. Export ONNX et déploiement
+
+Le script exporte automatiquement `control_scorer_cnn.onnx` à la fin de l'entraînement.
+Copier dans `backend/data/models/` puis redémarrer uvicorn — `CnnPatchScorer` se charge automatiquement.
 
 ### 4. Intégration : HeatmapCache + Pipeline OCAD
 
 À l'appel de `/generate-sprint`, le backend :
 1. **Si `.ocd` uploadé (`map_id` fourni)** :
-   - Extrait les zones OOB depuis les vecteurs OCAD (`GET /map/:mapId/forbidden-zones`, sym 709/527) → `forbidden_mask` fiable à 100%
-   - Récupère le PNG pleine-carte rendu par le tile service (`GET /renders/{mapId}.png`)
-   - Normalise les couleurs OCAD → distribution MapAnt (`style_normalizer.py`, `match_histograms`)
-   - Skip la requête Overpass bâtiments (zones OOB déjà connues) → gain ~50s
-2. **Sinon (fallback forêt/LD/MD)** : récupère l'image MapAnt (`_fetch_mapant_bbox_image`)
-3. Précompute une grille de scores V3 (`scorer.build_heatmap_cache(img, bbox, mpp)`)
-4. Interpole `lng/lat` depuis la `bbox` WGS84 pour activer la feature `is_urban`
-5. Passe le `HeatmapCache` à l'algorithme génétique → lookups O(1) pendant l'évolution
+   - Extrait les zones OOB depuis les vecteurs OCAD (sym 709/527) → `forbidden_mask` fiable à 100%
+   - Récupère le PNG pleine-carte rendu par le tile service
+   - Normalise les couleurs OCAD → distribution MapAnt (`style_normalizer.py`)
+2. **Sinon** : récupère l'image MapAnt (`_fetch_mapant_bbox_image`)
+3. Précompute une grille de scores CNN (`build_heatmap_cache`) — `CnnPatchScorer` si `.onnx` présent, XGBoost sinon
+4. Passe le `HeatmapCache` à l'algorithme génétique → lookups O(1)
 
-**Séparation entraînement / inférence :**
-- `train_control_scorer.py` — entraîné exclusivement sur patches MapAnt/RG2 (source de vérité terrain uniforme)
-- `ocad_pipeline.py` — adapte les cartes OCAD pour l'inférence (normalisation histogramme → domaine MapAnt)
-- `style_normalizer.py` — `match_histograms` RGB pour aligner la distribution de couleurs
+### 5. XGBoost V3 (fallback)
+
+```bash
+cd backend && python scripts/train_control_scorer.py --phase xgboost
+```
+
+**Métriques V3 (238k patches) :** AUC=0.807, Recall=0.789, F1=0.645
 
 ---
 

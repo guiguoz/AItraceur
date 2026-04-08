@@ -437,8 +437,8 @@ class GeneticAlgorithm:
             # Snap vers feature OCAD ISOM (90% si KDTree, sinon 60% O(n))
             # → ancre les postes sur des éléments terrain réels dès l'initialisation
             elif self._ocad_tree is not None and random.random() < 0.90:
-                _cp, _ = self._nearest_ocad(nx, ny)
-                if _cp:
+                _cp, _d = self._nearest_ocad(nx, ny)
+                if _cp and _d <= 80:
                     nx, ny = _cp["x"], _cp["y"]
             elif random.random() < 0.60:
                 cp = self._find_nearest_cp(nx, ny, target_leg_m * 0.5)
@@ -671,10 +671,15 @@ class GeneticAlgorithm:
         delta_m = random.uniform(-leg_m * 0.12, leg_m * 0.12)
         x = controls[idx][0] + delta_m / 72600
         y = controls[idx][1] + delta_m / 111000
-        # 60% snap vers feature OCAD ISOM (affine le placement après le déplacement)
+        # Clamp à la bounding box (évite postes dans le blanc hors-carte)
+        if self.config.bounding_box:
+            bb = self.config.bounding_box
+            x = max(bb["min_x"], min(bb["max_x"], x))
+            y = max(bb["min_y"], min(bb["max_y"], y))
+        # 60% snap vers feature OCAD ISOM — seulement si feature à ≤50m
         if self._ocad_tree is not None and random.random() < 0.60:
-            _cp, _ = self._nearest_ocad(x, y)
-            if _cp:
+            _cp, _d = self._nearest_ocad(x, y)
+            if _cp and _d <= 50:
                 x, y = _cp["x"], _cp["y"]
         if not self._is_in_forbidden_zone(x, y, forbidden_zones):
             controls[idx] = (x, y)
@@ -726,6 +731,11 @@ class GeneticAlgorithm:
         sign = random.choice([-1, 1])
         new_x = mid_x + perp_x * (offset_m / 72600) * sign
         new_y = mid_y + perp_y * (offset_m / 111000) * sign
+        # Clamp à la bounding box
+        if self.config.bounding_box:
+            bb = self.config.bounding_box
+            new_x = max(bb["min_x"], min(bb["max_x"], new_x))
+            new_y = max(bb["min_y"], min(bb["max_y"], new_y))
 
         if not self._is_in_forbidden_zone(new_x, new_y, forbidden_zones):
             controls[worst_idx] = (new_x, new_y)
@@ -746,10 +756,15 @@ class GeneticAlgorithm:
         delta_m = random.uniform(-leg_m * 0.25, leg_m * 0.25)
         x = controls[idx][0] + delta_m / 72600
         y = controls[idx][1] + delta_m / 111000
-        # Snap vers feature OCAD ISOM (80% si KDTree, sinon 40% O(n))
+        # Clamp à la bounding box
+        if self.config.bounding_box:
+            bb = self.config.bounding_box
+            x = max(bb["min_x"], min(bb["max_x"], x))
+            y = max(bb["min_y"], min(bb["max_y"], y))
+        # Snap vers feature OCAD ISOM — seulement si feature à ≤80m
         if self._ocad_tree is not None and random.random() < 0.80:
-            _cp, _ = self._nearest_ocad(x, y)
-            if _cp:
+            _cp, _d = self._nearest_ocad(x, y)
+            if _cp and _d <= 80:
                 x, y = _cp["x"], _cp["y"]
         elif random.random() < 0.40:
             cp = self._find_nearest_cp(x, y, leg_m * 2.0)

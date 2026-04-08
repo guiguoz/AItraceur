@@ -72,7 +72,7 @@ class DemAnalyzer:
     'dalle globale' : 64×64 appels SRTM par parcours, puis interpolation numpy.
     """
 
-    SAMPLE = 16  # grille SRTM (256 appels par parcours — suffisant pour relief)
+    SAMPLE = 64  # grille SRTM 64×64 (4096 appels — précision terrain CO)
     NEIGHBOR_RADIUS_DEG = 30 / 111_320  # ~30m en degrés
 
     def __init__(self, bbox: tuple, img_w: int, img_h: int, srtm_data) -> None:
@@ -285,6 +285,8 @@ def run_benchmark(n: int = 50, seed: int = 42, step_px: int = 20, use_dem: bool 
             import tempfile
             _cache = os.path.join(tempfile.gettempdir(), "srtm_cache")
             os.makedirs(_cache, exist_ok=True)
+            hgt_n = len([f for f in os.listdir(_cache) if f.endswith(".hgt")]) if os.path.exists(_cache) else 0
+            print(f"  Cache SRTM : {hgt_n} tuiles HGT ({'rapide' if hgt_n > 0 else 'téléchargement au 1er run'})")
             srtm_data = _srtm.get_data()
             print("SRTM chargé (DEM actif)")
         except Exception as e:
@@ -416,6 +418,10 @@ def run_benchmark(n: int = 50, seed: int = 42, step_px: int = 20, use_dem: bool 
             prof_real = build_profile(real_px, dem)
             prof_cnn  = build_profile(cnn_px, dem)
 
+        if avg_d > 10_000:
+            print(f"SKIP (CRS suspect : avg={avg_d/1000:.0f}km > 10km)")
+            continue
+
         print(f"avg={avg_d:5.0f}m  @50m={pct_50:4.0f}%  score={median_score:.3f}"
               f"  relief={relief_cat}  [{t_cnn:.1f}s]")
 
@@ -438,8 +444,7 @@ def run_benchmark(n: int = 50, seed: int = 42, step_px: int = 20, use_dem: bool 
     def mean_r(key):
         vals = [r[key] for r in results
                 if r[key] is not None
-                and not (isinstance(r[key], float) and math.isnan(r[key]))
-                and (key != "avg_dist_m" or r[key] < 500)]  # filtrer distances aberrantes
+                and not (isinstance(r[key], float) and math.isnan(r[key]))]
         return float(np.mean(vals)) if vals else float("nan")
 
     print()
@@ -539,6 +544,35 @@ def run_benchmark(n: int = 50, seed: int = 42, step_px: int = 20, use_dem: bool 
     print(f"  Répartition   : {cats}")
 
     print(f"\nTemps total : {total_t:.0f}s ({total_t/len(results):.1f}s/circuit)")
+
+    # ── Export patches debug (3 pires circuits) ──────────────────────────────
+    valid = [r for r in results
+             if r["median_score"] is not None and not math.isnan(r["median_score"])]
+    if valid:
+        worst3 = sorted(valid, key=lambda r: r["median_score"])[:3]
+        debug_dir = REPO_DIR / "output" / "benchmark_debug"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        course_map = {c["id"]: c for c in courses}
+        print(f"\n--- Export patches debug ({debug_dir}) ---")
+        for rank, res in enumerate(worst3, 1):
+            cid = res["id"]
+            course = course_map.get(cid)
+            if course is None:
+                continue
+            try:
+                dbg_img = Image.open(course["map_jpg"]).convert("RGB")
+            except Exception:
+                continue
+            dbg_bounds = course["bounds"]
+            dbg_w, dbg_h = dbg_img.size
+            dbg_mpp = compute_mpp(dbg_bounds, dbg_w, dbg_h)
+            real_ctrls = [c for c in course.get("controls", []) if c.get("type") == "Control"]
+            for i, ctrl in enumerate(real_ctrls[:5]):
+                px_c, py_c = wgs84_to_px(ctrl["lng"], ctrl["lat"], dbg_bounds, dbg_w, dbg_h)
+                patch = CnnPatchScorer.crop_patch(dbg_img, px_c, py_c, dbg_mpp)
+                fname = debug_dir / f"rank{rank}_cid{cid}_ctrl{i}_score{res['median_score']:.2f}.png"
+                patch.save(str(fname))
+                print(f"  {fname.name}")
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────

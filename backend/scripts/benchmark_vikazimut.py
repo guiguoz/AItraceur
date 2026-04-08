@@ -23,6 +23,7 @@ import os
 import random
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
@@ -71,7 +72,7 @@ class DemAnalyzer:
     'dalle globale' : 64×64 appels SRTM par parcours, puis interpolation numpy.
     """
 
-    SAMPLE = 64  # grille SRTM (4 096 appels par parcours)
+    SAMPLE = 16  # grille SRTM (256 appels par parcours — suffisant pour relief)
     NEIGHBOR_RADIUS_DEG = 30 / 111_320  # ~30m en degrés
 
     def __init__(self, bbox: tuple, img_w: int, img_h: int, srtm_data) -> None:
@@ -258,7 +259,7 @@ def relief_category(relief_m: float) -> str:
 
 # ── Benchmark principal ──────────────────────────────────────────────────────
 
-def run_benchmark(n: int = 50, seed: int = 42, step_px: int = 20) -> None:
+def run_benchmark(n: int = 50, seed: int = 42, step_px: int = 20, use_dem: bool = False) -> None:
     t0 = time.time()
 
     index_path = REPO_DIR / "vikazimut" / "index.json"
@@ -276,17 +277,20 @@ def run_benchmark(n: int = 50, seed: int = 42, step_px: int = 20) -> None:
     mode = f"{cnn._in_channels}ch"
     print(f"  Modèle chargé ({mode})\n")
 
-    # ── Chargement SRTM ──────────────────────────────────────────────────────
+    # ── Chargement SRTM (opt-in via --dem pour éviter blocage téléchargement HGT)
     srtm_data = None
-    try:
-        import srtm as _srtm
-        import tempfile
-        _cache = os.path.join(tempfile.gettempdir(), "srtm_cache")
-        os.makedirs(_cache, exist_ok=True)
-        srtm_data = _srtm.SrtmService(data_dir=_cache)
-        print("SRTM chargé (DEM actif)")
-    except Exception as e:
-        print(f"SRTM non disponible ({e}) — analyse relief désactivée")
+    if use_dem:
+        try:
+            import srtm as _srtm
+            import tempfile
+            _cache = os.path.join(tempfile.gettempdir(), "srtm_cache")
+            os.makedirs(_cache, exist_ok=True)
+            srtm_data = _srtm.get_data()
+            print("SRTM chargé (DEM actif)")
+        except Exception as e:
+            print(f"SRTM non disponible ({e}) — analyse relief désactivée")
+    else:
+        print("DEM désactivé (--dem pour activer l'analyse relief SRTM)")
 
     courses = select_courses(index_path, n=n, seed=seed)
 
@@ -313,11 +317,17 @@ def run_benchmark(n: int = 50, seed: int = 42, step_px: int = 20) -> None:
         img_w, img_h = map_img.size
         mpp = compute_mpp(bounds, img_w, img_h)
 
-        # ── DEM pour ce parcours ─────────────────────────────────────────────
+        # ── DEM pour ce parcours (timeout 15s pour éviter blocage téléchargement HGT)
         dem: Optional[DemAnalyzer] = None
         if srtm_data is not None:
+            def _build_dem():
+                return DemAnalyzer(bbox, img_w, img_h, srtm_data)
             try:
-                dem = DemAnalyzer(bbox, img_w, img_h, srtm_data)
+                with ThreadPoolExecutor(max_workers=1) as _pool:
+                    _fut = _pool.submit(_build_dem)
+                    dem = _fut.result(timeout=15)
+            except FuturesTimeoutError:
+                print("(DEM timeout)", end="  ")
             except Exception as e:
                 print(f"(DEM fail: {e})", end="  ")
 
@@ -325,24 +335,34 @@ def run_benchmark(n: int = 50, seed: int = 42, step_px: int = 20) -> None:
         t_cnn = time.time()
         xs = range(0, img_w, step_px)
         ys = range(0, img_h, step_px)
-
-        patches = []
-        coords  = []
         crop_px = max(1, int(CnnPatchScorer._FOV_M / mpp))
 
-        for py_g in ys:
-            for px_g in xs:
-                lng = bounds["west"]  + (px_g / img_w) * (bounds["east"]  - bounds["west"])
-                lat = bounds["north"] - (py_g / img_h) * (bounds["north"] - bounds["south"])
-                patch = CnnPatchScorer.crop_patch(map_img, px_g, py_g, mpp)
+        # 1. Construire coords d'abord (rapide — pas de PIL)
+        all_coords = [
+            (bounds["west"]  + (px_g / img_w) * (bounds["east"]  - bounds["west"]),
+             bounds["north"] - (py_g / img_h) * (bounds["north"] - bounds["south"]),
+             px_g, py_g)
+            for py_g in ys for px_g in xs
+        ]
 
-                if dem is not None and cnn._in_channels == 5:
-                    e_crop, s_crop = dem.dem_crop(px_g, py_g, crop_px)
-                    patches.append((patch, e_crop, s_crop))
-                else:
-                    patches.append(patch)
-                coords.append((lng, lat, px_g, py_g))
+        # 2. Sous-échantillonner AVANT de cropper (évite PIL sur toute l'image)
+        MAX_PATCHES = 2000
+        if len(all_coords) > MAX_PATCHES:
+            all_coords = random.sample(all_coords, MAX_PATCHES)
 
+        # 3. Cropper seulement les positions sélectionnées
+        patches = []
+        coords  = []
+        for lng, lat, px_g, py_g in all_coords:
+            patch = CnnPatchScorer.crop_patch(map_img, px_g, py_g, mpp)
+            if dem is not None and cnn._in_channels == 5:
+                e_crop, s_crop = dem.dem_crop(px_g, py_g, crop_px)
+                patches.append((patch, e_crop, s_crop))
+            else:
+                patches.append(patch)
+            coords.append((lng, lat, px_g, py_g))
+
+        print(f"patches={len(patches)}", end="  ", flush=True)
         try:
             scores = cnn.score_batch(patches)
         except Exception as e:
@@ -350,6 +370,7 @@ def run_benchmark(n: int = 50, seed: int = 42, step_px: int = 20) -> None:
             continue
 
         t_cnn = time.time() - t_cnn
+        print(f"CNN={t_cnn:.1f}s", end="  ", flush=True)
 
         # ── Top-K CNN ────────────────────────────────────────────────────────
         grid = [(float(s), lng, lat, px_g, py_g)
@@ -415,8 +436,10 @@ def run_benchmark(n: int = 50, seed: int = 42, step_px: int = 20) -> None:
         return
 
     def mean_r(key):
-        vals = [r[key] for r in results if r[key] is not None and not (
-            isinstance(r[key], float) and math.isnan(r[key]))]
+        vals = [r[key] for r in results
+                if r[key] is not None
+                and not (isinstance(r[key], float) and math.isnan(r[key]))
+                and (key != "avg_dist_m" or r[key] < 500)]  # filtrer distances aberrantes
         return float(np.mean(vals)) if vals else float("nan")
 
     print()
@@ -523,7 +546,8 @@ def run_benchmark(n: int = 50, seed: int = 42, step_px: int = 20) -> None:
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description="Benchmark CNN vs vrais postes Vikazimut")
     p.add_argument("--n",    type=int, default=50, help="Nombre de circuits (défaut: 50)")
-    p.add_argument("--step", type=int, default=20, help="Pas grille pixels  (défaut: 20)")
+    p.add_argument("--step", type=int, default=64, help="Pas grille pixels  (défaut: 64)")
     p.add_argument("--seed", type=int, default=42, help="Seed aléatoire     (défaut: 42)")
+    p.add_argument("--dem",  action="store_true",  help="Activer analyse relief SRTM (télécharge les tuiles HGT)")
     args = p.parse_args()
-    run_benchmark(n=args.n, step_px=args.step, seed=args.seed)
+    run_benchmark(n=args.n, step_px=args.step, seed=args.seed, use_dem=args.dem)

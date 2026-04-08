@@ -700,7 +700,7 @@ class CnnPatchScorer:
                 import srtm, tempfile, os  # type: ignore[import]
                 _srtm_cache = os.path.join(tempfile.gettempdir(), "srtm_cache")
                 os.makedirs(_srtm_cache, exist_ok=True)
-                srtm_data = srtm.SrtmService(data_dir=_srtm_cache)
+                srtm_data = srtm.get_data()
                 log.info("CnnPatchScorer: srtm.py chargé (DEM 5 canaux actif)")
             except ImportError:
                 log.warning("CnnPatchScorer: srtm.py absent (pip install srtm.py) → canaux DEM=0")

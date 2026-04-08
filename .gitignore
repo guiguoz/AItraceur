@@ -33,6 +33,10 @@ backend/tile-service/tiles/
 *.tiff
 *.tif
 *.geotiff
+
+# Archives volumineuses
+*.tar.gz
+*.gz
 # Lora model weights (heavy binaries) — but track text datasets (.jsonl)
 Lora/*.safetensors
 Lora/*.bin
@@ -105,13 +109,21 @@ poppler/
 tools/
 backend/data/models/best_model.pth
 *.pth
+*.pt
+*.onnx.data
 
 # Vikazimut dataset (volumineuse — >500MB localement)
 vikazimut/parcours/
 vikazimut/traces/
 vikazimut/maps/
+vikazimut/patches/
 vikazimut/index.json
 vikazimut/stats.json
+
+# Dossiers non-versionés
+AItraceur/
+xml/
+backend/data/rg2/
 
 # Sorties scripts
 backend/output/

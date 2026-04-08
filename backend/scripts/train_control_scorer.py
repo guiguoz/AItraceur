@@ -447,11 +447,11 @@ def train_cnn(
     sampler = WeightedRandomSampler(sample_weights, num_samples=len(sample_weights), replacement=True)
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, sampler=sampler,
-                              num_workers=4, pin_memory=(device.type == "cuda"),
-                              persistent_workers=True)
+                              num_workers=2, pin_memory=(device.type == "cuda"),
+                              persistent_workers=True, prefetch_factor=2)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False,
-                            num_workers=4, pin_memory=(device.type == "cuda"),
-                            persistent_workers=True)
+                            num_workers=2, pin_memory=(device.type == "cuda"),
+                            persistent_workers=True, prefetch_factor=2)
 
     # ------------------------------------------------------------------
     # Model — MobileNetV3-Small, dégeler features[-2:] + classifier
@@ -534,11 +534,18 @@ def train_cnn(
     log.info("Training for %d epochs (train=%d val=%d batch=%d)...",
              epochs, len(train_ds), len(val_ds), batch_size)
 
+    n_batches = len(train_loader)
+    log_every = max(1, min(10, n_batches // 10))  # log tous les 10 batches OU 10x par epoch (pour debug)
+
     for epoch in range(start_epoch, epochs + 1):
+        log.info("=" * 80)
+        log.info("Epoch %d/%d — Starting training loop...", epoch, epochs)
+
         # --- Train ---
         model.train()
         train_loss = 0.0
-        for imgs, labels in train_loader:
+        epoch_start = time.time()
+        for batch_idx, (imgs, labels) in enumerate(train_loader, 1):
             imgs, labels = imgs.to(device), labels.to(device)
             optimizer.zero_grad()
             logits = model(imgs).squeeze(1)
@@ -546,14 +553,27 @@ def train_cnn(
             loss.backward()
             optimizer.step()
             train_loss += loss.item() * len(imgs)
+
+            if batch_idx % log_every == 0:
+                elapsed = time.time() - epoch_start
+                samples_processed = batch_idx * batch_size
+                rate = samples_processed / max(elapsed, 0.1)
+                eta_sec = (n_batches - batch_idx) * batch_size / max(rate, 1)
+                log.info("  [E%d] batch %d/%d (%.0f%%) — loss=%.4f — %.0f samples/s — ETA %.0fmin",
+                         epoch, batch_idx, n_batches, 100.0 * batch_idx / n_batches,
+                         train_loss / batch_idx, rate, eta_sec / 60.0)
         train_loss /= len(train_ds)
 
+        log.info("  Train phase complete — avg_loss=%.4f", train_loss)
+
         # --- Validate ---
+        log.info("  Starting validation...")
         model.eval()
         val_loss = 0.0
         all_preds, all_probs, all_labels = [], [], []
+        val_start = time.time()
         with torch.no_grad():
-            for imgs, labels in val_loader:
+            for val_idx, (imgs, labels) in enumerate(val_loader, 1):
                 imgs, labels = imgs.to(device), labels.to(device)
                 logits = model(imgs).squeeze(1)
                 loss = criterion(logits, labels)
@@ -563,7 +583,14 @@ def train_cnn(
                 all_probs.extend(probs)
                 all_preds.extend(preds)
                 all_labels.extend(labels.cpu().numpy().astype(int))
+
+                if val_idx % max(1, len(val_loader) // 5) == 0:
+                    log.info("    Val batch %d/%d (%.0f%%)", val_idx, len(val_loader),
+                             100.0 * val_idx / len(val_loader))
+
         val_loss /= len(val_ds)
+        val_elapsed = time.time() - val_start
+        log.info("  Validation complete in %.1fs", val_elapsed)
 
         acc = np.mean(np.array(all_preds) == np.array(all_labels))
         f1 = f1_score(all_labels, all_preds, zero_division=0)

@@ -10,7 +10,7 @@
 - **Génération automatique** de circuits sprint (urbain) et forêt via algorithme génétique multi-objectifs
 - **Sprint asynchrone** : POST retourne `task_id` en <100ms, pipeline en arrière-plan (~35s), polling GET `/sprint-status`
 - **Contexte terrain manuel** : sélecteur [Auto / Urbain / Forêt] pour forcer le mode détection IA
-- **Fitness multicritère V2** : IA Score (HeatmapCache XGBoost), pénalité distance, détection dog-legs, bonus rythme
+- **Fitness multicritère V2** : IA Score (HeatmapCache CNN), pénalité distance, détection dog-legs, bonus rythme
 - **Pipeline OCAD natif** : le fichier `.ocd` uploadé alimente directement l'IA — zones interdites extraites des vecteurs (sym 709/527 ISSprOM/ISOM), image rasterisée normalisée vers la distribution MapAnt d'entraînement
 - **HeatmapCache** : grille de scores V2 précomputée (O(1) lookups GA), Smart Seeding population initiale — source : OCAD tile service (priorité) ou MapAnt (fallback forêt/LD)
 - **Forbidden mask vectoriel** : polygones OOB extraits directement depuis les symboles OCAD (100 % fiable) ; requête Overpass bâtiments skippée → gain ~50s
@@ -22,7 +22,7 @@
 - **Analyse de routes** : NetworkX A*, diversité des itinéraires (Jaccard), détection dog-legs, Re-Ranker Top-3 (budget 15s) ; bouton 🔍 par jambe → k polylines colorées sur la carte (bleu/orange/rouge)
 - **DialogueLog** : panneau visuel des échanges traceur↔contrôleur avec score IOF/FFCO par itération
 - **Avertissement génération** : si circuit < 70 % de la distance cible → `warning` + `distance_ratio` affichés dans l'interface (fond orange)
-- **Scorer XGBoost V3** : 18-dim bi-mode (`is_urban` feat[17]), `patch_scorer_v2.pkl` — 370k patches RG2 (88 clubs UK), entraîné sur images MapAnt
+- **CNN Scorer V4** : MobileNetV3-Small ONNX, F1=0.814, Recall=0.919 — 428k patches (RG2 UK + Vikazimut FR), entraîné sur Kaggle T4 GPU ; fallback XGBoost V3 (AUC=0.807) si `.onnx` absent
 - **Carte OCAD** : rendu haute-fidélité des fichiers `.ocd` via tile service Node.js
 - **Terrain OSM** : enrichissement automatique depuis Overpass API (highways pour RouteAnalyzer)
 - **Export** : IOF XML 3.0, GPX, PDF, KML/KMZ — à importer dans OCAD pour le tracé final

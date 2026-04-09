@@ -1987,6 +1987,10 @@ def _circuit_impl(body: dict) -> dict:
     target_climb_m = float(body.get("target_climb_m", 200))
     target_controls = int(body.get("target_controls", 10))
     winning_time_minutes = float(body.get("winning_time_minutes", 30))
+    map_id  = body.get("map_id", None)
+    ocad_sw = body.get("ocad_sw", None)
+    ocad_ne = body.get("ocad_ne", None)
+    force_mode = body.get("force_mode", None)
     method = body.get("method", "hybrid")
     num_variants = int(body.get("num_variants", 3))
     map_context = body.get("map_context")
@@ -2029,6 +2033,75 @@ def _circuit_impl(body: dict) -> dict:
         candidate_points=candidate_points,
         start_position=tuple(start_position_raw) if start_position_raw and len(start_position_raw) >= 2 else None,
     )
+
+    # ── HeatmapCache CNN (même logique que _sprint_impl) ──────────────────────
+    # Branche OCAD si map_id fourni, sinon MapAnt, sinon fallback ISOM.
+    heatmap_cache = None
+    if bounding_box or map_id:
+        try:
+            from src.services.learning.ocad_patch_scorer import OcadPatchScorer as _OPS, CnnPatchScorer as _CPS
+            _scorer_v2 = _OPS.load()
+            _cnn_scorer = _CPS.load()
+            if _scorer_v2 is not None:
+                _mapant_result = None
+                if map_id and ocad_sw and ocad_ne:
+                    try:
+                        from src.services.learning.ocad_pipeline import fetch_ocad_image as _fetch_ocad
+                        import math as _m2
+                        _map_img = _fetch_ocad(map_id, timeout=10)
+                        _sw, _ne = ocad_sw, ocad_ne
+                        _bbox_wgs84 = (_sw[1], _sw[0], _ne[1], _ne[0])
+                        _lat_c = (_sw[0] + _ne[0]) / 2
+                        _lng_delta = abs(_ne[1] - _sw[1])
+                        _width_m = _m2.radians(_lng_delta) * 6371000 * _m2.cos(_m2.radians(_lat_c))
+                        _mpp = _width_m / _map_img.width if _map_img.width > 0 else 0.5
+                        _mapant_result = (_map_img, _bbox_wgs84, _mpp)
+                        print(f"[circuit] OCAD PNG ({_map_img.width}×{_map_img.height}px, mpp={_mpp:.2f}m)", flush=True)
+                    except Exception as _ocad_err:
+                        print(f"[circuit] OCAD PNG ÉCHEC: {_ocad_err} → fallback MapAnt", flush=True)
+
+                if _mapant_result is None and bounding_box:
+                    import concurrent.futures as _cfs
+                    with _cfs.ThreadPoolExecutor(max_workers=1) as _mex:
+                        _mapant_fut = _mex.submit(_fetch_mapant_bbox_image, bounding_box, 15)
+                        try:
+                            _mapant_result = _mapant_fut.result(timeout=30)
+                        except _cfs.TimeoutError:
+                            _mapant_result = None
+                    print(f"[circuit] MapAnt {'OK' if _mapant_result else 'timeout → fallback ISOM'}", flush=True)
+
+                if _mapant_result is not None:
+                    _map_img, _bbox_wgs84, _mpp = _mapant_result
+                    _step_px = max(20, int(max(_map_img.width, _map_img.height) / 40))
+                    heatmap_cache = _scorer_v2.build_heatmap_cache(
+                        map_img=_map_img,
+                        bbox=_bbox_wgs84,
+                        mpp=_mpp,
+                        step_px=_step_px,
+                        force_mode=force_mode,
+                        cnn_scorer=_cnn_scorer,
+                    )
+                    print(f"[circuit] HeatmapCache CNN {heatmap_cache.scores.shape}", flush=True)
+        except Exception as _hm_err:
+            print(f"[circuit] HeatmapCache exception: {_hm_err} → fallback ISOM", flush=True)
+
+    if heatmap_cache is not None:
+        request = GenerationRequest(
+            bounding_box=request.bounding_box,
+            category=request.category,
+            technical_level=request.technical_level,
+            circuit_type=request.circuit_type,
+            target_length_m=request.target_length_m,
+            target_climb_m=request.target_climb_m,
+            target_controls=request.target_controls,
+            winning_time_minutes=request.winning_time_minutes,
+            map_context=request.map_context,
+            forbidden_zones=request.forbidden_zones,
+            required_controls=request.required_controls,
+            candidate_points=request.candidate_points,
+            start_position=request.start_position,
+            heatmap_cache=heatmap_cache,
+        )
 
     generator = AIGenerator()
     circuits = generator.generate(request, method=method, num_variants=num_variants)
@@ -3912,7 +3985,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
     })
 
     # ── Boucle traceur ↔ contrôleur ───────────────────────────────────────────
-    controleur = ControleurSprint()
+    controleur = ControleurSprint(circuit_type="sprint")
     current_controls = best_latlng
     final_report = None
 

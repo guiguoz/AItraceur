@@ -755,6 +755,12 @@ function App() {
           .map(c => ({ lat: c.lat, lng: c.lng })),
         // OCAD/OSM feature candidates for terrain-aware placement
         candidate_points: candidatePoints.slice(0, 600),
+        // OCAD map pour HeatmapCache CNN (même logique que sprint)
+        ...(ocadMapId && ocadBounds ? {
+          map_id: ocadMapId,
+          ocad_sw: ocadBounds.southWest,
+          ocad_ne: ocadBounds.northEast,
+        } : {}),
       }
 
       let controls

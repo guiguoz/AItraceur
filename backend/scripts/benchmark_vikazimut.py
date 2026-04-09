@@ -323,7 +323,9 @@ def run_benchmark(n: int = 50, seed: int = 42, step_px: int = 20, use_dem: bool 
         dem: Optional[DemAnalyzer] = None
         if srtm_data is not None:
             def _build_dem():
-                return DemAnalyzer(bbox, img_w, img_h, srtm_data)
+                import io, contextlib
+                with contextlib.redirect_stdout(io.StringIO()):
+                    return DemAnalyzer(bbox, img_w, img_h, srtm_data)
             try:
                 with ThreadPoolExecutor(max_workers=1) as _pool:
                     _fut = _pool.submit(_build_dem)

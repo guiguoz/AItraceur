@@ -271,7 +271,7 @@ class CircuitScorer:
         # Enrichir issues avec le contrôleur IOF/FFCO (per-poste avec références)
         if _CONTROLEUR_AVAILABLE and controls:
             try:
-                ctrl_report = ControleurSprint().validate(controls)
+                ctrl_report = ControleurSprint(circuit_type=circuit_type or "sprint").validate(controls)
                 issues = [
                     {
                         "code": iss.code,

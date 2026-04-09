@@ -132,12 +132,13 @@ class ControleurSprint:
     Retourne un rapport structuré avec issues C01–C12.
     """
 
-    def __init__(self, rules_path: Optional[str] = None):
+    def __init__(self, rules_path: Optional[str] = None, circuit_type: str = "sprint"):
         if rules_path is None:
             rules_path = os.path.join(os.path.dirname(__file__), "controleur_rules.json")
         with open(rules_path, encoding="utf-8") as f:
             all_rules = json.load(f)
-        self.rules = all_rules.get("sprint", {})
+        rule_key = "sprint" if circuit_type == "sprint" else "forest"
+        self.rules = all_rules.get(rule_key, all_rules.get("sprint", {}))
 
     # ── Point d'entrée ────────────────────────────────────────────────────────
 

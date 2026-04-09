@@ -427,8 +427,11 @@ def run_benchmark(n: int = 50, seed: int = 42, step_px: int = 20, use_dem: bool 
         print(f"avg={avg_d:5.0f}m  @50m={pct_50:4.0f}%  score={median_score:.3f}"
               f"  relief={relief_cat}  [{t_cnn:.1f}s]")
 
+        map_norm = "ISSprOM" if disc in ("urbano", "sprint") else "ISOM"
+
         results.append({
             "id": cid, "discipline": disc, "K": K,
+            "map_norm": map_norm,
             "avg_dist_m": avg_d, "pct_50": pct_50, "pct_100": pct_100,
             "median_score": median_score,
             "relief_cat": relief_cat,
@@ -460,6 +463,25 @@ def run_benchmark(n: int = 50, seed: int = 42, step_px: int = 20, use_dem: bool 
     print(f"Vrais contrôles avec candidat ≤50m : {mean_r('pct_50'):.1f}%")
     print(f"Vrais contrôles avec candidat ≤100m: {mean_r('pct_100'):.1f}%")
     print(f"Score CNN médian aux vraies pos.   : {mean_r('median_score'):.3f}")
+
+    # ── Ventilation par norme ────────────────────────────────────────────────
+    print("\n--- Ventilation par norme ---")
+    print(f"{'':16s}  {'ISSprOM(sprint)':>16s}  {'ISOM(forêt)':>12s}")
+    for metric, label, fmt in [
+        ("avg_dist_m", "Dist. moy.(m)",  ".0f"),
+        ("pct_50",     "CNN <50m (%)",   ".1f"),
+        ("pct_100",    "CNN <100m(%)",   ".1f"),
+        ("median_score","Score médian",  ".3f"),
+    ]:
+        row = ""
+        for norm in ("ISSprOM", "ISOM"):
+            sub = [r[metric] for r in results
+                   if r["map_norm"] == norm and r[metric] is not None
+                   and not (isinstance(r[metric], float) and math.isnan(r[metric]))]
+            val = float(np.mean(sub)) if sub else float("nan")
+            n   = len(sub)
+            row += f"  {val:{fmt}} (n={n})" if not math.isnan(val) else f"  {'n/a':>16s}"
+        print(f"  {label:14s}{row}")
 
     # ── Profil relief ────────────────────────────────────────────────────────
     real_profs = [r["prof_real"] for r in results if r["prof_real"] is not None]

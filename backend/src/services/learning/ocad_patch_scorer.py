@@ -134,6 +134,9 @@ class HeatmapCache:
         for gy, gx in zip(grid_ys.tolist(), grid_xs.tolist()):
             lng = min_lng + (gx / max(W - 1, 1)) * (max_lng - min_lng)
             lat = max_lat - (gy / max(H - 1, 1)) * (max_lat - min_lat)
+            # Exclure les positions en zone interdite (vert olive, eau, bâtiments)
+            if self.forbidden_mask is not None and self.is_forbidden(lng, lat):
+                continue
             candidates.append((lng, lat))
         return candidates
 

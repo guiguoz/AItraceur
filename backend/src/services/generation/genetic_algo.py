@@ -320,6 +320,41 @@ class GeneticAlgorithm:
         dist_m = dist_deg * 111_000  # 1° ≈ 111 km (équateur)
         return self._ocad_pts[idx], dist_m
 
+    def _best_att_ocad(self, x: float, y: float, radius_m: float) -> tuple:
+        """Retourne (cp_dict, dist_m) du feature OCAD ISOM le plus attractif dans radius_m.
+
+        Utilise query_ball_point() pour récupérer tous les voisins dans le rayon,
+        puis sélectionne celui avec le score d'attractivité ISOM le plus élevé.
+        En cas d'égalité, préfère le plus proche.
+
+        Si KDTree non disponible ou rayon vide → (None, inf).
+        """
+        if self._ocad_tree is None:
+            return None, float("inf")
+        radius_deg = radius_m / 111_000
+        idxs = self._ocad_tree.query_ball_point([x, y], radius_deg)
+        if not idxs:
+            return None, float("inf")
+        best_cp = None
+        best_att = -1.0
+        best_dist = float("inf")
+        for idx in idxs:
+            cp = self._ocad_pts[idx]
+            isom = cp.get("isom")
+            att = cp.get(
+                "attractiveness",
+                self._isom_att_scores.get(isom, 0.45) if isom else 0.45,
+            )
+            if cp.get("_intersection"):
+                att = 1.0
+            dist_deg = math.hypot(cp["x"] - x, cp["y"] - y)
+            dist_m = dist_deg * 111_000
+            if att > best_att or (att == best_att and dist_m < best_dist):
+                best_att = att
+                best_dist = dist_m
+                best_cp = cp
+        return best_cp, best_dist
+
     def generate(
         self,
         start_pos: Tuple[float, float],
@@ -495,16 +530,21 @@ class GeneticAlgorithm:
                 ny = max(bb["min_y"], min(bb["max_y"], ny))
 
             # Smart Seeding V2 (40% des cas si HeatmapCache disponible) :
-            # tire le poste depuis les top-20% de la carte plutôt qu'au hasard.
+            # tire le poste depuis les top-40% de la carte plutôt qu'au hasard.
             # → la population initiale démarre déjà sur des terrains attractifs.
             if self._top_candidates and random.random() < 0.40:
                 nx, ny = random.choice(self._top_candidates)
+                # Chaîner avec KDTree : ancre le candidat CNN sur la feature ISOM la plus attractive
+                if self._ocad_tree is not None:
+                    _cp, _d = self._best_att_ocad(nx, ny, 40)
+                    if _cp:
+                        nx, ny = _cp["x"], _cp["y"]
 
-            # Snap vers feature OCAD ISOM (90% si KDTree, sinon 60% O(n))
+            # Snap vers feature OCAD ISOM la plus attractive dans le rayon (90% si KDTree, sinon 60% O(n))
             # → ancre les postes sur des éléments terrain réels dès l'initialisation
             elif self._ocad_tree is not None and random.random() < 0.90:
-                _cp, _d = self._nearest_ocad(nx, ny)
-                if _cp and _d <= 80:
+                _cp, _d = self._best_att_ocad(nx, ny, 80)
+                if _cp:
                     nx, ny = _cp["x"], _cp["y"]
             elif random.random() < 0.60:
                 cp = self._find_nearest_cp(nx, ny, target_leg_m * 0.5)
@@ -742,10 +782,10 @@ class GeneticAlgorithm:
             bb = self.config.bounding_box
             x = max(bb["min_x"], min(bb["max_x"], x))
             y = max(bb["min_y"], min(bb["max_y"], y))
-        # 60% snap vers feature OCAD ISOM — seulement si feature à ≤50m
+        # 60% snap vers la feature OCAD ISOM la plus attractive dans ≤50m
         if self._ocad_tree is not None and random.random() < 0.60:
-            _cp, _d = self._nearest_ocad(x, y)
-            if _cp and _d <= 50:
+            _cp, _d = self._best_att_ocad(x, y, 50)
+            if _cp:
                 x, y = _cp["x"], _cp["y"]
         if not self._is_in_forbidden_zone(x, y, forbidden_zones):
             controls[idx] = (x, y)
@@ -803,6 +843,13 @@ class GeneticAlgorithm:
             new_x = max(bb["min_x"], min(bb["max_x"], new_x))
             new_y = max(bb["min_y"], min(bb["max_y"], new_y))
 
+        # Snap vers la feature OCAD ISOM la plus attractive dans ≤50m
+        # → évite d'atterrir dans le vide cartographique après le repositionnement géométrique
+        if self._ocad_tree is not None and random.random() < 0.60:
+            _cp, _d = self._best_att_ocad(new_x, new_y, 50)
+            if _cp:
+                new_x, new_y = _cp["x"], _cp["y"]
+
         if not self._is_in_forbidden_zone(new_x, new_y, forbidden_zones):
             controls[worst_idx] = (new_x, new_y)
         return controls
@@ -827,10 +874,10 @@ class GeneticAlgorithm:
             bb = self.config.bounding_box
             x = max(bb["min_x"], min(bb["max_x"], x))
             y = max(bb["min_y"], min(bb["max_y"], y))
-        # Snap vers feature OCAD ISOM — seulement si feature à ≤80m
+        # Snap vers la feature OCAD ISOM la plus attractive dans ≤80m
         if self._ocad_tree is not None and random.random() < 0.80:
-            _cp, _d = self._nearest_ocad(x, y)
-            if _cp and _d <= 80:
+            _cp, _d = self._best_att_ocad(x, y, 80)
+            if _cp:
                 x, y = _cp["x"], _cp["y"]
         elif random.random() < 0.40:
             cp = self._find_nearest_cp(x, y, leg_m * 2.0)
@@ -915,22 +962,29 @@ class GeneticAlgorithm:
         if len(leg_m) >= 2:
             mean_leg = float(leg_m.mean())
             rhythm = float(leg_m.std() / (mean_leg + 1e-6))  # CV [0, ∞]
+            rhythm = min(rhythm, 0.8)  # cap : évite de récompenser circuits pathologiques
         else:
             rhythm = 0.0
 
         # ── E. Route diversity (données GPX Vikazimut) ────────────────────────
-        # Bonus si la jambe a historiquement un fort CV (choix de route réel),
-        # malus si jambe triviale (tout le monde prend le même chemin).
+        # Signal continu centré sur cv=0.20 (gradient linéaire).
+        # Bonus maximal ≈ +4.5 pts si cv=0.50 ; malus ≈ −3 pts si cv=0.00.
         # Fallback silencieux si leg_diversity.json absent ou secteur non couvert.
         diversity_bonus = 0.0
         if self._leg_diversity_db:
             for i in range(len(controls) - 1):
                 cv = self._lookup_leg_cv(controls[i], controls[i + 1])
                 if cv is not None:
-                    if cv > 0.40:
-                        diversity_bonus += 5.0   # jambe à choix de route
-                    elif cv < 0.05:
-                        diversity_bonus -= 5.0   # jambe triviale/foree
+                    diversity_bonus += (cv - 0.20) * 15.0
+
+        # ── F. Pénalité zones interdites (HeatmapCache.is_forbidden) ─────────
+        # Pénalise les postes qui tombent dans le forbidden_mask (vert olive, eau,
+        # bâtiments dilatés) même si forbidden_zones JSON ne les couvre pas.
+        forbidden_penalty = 0.0
+        if config.heatmap_cache is not None and config.heatmap_cache.forbidden_mask is not None:
+            for lng, lat in controls[1:-1]:  # hors départ et arrivée
+                if config.heatmap_cache.is_forbidden(lng, lat):
+                    forbidden_penalty += 50.0
 
         # ── Score final (à maximiser) ───────────────────────────────────────
         # Seuils depuis FFCORulesEngine si disponible, sinon valeurs historiques
@@ -959,6 +1013,7 @@ class GeneticAlgorithm:
             + W_RHYTHM * rhythm
             - density_penalty
             + diversity_bonus
+            - forbidden_penalty
         )
 
     def _terrain_quality_score_isom(self, controls: List[Tuple[float, float]]) -> float:

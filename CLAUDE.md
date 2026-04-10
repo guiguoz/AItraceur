@@ -71,11 +71,32 @@ build_heatmap_cache(cnn_scorer=cnn)          # branche CNN si .onnx présent
 
 ### HeatmapCache
 
-Avant chaque génération GA, une grille de scores est précalculée sur toute la bbox :
+Avant chaque génération GA, une grille de scores CNN est précalculée sur toute la bbox :
 - Source : OCAD tile service (priorité) ou MapAnt (fallback forêt)
 - Lookup O(1) dans le GA → rend l'évaluation fitness rapide
 - `build_heatmap_cache()` dans `ocad_patch_scorer.py`
-- Actif sur `/generate-circuit` (forêt/MD/LD) **et** `/generate-sprint` — paramètres OCAD transmis par le frontend dans tous les cas, y compris la complétion (`handleCompleteCircuit`)
+- Actif sur `/generate-circuit` (forêt/MD/LD) **et** `/generate-sprint`
+- `get_top_candidates(0.40)` filtre les pixels `forbidden_mask` avant de retourner les top-40%
+
+### ElevationCache
+
+Avant chaque génération GA, une grille 30×30 d'altitudes est précomputée via IGN API :
+- `build_elevation_cache(bbox)` dans `lidar_manager.py` — ~900 points, batches IGN, ~10-15s
+- `estimate_dplus(controls)` → D+ estimé O(N postes) sans requête réseau
+- Fallback silencieux si IGN inaccessible — terme G fitness désactivé
+- Actif sur `/generate-circuit` **et** `/generate-sprint`
+
+### Fitness GA — termes A→G
+
+| Terme | Critère | Poids |
+|-------|---------|-------|
+| A | Score CNN moyen (HeatmapCache) | ×30 |
+| B | Pénalité distance vs cible | ×40 |
+| C | Dog-legs (−20 pts/violation) | ×1 |
+| D | Rythme CV inter-postes (cap 0.8) | ×15 |
+| E | Diversité GPX Vikazimut — gradient `(cv−0.20)×15` | additive |
+| F | Zones interdites forbidden_mask (−50 pts/poste) | additive |
+| G | D+/distance > seuil IOF 4% (ElevationCache) | additive |
 
 ### Boucle traceur ↔ contrôleur
 
@@ -136,6 +157,6 @@ Le notebook Kaggle embarque le script inline (`%%writefile train_cnn.py`) pour �
 | Priorité | Tâche |
 |----------|-------|
 | Haute | Déploiement prod (CORS, API_BASE, build frontend, rate limiting, clé admin) |
-| Moyenne | CNN 5 canaux (RGB + altitude + pente DEM SRTM) — plan dans `~/.claude/plans/` |
+| Moyenne | Segment Crossover spatial (remplacer OX TSP) — quand plateau fitness GA |
 | Basse | Mode Compétition (plusieurs circuits partagent des balises) |
 | Basse | Intercalation V2 : algorithme TSP cheapest-insertion (backend) pour ordre optimal des postes de complétion |

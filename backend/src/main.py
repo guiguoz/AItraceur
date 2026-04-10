@@ -2087,7 +2087,16 @@ def _circuit_impl(body: dict) -> dict:
         except Exception as _hm_err:
             print(f"[circuit] HeatmapCache exception: {_hm_err} → fallback ISOM", flush=True)
 
-    if heatmap_cache is not None:
+    # ── ElevationCache (SRTM/IGN — terme G fitness D+) ───────────────────────
+    elevation_cache = None
+    if bounding_box:
+        try:
+            from src.services.terrain.lidar_manager import build_elevation_cache as _build_elev
+            elevation_cache = _build_elev(bounding_box, n_cols=30, n_rows=30, timeout=20)
+        except Exception as _elev_err:
+            print(f"[circuit] ElevationCache exception: {_elev_err} → terme G désactivé", flush=True)
+
+    if heatmap_cache is not None or elevation_cache is not None:
         request = GenerationRequest(
             bounding_box=request.bounding_box,
             category=request.category,
@@ -2103,6 +2112,7 @@ def _circuit_impl(body: dict) -> dict:
             candidate_points=request.candidate_points,
             start_position=request.start_position,
             heatmap_cache=heatmap_cache,
+            elevation_cache=elevation_cache,
         )
 
     generator = AIGenerator()
@@ -3855,6 +3865,15 @@ def _sprint_impl(task_id: str, body: dict) -> None:
         print(f"{_tag} ⚠️ FFCORulesEngine non chargé : {_re_err}", flush=True)
         _rules_engine = None
 
+    # ElevationCache (SRTM/IGN — terme G fitness D+)
+    _elevation_cache = None
+    if bounding_box:
+        try:
+            from src.services.terrain.lidar_manager import build_elevation_cache as _build_elev_s
+            _elevation_cache = _build_elev_s(bounding_box, n_cols=30, n_rows=30, timeout=20)
+        except Exception as _elev_err:
+            print(f"{_tag} ElevationCache exception: {_elev_err} → terme G désactivé", flush=True)
+
     generator = AIGenerator()
     gen_request = GenerationRequest(
         bounding_box=bounding_box,
@@ -3868,6 +3887,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
         forbidden_zones=oob_polygons,
         start_position=start_position,
         heatmap_cache=heatmap_cache,
+        elevation_cache=_elevation_cache,
         route_analyzer=route_analyzer,   # re-ranker choix d'itinéraire sprint
         rules_engine=_rules_engine,
     )

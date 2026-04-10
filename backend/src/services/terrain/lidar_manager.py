@@ -27,6 +27,162 @@ except ImportError:
 IGN_ELEVATION_URL = "https://data.geopf.fr/altimetrie/1.0/calcul/alti/rest/elevation.json"
 
 
+# ---------------------------------------------------------------------------
+# ElevationCache — grille 2D d'altitudes précomputée pour le GA
+# ---------------------------------------------------------------------------
+@dataclass
+class ElevationCache:
+    """
+    Grille 2D d'altitudes (mètres) précomputée sur la bbox avant le GA.
+
+    Permet d'estimer le D+ d'un circuit en O(N_postes) sans requête réseau,
+    via interpolation bilinéaire entre les cellules de la grille.
+
+    Attributes:
+        altitudes: (n_rows, n_cols) float32 — altitudes en mètres (NaN si données absentes).
+        bbox:      (min_lng, min_lat, max_lng, max_lat) WGS84.
+        n_rows:    Nombre de lignes de la grille.
+        n_cols:    Nombre de colonnes de la grille.
+    """
+    altitudes: "np.ndarray"   # (n_rows, n_cols) float32
+    bbox: tuple               # (min_lng, min_lat, max_lng, max_lat)
+    n_rows: int
+    n_cols: int
+
+    def query(self, lng: float, lat: float) -> Optional[float]:
+        """
+        Altitude interpolée bilinéairement pour une position WGS84.
+
+        Returns:
+            Altitude en mètres, ou None si hors bbox / données absentes.
+        """
+        import numpy as np
+        min_lng, min_lat, max_lng, max_lat = self.bbox
+        if max_lng == min_lng or max_lat == min_lat:
+            return None
+        tx = (lng - min_lng) / (max_lng - min_lng)
+        ty = 1.0 - (lat - min_lat) / (max_lat - min_lat)  # y inversé
+        if not (0.0 <= tx <= 1.0 and 0.0 <= ty <= 1.0):
+            return None
+        gx = tx * (self.n_cols - 1)
+        gy = ty * (self.n_rows - 1)
+        x0, y0 = int(gx), int(gy)
+        x1 = min(x0 + 1, self.n_cols - 1)
+        y1 = min(y0 + 1, self.n_rows - 1)
+        fx, fy = gx - x0, gy - y0
+        vals = [
+            self.altitudes[y0, x0], self.altitudes[y0, x1],
+            self.altitudes[y1, x0], self.altitudes[y1, x1],
+        ]
+        if any(np.isnan(v) for v in vals):
+            # Fallback : première valeur non-NaN parmi les 4 voisins
+            for v in vals:
+                if not np.isnan(v):
+                    return float(v)
+            return None
+        return float(
+            vals[0] * (1 - fx) * (1 - fy)
+            + vals[1] * fx * (1 - fy)
+            + vals[2] * (1 - fx) * fy
+            + vals[3] * fx * fy
+        )
+
+    def estimate_dplus(self, controls: list) -> float:
+        """
+        Estime le D+ d'un circuit (séquence de (lng, lat)).
+
+        Calcule la somme des dénivelés positifs entre postes consécutifs.
+        Les legs sans données altimétrique sont ignorés (pas de pénalité).
+
+        Returns:
+            D+ estimé en mètres.
+        """
+        d_plus = 0.0
+        prev_alt = None
+        for lng, lat in controls:
+            alt = self.query(lng, lat)
+            if alt is None:
+                prev_alt = None  # rupture de chaîne si données absentes
+                continue
+            if prev_alt is not None and alt > prev_alt:
+                d_plus += alt - prev_alt
+            prev_alt = alt
+        return d_plus
+
+
+def build_elevation_cache(
+    bbox: dict,
+    n_cols: int = 30,
+    n_rows: int = 30,
+    timeout: int = 20,
+) -> Optional["ElevationCache"]:
+    """
+    Construit une ElevationCache sur la bbox en interrogeant l'API IGN altimétrie.
+
+    Fetche une grille régulière (n_rows × n_cols) de points WGS84 en batch
+    via get_elevation_for_points(). Typiquement ~900 points → 5 requêtes IGN.
+
+    Args:
+        bbox:    {min_x, min_y, max_x, max_y} WGS84.
+        n_cols:  Nombre de colonnes (résolution longitudinale).
+        n_rows:  Nombre de lignes (résolution latitudinale).
+        timeout: Timeout total en secondes (fallback silencieux si dépassé).
+
+    Returns:
+        ElevationCache, ou None si l'API est inaccessible.
+    """
+    import numpy as np
+    import time as _time
+
+    min_lng = bbox.get("min_x", bbox.get("min_lng"))
+    min_lat = bbox.get("min_y", bbox.get("min_lat"))
+    max_lng = bbox.get("max_x", bbox.get("max_lng"))
+    max_lat = bbox.get("max_y", bbox.get("max_lat"))
+
+    if None in (min_lng, min_lat, max_lng, max_lat):
+        return None
+
+    # Construire la grille (row=lat, col=lng) — lat décroissant (image convention)
+    lngs = [min_lng + (max_lng - min_lng) * c / max(n_cols - 1, 1) for c in range(n_cols)]
+    lats = [max_lat - (max_lat - min_lat) * r / max(n_rows - 1, 1) for r in range(n_rows)]
+
+    coords = [(lng, lat) for lat in lats for lng in lngs]  # row-major
+    t0 = _time.time()
+
+    try:
+        elevations = get_elevation_profile(coords, chunk_size=200)
+    except Exception as e:
+        print(f"[ElevationCache] IGN API erreur: {e} → cache désactivé", flush=True)
+        return None
+
+    if _time.time() - t0 > timeout:
+        print(f"[ElevationCache] timeout {timeout}s → cache désactivé", flush=True)
+        return None
+
+    grid = np.full((n_rows, n_cols), np.nan, dtype=np.float32)
+    for idx, alt in enumerate(elevations):
+        if alt is not None:
+            r = idx // n_cols
+            c = idx % n_cols
+            grid[r, c] = float(alt)
+
+    n_valid = int(np.sum(~np.isnan(grid)))
+    print(
+        f"[ElevationCache] {n_rows}×{n_cols} grille, {n_valid}/{n_rows*n_cols} pts valides "
+        f"({_time.time()-t0:.1f}s)",
+        flush=True,
+    )
+    if n_valid == 0:
+        return None
+
+    return ElevationCache(
+        altitudes=grid,
+        bbox=(min_lng, min_lat, max_lng, max_lat),
+        n_rows=n_rows,
+        n_cols=n_cols,
+    )
+
+
 def get_elevation_for_points(
     coords: List[Tuple[float, float]],
     resource: str = "ign_rge_alti_wld",

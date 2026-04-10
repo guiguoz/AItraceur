@@ -37,6 +37,8 @@ class GenerationRequest:
     candidate_points: List[Dict] = field(default_factory=list)  # [{x, y, isom}, ...]
     map_context: Optional[str] = None  # ISOM terrain summary from OCAD GeoJSON
     heatmap_cache: Optional[HeatmapCache] = field(default=None, repr=False)
+    elevation_cache: Optional[object] = field(default=None, repr=False)
+    # ElevationCache — grille SRTM/IGN pour estimer D+ pendant la fitness GA.
     route_analyzer: Optional[object] = field(default=None, repr=False)
     # RouteAnalyzer OSM — si fourni, active le re-ranker choix d'itinéraire sprint.
     rules_engine: Optional[object] = field(default=None, repr=False)
@@ -190,6 +192,7 @@ class AIGenerator:
             sprint_mode=sprint_mode,
             candidate_points=request.candidate_points,
             heatmap_cache=request.heatmap_cache,
+            elevation_cache=request.elevation_cache,
             rules_engine=request.rules_engine,
         )
 

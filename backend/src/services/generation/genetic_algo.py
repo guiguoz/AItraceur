@@ -80,6 +80,12 @@ class GenerationConfig:
     # Si None : fallback ISOM attractiveness (comportement existant, aucune régression).
     heatmap_cache: Optional[HeatmapCache] = field(default=None, repr=False)
 
+    # Grille d'altitudes précomputée (optionnel)
+    # Si fourni : evaluate_fitness() calcule un D+ estimé et pénalise les circuits
+    # dont le ratio D+/distance_totale dépasse le seuil IOF (max_climb_ratio).
+    # Si None : terme G absent (aucune régression).
+    elevation_cache: Optional[object] = field(default=None, repr=False)
+
     # FFCORulesEngine — source de vérité des seuils et pondérations (optionnel).
     # Si None : valeurs historiques hardcodées (aucune régression).
     rules_engine: Optional[object] = field(default=None, repr=False)
@@ -986,6 +992,18 @@ class GeneticAlgorithm:
                 if config.heatmap_cache.is_forbidden(lng, lat):
                     forbidden_penalty += 50.0
 
+        # ── G. Pénalité dénivelé (D+/distance > seuil IOF) ───────────────────
+        # Estime le D+ via ElevationCache (grille SRTM/IGN précomputée).
+        # Pénalise si le ratio D+/distance_totale dépasse max_climb_ratio (défaut 4% IOF).
+        # Fallback silencieux si elevation_cache absent ou données insuffisantes.
+        dplus_penalty = 0.0
+        if config.elevation_cache is not None and total_m > 0:
+            estimated_dplus = config.elevation_cache.estimate_dplus(controls)
+            max_climb_ratio = float(self._placement_rules.get("max_climb_ratio", 0.04))
+            dplus_ratio = estimated_dplus / total_m
+            if dplus_ratio > max_climb_ratio:
+                dplus_penalty = (dplus_ratio - max_climb_ratio) * 200.0  # −20 pts pour +10% dépassement
+
         # ── Score final (à maximiser) ───────────────────────────────────────
         # Seuils depuis FFCORulesEngine si disponible, sinon valeurs historiques
         if self._thresholds is not None:
@@ -1014,6 +1032,7 @@ class GeneticAlgorithm:
             - density_penalty
             + diversity_bonus
             - forbidden_penalty
+            - dplus_penalty
         )
 
     def _terrain_quality_score_isom(self, controls: List[Tuple[float, float]]) -> float:

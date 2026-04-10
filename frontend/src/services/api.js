@@ -73,10 +73,6 @@ export const generateCircuitAsync = (params) =>
 export const getCircuitStatus = (taskId) =>
   api.get(`/api/v1/generation/circuit-status/${taskId}`, { timeout: 10000 });
 
-// ── Terrain runnabilité ──────────────────────────────────────────────────────
-export const getRunnabilityGrid = (bbox, resolution_m = 100) =>
-  api.post('/api/v1/terrain/runnability-grid', { bounding_box: bbox, resolution_m }, { timeout: 60000 });
-
 // ── Dénivelé parcours ────────────────────────────────────────────────────────
 export const getCourseElevation = (controls) =>
   api.post('/api/v1/terrain/course-elevation', { controls }, { timeout: 30000 });

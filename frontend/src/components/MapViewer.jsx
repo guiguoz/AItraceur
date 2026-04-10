@@ -8,25 +8,6 @@ const IOF_COLOR = '#9b2cae';
 const SUGGESTION_COLOR = '#7c3aed';
 const ICON_SIZE = 32;
 
-// Runnability color palette — IOF ISOM standard
-const RUNNABILITY_COLORS = [
-  { threshold: 0.9, color: null },
-  { threshold: 0.75, color: '#d4e6a0', fillOpacity: 0.35 },
-  { threshold: 0.55, color: '#8bc34a', fillOpacity: 0.45 },
-  { threshold: 0.35, color: '#4caf50', fillOpacity: 0.55 },
-  { threshold: 0.20, color: '#2e7d32', fillOpacity: 0.65 },
-  { threshold: 0.0,  color: '#1b5e20', fillOpacity: 0.80 },
-];
-
-const getRunnabilityStyle = (score) => {
-  for (const { threshold, color, fillOpacity } of RUNNABILITY_COLORS) {
-    if (score >= threshold) {
-      if (!color) return { opacity: 0, fillOpacity: 0, weight: 0 };
-      return { color, fillColor: color, fillOpacity, weight: 0, opacity: 0 };
-    }
-  }
-  return { color: '#1b5e20', fillColor: '#1b5e20', fillOpacity: 0.8, weight: 0 };
-};
 
 // Create IOF-standard control icons using inline SVG
 const createControlIcon = (type, order) => {
@@ -99,25 +80,6 @@ function MapEvents({ onControlClick, onForbiddenClick, activeTool }) {
   return null;
 }
 
-// Runnability overlay layer — GeoJSON grid colored by score
-function RunnabilityLayer({ terrainData }) {
-  const map = useMap();
-  const layerRef = useRef(null);
-
-  useEffect(() => {
-    if (layerRef.current) { map.removeLayer(layerRef.current); layerRef.current = null; }
-    if (!terrainData?.features?.length) return;
-    const renderer = L.canvas();
-    layerRef.current = L.geoJSON(terrainData, {
-      renderer,
-      style: (feature) => getRunnabilityStyle(feature.properties.runnability),
-    });
-    map.addLayer(layerRef.current);
-    return () => { if (layerRef.current) { map.removeLayer(layerRef.current); layerRef.current = null; } };
-  }, [terrainData, map]);
-
-  return null;
-}
 
 // Auto-fit bounds when map or image loads
 function FitBounds({ bounds }) {
@@ -177,7 +139,6 @@ export function MapViewer({
   forbiddenZones = [],
   currentSuggestion = null,
   activeTool = 'view',
-  terrainData = null,
   imageData = null,
   onAddForbiddenZone,
   onUpdateSuggestion,
@@ -288,9 +249,6 @@ export function MapViewer({
         {imageData && (
           <ImageOverlay url={imageData.url} bounds={imageData.bounds} opacity={1} zIndex={10} />
         )}
-
-        {/* Runnability overlay */}
-        {terrainData && <RunnabilityLayer terrainData={terrainData} />}
 
         {/* Completed forbidden zones — red dashed polygons */}
         {/* forbiddenZones stockées en [lng,lat] (backend) → convertir en [lat,lng] pour Leaflet */}

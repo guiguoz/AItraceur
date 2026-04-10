@@ -3,7 +3,6 @@ import { MapViewer } from './components/MapViewer'
 import OcadUploader from './components/OcadUploader'
 import GpxImporter from './components/GpxImporter'
 import ControlsList from './components/ControlsList'
-import TerrainPanel from './components/TerrainPanel'
 import CircuitCreationModal from './components/CircuitCreationModal'
 import CircuitSelector from './components/CircuitSelector'
 import AISuggestionPanel from './components/AISuggestionPanel'
@@ -499,8 +498,6 @@ function App() {
   const [mapMode, setMapMode] = useState('osm') // 'osm' | 'ocad'
   const [ocadAnalysis, setOcadAnalysis] = useState(null)
   const [renderLoading, setRenderLoading] = useState(false)
-  const [terrainData, setTerrainData] = useState(null)
-  const [showRunnability, setShowRunnability] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [generationError, setGenerationError] = useState(null)
   const [dialogue, setDialogue] = useState([])
@@ -1489,14 +1486,6 @@ function App() {
                     )
                   })()}
 
-                  {/* Terrain */}
-                  <TerrainPanel
-                    ocadData={ocadData}
-                    onTerrainLoaded={(data) => { setTerrainData(data); setShowRunnability(true) }}
-                    showRunnability={showRunnability}
-                    onToggleRunnability={() => setShowRunnability(v => !v)}
-                  />
-
                   {/* Actions */}
                   <div className="bg-gray-700/50 p-4 rounded-xl border border-gray-700">
                     <h2 className="text-sm font-semibold text-gray-200 mb-3 flex items-center gap-2">
@@ -1608,7 +1597,6 @@ function App() {
           forbiddenZones={activeCircuit?.forbiddenZones ?? []}
           currentSuggestion={currentSuggestion}
           activeTool={activeTool}
-          terrainData={showRunnability ? terrainData : null}
           imageData={imageData}
           onAddForbiddenZone={handleAddForbiddenZone}
           onUpdateSuggestion={handleUpdateSuggestion}

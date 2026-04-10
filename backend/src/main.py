@@ -1998,6 +1998,8 @@ def _circuit_impl(body: dict) -> dict:
     forbidden_zones_polygons = list(body.get("forbidden_zones_polygons") or [])
     required_controls_raw = body.get("required_controls") or []
     candidate_points = list(body.get("candidate_points") or [])
+    _n_isom = sum(1 for cp in candidate_points if cp.get("isom"))
+    print(f"[circuit] candidate_points: {len(candidate_points)} total, {_n_isom} avec isom", flush=True)
 
     # Mode sprint : enrichir depuis OSM si peu de candidats OCAD
     if (circuit_type == "sprint" or technical_level in ("TD1", "TD2")) and len(candidate_points) < 50 and bounding_box:

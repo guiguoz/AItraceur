@@ -14,7 +14,7 @@
 - **Pipeline OCAD natif** : le fichier `.ocd` uploadé alimente directement l'IA — zones interdites extraites des vecteurs (sym 709/527 ISSprOM/ISOM), image rasterisée normalisée vers la distribution MapAnt d'entraînement
 - **HeatmapCache** : grille de scores V2 précomputée (O(1) lookups GA), Smart Seeding population initiale — source : OCAD tile service (priorité) ou MapAnt (fallback forêt/LD)
 - **Forbidden mask vectoriel** : polygones OOB extraits directement depuis les symboles OCAD (100 % fiable) ; requête Overpass bâtiments skippée → gain ~50s
-- **Ancrage vectoriel ISOM Phase 2** : postes ancrés sur les features OCAD réelles via `scipy.spatial.KDTree` (O(log N)) — pénalité si poste trop loin (rayon 40 m sprint / 80 m forêt), attractivité sémantique `ISOM_ATT` transmise depuis le frontend
+- **Ancrage vectoriel ISOM Phase 2** : postes ancrés sur les features OCAD réelles via `scipy.spatial.KDTree` (O(log N)) — pénalité si poste trop loin (rayon 40 m sprint / 80 m forêt), attractivité sémantique `ISOM_ATT` transmise depuis le frontend (`extractCandidatePoints` : contours 101-105 ignorés, chemins forêt 503-508 inclus avec extraction des vertices de changement de direction, ruisseaux 301-303 exclus pour éviter la confusion avec les lignes nord magnétiques)
 - **Contrôleur IOF/FFCO** : validation automatique des règles (dog-legs, jambes C01–C12, TD1-5/PD1-5)
 - **Boucle traceur ↔ contrôleur** : dialogue IA avec corrections automatiques (jusqu'à 5 itérations)
 - **FFCORulesEngine** : source de vérité unique pour les seuils FFCO/IOF — distances, TD, temps gagnants par catégorie exposés via `GET /api/v1/categories` ; seuils injectés dans le GA (remplace les constantes hardcodées)
@@ -22,6 +22,7 @@
 - **Analyse de routes** : NetworkX A*, diversité des itinéraires (Jaccard), détection dog-legs, Re-Ranker Top-3 (budget 15s) ; bouton 🔍 par jambe → k polylines colorées sur la carte (bleu/orange/rouge)
 - **DialogueLog** : panneau visuel des échanges traceur↔contrôleur avec score IOF/FFCO par itération
 - **Avertissement génération** : si circuit < 70 % de la distance cible → `warning` + `distance_ratio` affichés dans l'interface (fond orange)
+- **Complétion de circuit** : si le circuit validé est sous la distance cible, l'IA propose des postes supplémentaires via `/generate-circuit` avec `required_controls` — chaque suggestion s'intercale dans la jambe géométriquement la plus proche (`insertAfterId` + label "intercaler entre poste #X → poste #Y"), OCAD params (map_id, candidate_points CNN) transmis pour maintenir la qualité forêt
 - **CNN Scorer V4** : MobileNetV3-Small ONNX, F1=0.814, Recall=0.919 — 428k patches (RG2 UK + Vikazimut FR), entraîné sur Kaggle T4 GPU ; fallback XGBoost V3 (AUC=0.807) si `.onnx` absent
 - **Carte OCAD** : rendu haute-fidélité des fichiers `.ocd` via tile service Node.js
 - **Terrain OSM** : enrichissement automatique depuis Overpass API (highways pour RouteAnalyzer)
@@ -153,7 +154,7 @@ Copier dans `backend/data/models/` puis redémarrer uvicorn — `CnnPatchScorer`
 
 ### 4. Intégration : HeatmapCache + Pipeline OCAD
 
-À l'appel de `/generate-sprint`, le backend :
+À l'appel de `/generate-sprint` **et `/generate-circuit`** (forêt/LD/MD), le backend :
 1. **Si `.ocd` uploadé (`map_id` fourni)** :
    - Extrait les zones OOB depuis les vecteurs OCAD (sym 709/527) → `forbidden_mask` fiable à 100%
    - Récupère le PNG pleine-carte rendu par le tile service
@@ -161,6 +162,8 @@ Copier dans `backend/data/models/` puis redémarrer uvicorn — `CnnPatchScorer`
 2. **Sinon** : récupère l'image MapAnt (`_fetch_mapant_bbox_image`)
 3. Précompute une grille de scores CNN (`build_heatmap_cache`) — `CnnPatchScorer` si `.onnx` présent, XGBoost sinon
 4. Passe le `HeatmapCache` à l'algorithme génétique → lookups O(1)
+
+> Le frontend transmet `candidate_points` (jusqu'à 600, filtrés bbox + OOB) et les paramètres OCAD dans **toutes** les requêtes de génération, y compris la complétion de circuit (`handleCompleteCircuit`).
 
 ### 5. XGBoost V3 (fallback)
 

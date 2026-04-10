@@ -169,6 +169,10 @@ class GeneticAlgorithm:
                 self._ocad_tree = _KDTree(_kd_coords)
             except Exception:
                 self._ocad_tree = None
+        if self._ocad_tree is not None:
+            print(f"[GA DEBUG] KDTree ISOM: {len(self._ocad_pts)} features", flush=True)
+        else:
+            print(f"[GA DEBUG] KDTree ISOM: ABSENT (ocad_pts={len(self._ocad_pts)}, threshold>=20)", flush=True)
 
     def _load_placement_rules(self) -> dict:
         """Charge les seuils IOF/FFCO depuis placement_rules.json selon circuit_type et technical_level."""

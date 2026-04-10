@@ -75,6 +75,7 @@ Avant chaque génération GA, une grille de scores est précalculée sur toute l
 - Source : OCAD tile service (priorité) ou MapAnt (fallback forêt)
 - Lookup O(1) dans le GA → rend l'évaluation fitness rapide
 - `build_heatmap_cache()` dans `ocad_patch_scorer.py`
+- Actif sur `/generate-circuit` (forêt/MD/LD) **et** `/generate-sprint` — paramètres OCAD transmis par le frontend dans tous les cas, y compris la complétion (`handleCompleteCircuit`)
 
 ### Boucle traceur ↔ contrôleur
 
@@ -95,6 +96,24 @@ GA génère circuit
 - **Tile service sans état** : restart = toutes les cartes perdues (re-upload `.ocd` requis)
 - **SQLite** par défaut (`aitraceur.db`) — pas besoin de Docker en dev
 - **`global_score`** est dans [0, 100] — diviser par 100 pour obtenir [0, 1]
+
+### extractCandidatePoints (App.jsx)
+
+Extrait les features OCAD comme candidats pour le KDTree ISOM Phase 2.
+- `ATTRACTIVE_ISOM` : ensemble des codes ISOM retenus (terrain forms 101-120, végétation 201-215, constructions 304-308/401-406, sentiers/chemins forêt 501-508/516/521-522)
+- **Contours 101-105** (LineString) : centroïde ignoré — points sur courbe de niveau sans signification CO
+- **Terrain forms 106-115** (knolls/pits, LineString fermée) : centroïde conservé
+- **PATH_ISOM 501-506** : extraction des vertices de changement de direction (> 15°, pas centroïde)
+- **Ruisseaux 301-303 absents** : endpoints de LineString = bords de carte + confusion avec lignes nord magnétiques (même couleur bleue)
+- `sym` parsing : `sym > 10000 ? Math.floor(sym/1000) : Math.floor(sym)` — gère formats 6-chiffres (`101000`) et 3-chiffres (`101`)
+
+### Complétion de circuit + intercalation (App.jsx)
+
+Quand le circuit validé est sous la distance cible :
+1. `handleCompleteCircuit` appelle `/generate-circuit` avec `required_controls` (postes existants) + params OCAD complets
+2. `assignInsertionPositions` attribue à chaque suggestion l'`insertAfterId` de la jambe géométriquement la plus proche (`pointToSegmentDist`, filtre MIN_LEG_M=30m)
+3. `handleValidateSuggestion` insère par `insertAfterId` (pas en fin de liste)
+4. `AISuggestionPanel` affiche "↕ intercaler entre X → Y"
 
 ---
 
@@ -119,3 +138,4 @@ Le notebook Kaggle embarque le script inline (`%%writefile train_cnn.py`) pour �
 | Haute | Déploiement prod (CORS, API_BASE, build frontend, rate limiting, clé admin) |
 | Moyenne | CNN 5 canaux (RGB + altitude + pente DEM SRTM) — plan dans `~/.claude/plans/` |
 | Basse | Mode Compétition (plusieurs circuits partagent des balises) |
+| Basse | Intercalation V2 : algorithme TSP cheapest-insertion (backend) pour ordre optimal des postes de complétion |

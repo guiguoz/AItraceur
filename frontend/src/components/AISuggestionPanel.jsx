@@ -30,6 +30,9 @@ export default function AISuggestionPanel({ activeCircuit, onValidate, onSkip })
       </div>
 
       <p className="text-sm text-white font-medium mb-0.5">{typeLabel}</p>
+      {suggestion.insertLabel && (
+        <p className="text-xs text-purple-300 mb-1">↕ {suggestion.insertLabel}</p>
+      )}
       {suggestion.description && suggestion.description !== 'Position libre' && (
         <p className="text-xs text-purple-300 font-medium mb-1 flex items-center gap-1">
           <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">

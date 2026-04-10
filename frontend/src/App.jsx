@@ -98,6 +98,50 @@ function computeCourseDistance(controls) {
   return Math.round(total)
 }
 
+// Distance (m) du point P au segment AB (projection orthogonale clampée)
+function pointToSegmentDist(p, a, b) {
+  const dx = b.lng - a.lng, dy = b.lat - a.lat
+  if (dx === 0 && dy === 0) return haversineDistance(p, a)
+  const t = Math.max(0, Math.min(1, ((p.lng - a.lng) * dx + (p.lat - a.lat) * dy) / (dx * dx + dy * dy)))
+  return haversineDistance(p, { lat: a.lat + t * dy, lng: a.lng + t * dx })
+}
+
+// Pour chaque suggestion de complétion, trouve la jambe la plus proche et attribue
+// insertAfterId (id du contrôle de début de jambe) + insertLabel (texte UI).
+// Si le poste serait trop proche d'un existant (< MIN_LEG_M), insertAfterId = null → append.
+function assignInsertionPositions(existingControls, suggestions) {
+  const MIN_LEG_M = 30
+  const ordered = [...existingControls]
+    .filter(c => ['start', 'control', 'finish'].includes(c.type))
+    .sort((a, b) => a.order - b.order)
+  if (ordered.length < 2) return suggestions
+
+  const legLabel = (ctrl, idx, all) => {
+    if (ctrl.type === 'start') return 'départ'
+    if (ctrl.type === 'finish') return 'arrivée'
+    const n = all.slice(0, idx).filter(c => c.type === 'control').length + 1
+    return `poste #${n}`
+  }
+
+  return suggestions.map(s => {
+    let bestIdx = ordered.length - 2
+    let bestDist = Infinity
+    for (let i = 0; i < ordered.length - 1; i++) {
+      const d = pointToSegmentDist(s, ordered[i], ordered[i + 1])
+      if (d < bestDist) { bestDist = d; bestIdx = i }
+    }
+    const fromOk = haversineDistance(s, ordered[bestIdx]) >= MIN_LEG_M
+    const toOk = haversineDistance(s, ordered[bestIdx + 1]) >= MIN_LEG_M
+    return {
+      ...s,
+      insertAfterId: (fromOk && toOk) ? ordered[bestIdx].id : null,
+      insertLabel: (fromOk && toOk)
+        ? `intercaler entre ${legLabel(ordered[bestIdx], bestIdx, ordered)} → ${legLabel(ordered[bestIdx + 1], bestIdx + 1, ordered)}`
+        : null,
+    }
+  })
+}
+
 // Collect all GeoJSON vertices in [lat, lng] format for coverage check
 function buildOcadVertices(geojson) {
   const pts = []
@@ -140,9 +184,9 @@ function extractBoundingBox(geojson) {
 const ATTRACTIVE_ISOM = new Set([
   101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,
   201,202,203,204,205,206,209,210,211,212,215,
-  301,302,303,304,305,306,308,
+  304,305,306,308,
   401,402,403,404,405,406,
-  501,502,516,521,522,
+  501,502,503,504,505,506,507,508,516,521,522,
 ])
 
 // ISSOM codes for sprint maps (urban — ISSOM 2017)
@@ -310,7 +354,7 @@ function extractCandidatePoints(geojson, max = 600, sprintMode = false) {
   for (const f of geojson.features) {
     const sym = f.properties?.sym
     if (!sym) continue
-    const isom = Math.floor(sym / 1000)
+    const isom = sym > 10000 ? Math.floor(sym / 1000) : Math.floor(sym)
     if (!attractiveCodes.has(isom)) continue
     const geom = f.geometry
     if (!geom) continue
@@ -342,6 +386,10 @@ function extractCandidatePoints(geojson, max = 600, sprintMode = false) {
       pts.push({ x: coords[coords.length-1][0], y: coords[coords.length-1][1], isom, attractiveness: att })
 
     } else {
+      // Skip contour lines (101-105) only — their centroid is meaningless.
+      // Terrain forms (106-115: knolls, pits, cliffs) have meaningful centroids.
+      const CONTOUR_CODES = new Set([101, 102, 103, 104, 105])
+      if ((geom.type === 'LineString' || geom.type === 'MultiLineString') && CONTOUR_CODES.has(isom)) continue
       const c = computeGeoCentroid(geom)
       if (c) pts.push({ x: c[0], y: c[1], isom, attractiveness: att })
     }
@@ -555,16 +603,22 @@ function App() {
   useEffect(() => {
     const features = ocadData?.geojson?.features
     if (!features?.length) { setDetectedMode(null); return }
-    let built = 0, road = 0
+    let contours = 0, vegetation = 0, buildings = 0, pavedAreas = 0
     for (const feat of features) {
       const raw = feat.properties?.sym ?? feat.properties?.symbol
       const n = Math.floor(typeof raw === 'number' ? raw : parseFloat(raw))
       if (isNaN(n)) continue
       const s = n > 10000 ? Math.floor(n / 1000) : n
-      if (s >= 521 && s <= 526) built++
-      else if (s >= 501 && s <= 504) road++
+      if (s >= 101 && s <= 115) contours++        // courbes de niveau (ISOM uniquement)
+      else if (s >= 401 && s <= 430) vegetation++ // végétation (ISOM uniquement)
+      else if (s >= 521 && s <= 526) buildings++  // bâtiments (ISSprOM >> ISOM)
+      else if (s >= 501 && s <= 510) pavedAreas++ // zones pavées/routes (ISSprOM)
     }
-    setDetectedMode(built > 5 || (built > 0 && road > 15) ? 'sprint' : 'forest')
+    const isomScore   = contours + vegetation
+    const isspromScore = buildings * 3 + pavedAreas
+    // Courbes de niveau = signature ISOM forte (quasi-absentes en sprint)
+    const mode = (contours > 10 || isomScore > isspromScore * 2) ? 'forest' : 'sprint'
+    setDetectedMode(mode)
   }, [ocadData])
 
   const handleError = (errMsg) => {
@@ -862,8 +916,20 @@ function App() {
     updateActiveCircuit(c => {
       const suggestion = c.aiSuggestions[c.suggestionIdx]
       if (!suggestion) return { status: 'complete' }
-      const newControl = { ...suggestion, order: c.controls.length + 1 }
-      const controls = [...c.controls, newControl].map((ctrl, i) => ({ ...ctrl, order: i + 1 }))
+      let controls
+      if (suggestion.insertAfterId) {
+        const ordered = [...c.controls].sort((a, b) => a.order - b.order)
+        const pos = ordered.findIndex(ctrl => ctrl.id === suggestion.insertAfterId)
+        const insertAt = pos >= 0 ? pos + 1 : ordered.length
+        controls = [
+          ...ordered.slice(0, insertAt),
+          { ...suggestion },
+          ...ordered.slice(insertAt),
+        ].map((ctrl, i) => ({ ...ctrl, order: i + 1 }))
+      } else {
+        const newControl = { ...suggestion, order: c.controls.length + 1 }
+        controls = [...c.controls, newControl].map((ctrl, i) => ({ ...ctrl, order: i + 1 }))
+      }
       const newIdx = c.suggestionIdx + 1
       const targetLength = getCircuitParams(c).target_length_m
       // Projeter la distance avec l'arrivée (déjà posée ou dans les suggestions restantes)
@@ -933,11 +999,31 @@ function App() {
         const _completionData = await _pollSprintStatus(_tid, setProgressLabel)
         newControls = _completionData?.controls ?? []
       } else {
+        const ocadOobZones = ocadData?.geojson ? extractOobZones(ocadData.geojson) : []
+        const oobZones = [...(activeCircuit.forbiddenZones ?? []), ...ocadOobZones]
+        let candidatePoints = ocadData?.geojson
+          ? extractCandidatePoints(ocadData.geojson, 600, false)
+          : []
+        if (ocadData?.geojson && bbox) {
+          const margin = 0.02
+          candidatePoints = candidatePoints.filter(cp =>
+            cp.x >= bbox.min_x - margin && cp.x <= bbox.max_x + margin &&
+            cp.y >= bbox.min_y - margin && cp.y <= bbox.max_y + margin &&
+            !oobZones.some(ring => pointInPolygon(cp.x, cp.y, ring))
+          )
+        }
         const res = await generateCircuit({
           bounding_box: bbox,
           ...circuitParams,
           target_controls: Math.ceil(missing * 1.5),
           required_controls: placed.map(c => ({ lat: c.lat, lng: c.lng })),
+          candidate_points: candidatePoints.slice(0, 600),
+          ...(ocadMapId && ocadBounds ? {
+            map_id: ocadMapId,
+            ocad_sw: ocadBounds.southWest,
+            ocad_ne: ocadBounds.northEast,
+          } : {}),
+          ...(forceMode !== 'auto' ? { force_mode: forceMode } : detectedMode ? { force_mode: detectedMode } : {}),
         })
         newControls = res.data?.circuits?.[0]?.controls ?? []
       }
@@ -955,11 +1041,14 @@ function App() {
         .filter(s => s.type !== 'start')
         .filter(s => !(s.type === 'finish' && hasFinish))
         .filter(s => s.type === 'finish' || inBbox(s))
-      updateActiveCircuit(c => ({
-        aiSuggestions: [...(c.aiSuggestions || []), ...newSuggestions],
-        suggestionIdx: c.aiSuggestions?.length ?? 0,
-        status: newSuggestions.length > 0 ? 'ai_suggesting' : 'complete',
-      }))
+      updateActiveCircuit(c => {
+        const enriched = assignInsertionPositions(c.controls, newSuggestions)
+        return {
+          aiSuggestions: [...(c.aiSuggestions || []), ...enriched],
+          suggestionIdx: c.aiSuggestions?.length ?? 0,
+          status: enriched.length > 0 ? 'ai_suggesting' : 'complete',
+        }
+      })
     } catch (err) {
       console.error('[Complétion] Erreur:', err.message)
     } finally {

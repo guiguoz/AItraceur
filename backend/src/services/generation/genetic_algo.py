@@ -174,6 +174,68 @@ class GeneticAlgorithm:
         else:
             print(f"[GA DEBUG] KDTree ISOM: ABSENT (ocad_pts={len(self._ocad_pts)}, threshold>=20)", flush=True)
 
+        # ── Leg Diversity DB (données GPX Vikazimut) ──────────────────────────
+        self._leg_diversity_db: list = self._load_leg_diversity_db()
+
+    def _load_leg_diversity_db(self) -> list:
+        """Charge leg_diversity.json si présent. Retourne [] si absent (fallback silencieux)."""
+        import json
+        from pathlib import Path
+        db_path = Path(__file__).parents[3] / "data" / "leg_diversity.json"
+        try:
+            with open(db_path, encoding="utf-8") as f:
+                db = json.load(f)
+            print(f"[GA] Leg diversity DB: {len(db)} jambes chargees", flush=True)
+            return db
+        except Exception:
+            return []
+
+    def _lookup_leg_cv(
+        self,
+        a: Tuple[float, float],
+        b: Tuple[float, float],
+    ) -> Optional[float]:
+        """
+        Cherche dans leg_diversity_db les jambes géographiquement similaires à (a→b).
+
+        Critères :
+          - bbox de l'entrée contient les deux contrôles (±0.01° marge)
+          - dist_m de l'entrée est à ±30% de la distance réelle
+
+        Retourne le CV médian des entrées correspondantes, ou None si pas de données.
+        """
+        if not self._leg_diversity_db:
+            return None
+
+        lng_a, lat_a = a
+        lng_b, lat_b = b
+        dist_real = self._haversine_m(a, b)
+        if dist_real < 30:
+            return None
+
+        margin = 0.01  # ~1km — tolérance de positionnement géographique
+        dist_lo = dist_real * 0.70
+        dist_hi = dist_real * 1.30
+
+        cvs = []
+        for entry in self._leg_diversity_db:
+            # Les deux contrôles doivent être dans la bbox (avec marge)
+            if not (
+                entry["lat_min"] - margin <= lat_a <= entry["lat_max"] + margin
+                and entry["lng_min"] - margin <= lng_a <= entry["lng_max"] + margin
+                and entry["lat_min"] - margin <= lat_b <= entry["lat_max"] + margin
+                and entry["lng_min"] - margin <= lng_b <= entry["lng_max"] + margin
+            ):
+                continue
+            if not (dist_lo <= entry["dist_m"] <= dist_hi):
+                continue
+            cvs.append(entry["cv"])
+
+        if not cvs:
+            return None
+        cvs.sort()
+        return cvs[len(cvs) // 2]  # médiane
+
     def _load_placement_rules(self) -> dict:
         """Charge les seuils IOF/FFCO depuis placement_rules.json selon circuit_type et technical_level."""
         import json
@@ -856,6 +918,20 @@ class GeneticAlgorithm:
         else:
             rhythm = 0.0
 
+        # ── E. Route diversity (données GPX Vikazimut) ────────────────────────
+        # Bonus si la jambe a historiquement un fort CV (choix de route réel),
+        # malus si jambe triviale (tout le monde prend le même chemin).
+        # Fallback silencieux si leg_diversity.json absent ou secteur non couvert.
+        diversity_bonus = 0.0
+        if self._leg_diversity_db:
+            for i in range(len(controls) - 1):
+                cv = self._lookup_leg_cv(controls[i], controls[i + 1])
+                if cv is not None:
+                    if cv > 0.40:
+                        diversity_bonus += 5.0   # jambe à choix de route
+                    elif cv < 0.05:
+                        diversity_bonus -= 5.0   # jambe triviale/foree
+
         # ── Score final (à maximiser) ───────────────────────────────────────
         # Seuils depuis FFCORulesEngine si disponible, sinon valeurs historiques
         if self._thresholds is not None:
@@ -882,6 +958,7 @@ class GeneticAlgorithm:
             - W_ANGLE * angle_penalty
             + W_RHYTHM * rhythm
             - density_penalty
+            + diversity_bonus
         )
 
     def _terrain_quality_score_isom(self, controls: List[Tuple[float, float]]) -> float:

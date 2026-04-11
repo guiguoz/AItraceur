@@ -1004,6 +1004,11 @@ class GeneticAlgorithm:
             if dplus_ratio > max_climb_ratio:
                 dplus_penalty = (dplus_ratio - max_climb_ratio) * 200.0  # −20 pts pour +10% dépassement
 
+        # ── H. Score de forme géométrique (aspect du tracé) ──────────────────
+        # Indépendant du terrain — pénalise Z-patterns, spirales, accordéons.
+        # Fallback 0.5 (neutre) si < 4 contrôles.
+        shape_score = self._compute_shape_score(controls, config.bounding_box)
+
         # ── Score final (à maximiser) ───────────────────────────────────────
         # Seuils depuis FFCORulesEngine si disponible, sinon valeurs historiques
         if self._thresholds is not None:
@@ -1018,6 +1023,7 @@ class GeneticAlgorithm:
             W_ANGLE = 1.0    # multiplicateur × 20 par dog-leg → éliminatoire
             W_RHYTHM = 15.0
             _density_mult = 50.0
+        W_SHAPE = 10.0  # forme géométrique — anti-Z/spirale/accordéon
 
         # Pénalité quadratique si trop peu de postes par rapport à la cible
         n_postes = len(controls) - 2  # hors départ et arrivée
@@ -1029,11 +1035,90 @@ class GeneticAlgorithm:
             - W_DIST * dist_penalty
             - W_ANGLE * angle_penalty
             + W_RHYTHM * rhythm
+            + W_SHAPE * shape_score
             - density_penalty
             + diversity_bonus
             - forbidden_penalty
             - dplus_penalty
         )
+
+    def _compute_shape_score(
+        self,
+        controls: List[Tuple[float, float]],
+        bounding_box: dict,
+    ) -> float:
+        """
+        Terme H : score de forme géométrique du circuit (0–1).
+
+        Évalue l'aspect visuel du tracé indépendamment du terrain.
+        Pénalise les Z-patterns, spirales, accordéons et circuits trop groupés.
+
+        H1 (35%) — Winding balance   : somme des angles de virage signés ≈ 0
+        H2 (30%) — Variance circulaire: diversité des directions de jambes
+        H3 (20%) — Runs consécutifs  : pas de séquence de N jambes dans le même quart
+        H4 (15%) — Spread spatial    : les postes couvrent bien la bbox
+
+        Returns:
+            float in [0.0, 1.0]. Fallback 0.5 (neutre) si < 4 contrôles.
+        """
+        if len(controls) < 4:
+            return 0.5
+
+        n = len(controls)
+
+        # ── H1 : Winding balance ──────────────────────────────────────────
+        winding_sum = 0.0
+        for i in range(1, n - 1):
+            ax = controls[i][0] - controls[i - 1][0]
+            ay = controls[i][1] - controls[i - 1][1]
+            bx = controls[i + 1][0] - controls[i][0]
+            by = controls[i + 1][1] - controls[i][1]
+            winding_sum += math.atan2(ax * by - ay * bx, ax * bx + ay * by)
+        winding_deg = abs(math.degrees(winding_sum))
+        h1 = max(0.0, 1.0 - winding_deg / 270.0)  # 0° → 1.0 ; ≥270° → 0.0
+
+        # ── H2 : Variance circulaire des azimuts ──────────────────────────
+        sin_sum = cos_sum = 0.0
+        n_legs = n - 1
+        for i in range(n_legs):
+            az = math.atan2(
+                controls[i + 1][0] - controls[i][0],
+                controls[i + 1][1] - controls[i][1],
+            )
+            sin_sum += math.sin(az)
+            cos_sum += math.cos(az)
+        circ_var = 1.0 - math.hypot(sin_sum / n_legs, cos_sum / n_legs)
+        h2 = min(circ_var / 0.60, 1.0)  # cible : circ_var ≥ 0.60
+
+        # ── H3 : Runs consécutifs dans le même quart ──────────────────────
+        quads = [
+            int((math.atan2(
+                controls[i + 1][0] - controls[i][0],
+                controls[i + 1][1] - controls[i][1],
+            ) + math.pi) / (math.pi / 2)) % 4
+            for i in range(n_legs)
+        ]
+        max_run = cur_run = 1
+        for i in range(1, len(quads)):
+            cur_run = cur_run + 1 if quads[i] == quads[i - 1] else 1
+            if cur_run > max_run:
+                max_run = cur_run
+        h3 = max(0.0, 1.0 - max(0, max_run - 3) * 0.25)  # −0.25 par run > 3
+
+        # ── H4 : Spread spatial ───────────────────────────────────────────
+        inner = controls[1:-1]  # hors départ et arrivée
+        if len(inner) >= 2:
+            lngs = [p[0] for p in inner]
+            lats = [p[1] for p in inner]
+            bbox_w = max((bounding_box.get("max_x", 0) - bounding_box.get("min_x", 0)), 1e-9)
+            bbox_h = max((bounding_box.get("max_y", 0) - bounding_box.get("min_y", 0)), 1e-9)
+            import numpy as _np
+            spread = (float(_np.std(lngs)) / bbox_w + float(_np.std(lats)) / bbox_h) / 2
+            h4 = min(spread / 0.20, 1.0)  # cible : spread ≥ 20 % de la bbox
+        else:
+            h4 = 0.5
+
+        return 0.35 * h1 + 0.30 * h2 + 0.20 * h3 + 0.15 * h4
 
     def _terrain_quality_score_isom(self, controls: List[Tuple[float, float]]) -> float:
         """

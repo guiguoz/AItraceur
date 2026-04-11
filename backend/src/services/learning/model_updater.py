@@ -49,12 +49,23 @@ def _local_version() -> Optional[str]:
         return None
 
 
+_PLACEHOLDER_HOST = "aitraceur.vikazim.fr"
+
+
 def check_and_download() -> None:
     """
     Vérifie si un modèle plus récent est disponible sur Ionos.
     Télécharge et installe silencieusement si c'est le cas.
     Appelé dans un thread daemon au démarrage — jamais bloquant.
     """
+    # Domaine de dev non configuré → skip silencieux
+    try:
+        from urllib.parse import urlparse as _urlparse
+        if _urlparse(MODEL_REGISTRY_URL).hostname == _PLACEHOLDER_HOST:
+            return
+    except Exception:
+        pass
+
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
     try:

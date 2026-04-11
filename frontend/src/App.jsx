@@ -185,6 +185,8 @@ const ATTRACTIVE_ISOM = new Set([
   201,202,203,204,205,206,209,210,211,212,215,
   304,305,306,308,
   401,402,403,404,405,406,
+  // Vegetation ponctuels ISOM 2017 : bouquet d'arbres, arbre remarquable, souche
+  415,416,417,
   501,502,503,504,505,506,507,508,516,521,522,
 ])
 
@@ -337,7 +339,9 @@ const ISOM_ATT = {
   529: 0.75,                     // carrefour de chemins pavés (sprint)
   // 0.6 — lisières, angles de végétation
   301: 0.60, 302: 0.60, 303: 0.60, 304: 0.55, 305: 0.55, 306: 0.55,
-  308: 0.65,                     // arbre remarquable
+  308: 0.65,                     // arbre remarquable (ISOM 2000)
+  // Vegetation ponctuels ISOM 2017
+  415: 0.75, 416: 0.90, 417: 0.85, // bouquet d'arbres, arbre remarquable, souche
   // 0.5 — bâti, clôtures (sprint uniquement pratiquement)
   501: 0.55, 502: 0.50, 516: 0.50, 521: 0.50, 522: 0.50,
 }

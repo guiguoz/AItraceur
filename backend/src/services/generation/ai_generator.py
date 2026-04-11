@@ -101,6 +101,10 @@ ISOM_DESCRIPTIONS: Dict[int, str] = {
     305: "angle de végétation ouverte",
     306: "extrémité de broussaille",
     308: "arbre remarquable",
+    # Vegetation ponctuels ISOM 2017
+    415: "bouquet d'arbres",
+    416: "arbre remarquable",
+    417: "souche",
     # Path network
     401: "carrefour de chemins",
     402: "croisement de chemins",
@@ -334,7 +338,7 @@ class AIGenerator:
         x: float,
         y: float,
         candidate_points: List[Dict],
-        radius_m: float = 80.0,
+        radius_m: float = 40.0,
     ) -> str:
         """Retourne la description IOF colonne D du feature le plus proche (FFCO 2018)."""
         import math

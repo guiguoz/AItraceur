@@ -156,6 +156,11 @@ class AIGenerator:
         import logging as _logging
         _log = _logging.getLogger(__name__)
 
+        # Aliases frontend → méthode interne
+        _METHOD_ALIASES: dict = {"genetic": None, "hybrid": None}
+        if method in _METHOD_ALIASES:
+            method = _METHOD_ALIASES[method]
+
         _VALID_METHODS = {"sa", "ga", None}
         if method not in _VALID_METHODS:
             _log.warning(

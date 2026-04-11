@@ -2074,7 +2074,8 @@ def _circuit_impl(body: dict) -> dict:
 
                 if _mapant_result is not None:
                     _map_img, _bbox_wgs84, _mpp = _mapant_result
-                    _step_px = max(20, int(max(_map_img.width, _map_img.height) / 40))
+                    # Forêt : résolution doublée (/ 80) pour capturer les features ISOM fines
+                    _step_px = max(20, int(max(_map_img.width, _map_img.height) / (80 if force_mode == "forest" else 40)))
                     heatmap_cache = _scorer_v2.build_heatmap_cache(
                         map_img=_map_img,
                         bbox=_bbox_wgs84,
@@ -3794,8 +3795,8 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                 if _mapant_result is not None:
                     _map_img, _bbox_wgs84, _mpp = _mapant_result
                     # step_px dynamique : cible ~40×40 cellules (~1600 patchs)
-                    # ThreadPoolExecutor dans score_map_image → ~2s au lieu de 44s
-                    _step_px = max(20, int(max(_map_img.width, _map_img.height) / 40))
+                    # Forêt : résolution doublée (/ 80) pour capturer les features ISOM fines
+                    _step_px = max(20, int(max(_map_img.width, _map_img.height) / (80 if force_mode == "forest" else 40)))
                     print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ build_heatmap_cache (step_px={_step_px})...", flush=True)
                     heatmap_cache = _scorer_v2.build_heatmap_cache(
                         map_img=_map_img,

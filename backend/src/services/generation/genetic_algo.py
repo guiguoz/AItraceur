@@ -183,6 +183,11 @@ class GeneticAlgorithm:
         # ── Leg Diversity DB (données GPX Vikazimut) ──────────────────────────
         self._leg_diversity_db: list = self._load_leg_diversity_db()
 
+        # ── Navigation roles ISOM (termes I/J/K) ──────────────────────────────
+        self._nav_roles: dict = self._load_nav_roles()
+        self._nav_params: dict = self._load_nav_params()
+        self._nav_cache: dict = {}  # cache (px,py,cx,cy,role) → score, clé arrondie à 4 décimales (~11m)
+
     def _load_leg_diversity_db(self) -> list:
         """Charge leg_diversity.json si présent. Retourne [] si absent (fallback silencieux)."""
         import json
@@ -286,6 +291,171 @@ class GeneticAlgorithm:
             }
         except Exception:
             return {}
+
+    def _load_nav_roles(self) -> dict:
+        """Charge isom_navigation_roles.json. Retourne {} si absent (fallback silencieux)."""
+        import json
+        from pathlib import Path
+        p = Path(__file__).parents[3] / "data" / "isom_navigation_roles.json"
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    def _load_nav_params(self) -> dict:
+        """Retourne le bloc navigation de placement_rules.json pour le TD/circuit courant."""
+        return self._placement_rules.get("navigation", {})
+
+    def _nav_roles_quality(self, isom: int, role: str) -> float:
+        """Retourne la qualité [0.3, 0.5, 0.75, 1.0] d'un code ISOM pour un rôle navigation."""
+        roles = self._nav_roles.get(role, {}).get("quality", {})
+        if isom in roles.get("very_high", []):
+            return 1.0
+        if isom in roles.get("high", []):
+            return 0.75
+        if isom in roles.get("medium", []):
+            return 0.5
+        return 0.3
+
+    def _score_attack_point(
+        self,
+        cx: float, cy: float,
+        px: float, py: float,
+        radius_m: float,
+    ) -> float:
+        """Score qualité du point d'attaque pour le poste (cx,cy) en arrivant depuis (px,py).
+
+        Retourne [0, 1]. Neutre 0.5 si KDTree absent ou radius_m=0.
+        Approximation V1 : radius en degrés = radius_m/111_000 (sur-sélection en longitude à hautes lat).
+        """
+        if self._ocad_tree is None or radius_m == 0:
+            return 0.5
+        _key = (round(px, 4), round(py, 4), round(cx, 4), round(cy, 4), "attack")
+        if _key in self._nav_cache:
+            return self._nav_cache[_key]
+
+        LNG_TO_M = 111_000 * math.cos(math.radians(cy))
+        LAT_TO_M = 110_540
+        approach_dx_m = (cx - px) * LNG_TO_M
+        approach_dy_m = (cy - py) * LAT_TO_M
+
+        radius_deg = radius_m / 111_000
+        idxs = self._ocad_tree.query_ball_point([cx, cy], radius_deg)
+        codes = self._nav_roles.get("attack_point", {}).get("codes", [])
+        best = 0.0
+        for idx in idxs:
+            cp = self._ocad_pts[idx]
+            isom = cp.get("isom")
+            if isom not in codes:
+                continue
+            quality = self._nav_roles_quality(isom, "attack_point")
+            dist_m = math.hypot((cp["x"] - cx) * LNG_TO_M, (cp["y"] - cy) * LAT_TO_M)
+            feat_dx_m = (cp["x"] - cx) * LNG_TO_M
+            feat_dy_m = (cp["y"] - cy) * LAT_TO_M
+            dot = approach_dx_m * feat_dx_m + approach_dy_m * feat_dy_m
+            side_bonus = 1.0 if dot < 0 else 0.6
+            dist_factor = max(0.0, 1.0 - dist_m / radius_m)
+            best = max(best, quality * side_bonus * dist_factor)
+
+        result = min(best, 1.0)
+        self._nav_cache[_key] = result
+        return result
+
+    def _score_catching_feature(
+        self,
+        cx: float, cy: float,
+        px: float, py: float,
+        radius_m: float,
+    ) -> float:
+        """Score ligne d'arrêt au-delà du poste (cx,cy), en arrivant depuis (px,py).
+
+        Retourne [0, 1]. Neutre 0.5 si KDTree absent ou radius_m=0.
+        """
+        if self._ocad_tree is None or radius_m == 0:
+            return 0.5
+        _key = (round(px, 4), round(py, 4), round(cx, 4), round(cy, 4), "catch")
+        if _key in self._nav_cache:
+            return self._nav_cache[_key]
+
+        LNG_TO_M = 111_000 * math.cos(math.radians(cy))
+        LAT_TO_M = 110_540
+        approach_dx_m = (cx - px) * LNG_TO_M
+        approach_dy_m = (cy - py) * LAT_TO_M
+        norm_m = max(math.hypot(approach_dx_m, approach_dy_m), 1e-6)
+        overshoot_x = cx + (approach_dx_m / norm_m) * (radius_m * 0.5) / LNG_TO_M
+        overshoot_y = cy + (approach_dy_m / norm_m) * (radius_m * 0.5) / LAT_TO_M
+
+        radius_deg = radius_m * 0.6 / 111_000
+        idxs = self._ocad_tree.query_ball_point([overshoot_x, overshoot_y], radius_deg)
+        codes = self._nav_roles.get("catching_feature", {}).get("codes", [])
+        best = 0.0
+        for idx in idxs:
+            cp = self._ocad_pts[idx]
+            isom = cp.get("isom")
+            if isom not in codes:
+                continue
+            quality = self._nav_roles_quality(isom, "catching_feature")
+            best = max(best, quality * 0.9)
+
+        self._nav_cache[_key] = best
+        return best
+
+    def _score_handrail(
+        self,
+        ax: float, ay: float,
+        bx: float, by: float,
+        n_samples: int = 5,
+    ) -> float:
+        """Score disponibilité d'une main courante le long de la jambe A→B.
+
+        Échantillonne n_samples points intermédiaires, vérifie une feature HANDRAIL à ≤50m.
+        Retourne [0, 1]. Neutre 0.5 si KDTree absent.
+        """
+        if self._ocad_tree is None:
+            return 0.5
+        _key = (round(ax, 4), round(ay, 4), round(bx, 4), round(by, 4), "handrail")
+        if _key in self._nav_cache:
+            return self._nav_cache[_key]
+
+        codes = self._nav_roles.get("handrail", {}).get("codes", [])
+        radius_deg = 50.0 / 111_000  # Option B : rayon en degrés
+        hits = 0
+        for i in range(1, n_samples + 1):
+            t = i / (n_samples + 1)
+            sx = ax + t * (bx - ax)
+            sy = ay + t * (by - ay)
+            idxs = self._ocad_tree.query_ball_point([sx, sy], radius_deg)
+            if any(self._ocad_pts[idx].get("isom") in codes for idx in idxs):
+                hits += 1
+
+        result = hits / n_samples
+        self._nav_cache[_key] = result
+        return result
+
+    def compute_nav_scores(
+        self,
+        controls: list,
+    ) -> list:
+        """Calcule les scores navigation par jambe sur le circuit final (une seule fois).
+
+        Appelé sur le meilleur individu après convergence GA, avant de construire
+        GeneratedCircuit. Ne pas appeler dans evaluate_fitness() (trop coûteux).
+
+        Returns:
+            list de dicts [{attack, catch, handrail}] — une entrée par jambe (len = len(controls)-1).
+        """
+        nav = self._nav_params
+        _r_att = nav.get("attack_radius_m", 0)
+        _r_cat = nav.get("catching_radius_m", 0)
+        result = []
+        for i in range(1, len(controls)):
+            cx, cy = controls[i][0], controls[i][1]
+            px, py = controls[i - 1][0], controls[i - 1][1]
+            att = self._score_attack_point(cx, cy, px, py, _r_att) if _r_att > 0 else None
+            cat = self._score_catching_feature(cx, cy, px, py, _r_cat) if _r_cat > 0 else None
+            hr = self._score_handrail(px, py, cx, cy) if nav.get("handrail_required") else None
+            result.append({"attack": att, "catch": cat, "handrail": hr})
+        return result
 
     def set_graph(self, graph):
         """Définit le graphe de navigation."""
@@ -972,6 +1142,17 @@ class GeneticAlgorithm:
         else:
             rhythm = 0.0
 
+        # ── L. Conformité longueur jambes au profil format ────────────────────
+        # Pénalise les circuits dont la longueur moyenne de jambe s'éloigne de la
+        # cible IOF par format : Sprint ~250m, MD ~600m, LD ~2000m.
+        # Complète terme D (CV) qui récompense la variété sans tenir compte du format.
+        _TARGET_LEG_M = {"sprint": 250.0, "md": 600.0, "ld": 2000.0, "foret": 600.0}
+        _ct = (config.circuit_type or "forest").lower()
+        _target_leg = _TARGET_LEG_M.get(_ct, 600.0)
+        _n_legs = len(leg_m)
+        _mean_leg = float(leg_m.mean()) if _n_legs > 0 else _target_leg
+        _leg_conformity = 1.0 - min(abs(_mean_leg - _target_leg) / _target_leg, 1.0)
+
         # ── E. Route diversity (données GPX Vikazimut) ────────────────────────
         # Signal continu centré sur cv=0.20 (gradient linéaire).
         # Bonus maximal ≈ +4.5 pts si cv=0.50 ; malus ≈ −3 pts si cv=0.00.
@@ -1009,6 +1190,68 @@ class GeneticAlgorithm:
         # Fallback 0.5 (neutre) si < 4 contrôles.
         shape_score = self._compute_shape_score(controls, config.bounding_box)
 
+        # ── I. Qualité point d'attaque ─────────────────────────────────────────
+        # ── J. Ligne d'arrêt ──────────────────────────────────────────────────
+        # ── K. Main courante ──────────────────────────────────────────────────
+        # Conditionnels au KDTree OCAD. Sans KDTree : score neutre 0.5, impact nul.
+        _nav = self._nav_params
+        _r_att = _nav.get("attack_radius_m", 0)
+        _r_cat = _nav.get("catching_radius_m", 0)
+
+        attack_scores_f: list = []
+        if _nav.get("attack_required") and self._ocad_tree is not None and _r_att > 0:
+            for i in range(1, len(controls)):
+                cx, cy = controls[i][0], controls[i][1]
+                px, py = controls[i - 1][0], controls[i - 1][1]
+                attack_scores_f.append(self._score_attack_point(cx, cy, px, py, _r_att))
+        attack_score_f = sum(attack_scores_f) / len(attack_scores_f) if attack_scores_f else 0.5
+
+        catch_scores_f: list = []
+        if _r_cat > 0 and self._ocad_tree is not None:
+            for i in range(1, len(controls)):
+                cx, cy = controls[i][0], controls[i][1]
+                px, py = controls[i - 1][0], controls[i - 1][1]
+                catch_scores_f.append(self._score_catching_feature(cx, cy, px, py, _r_cat))
+        catch_score_f = sum(catch_scores_f) / len(catch_scores_f) if catch_scores_f else 0.5
+
+        hr_scores_f: list = []
+        handrail_score_f = 0.5
+        if _nav.get("handrail_required") and self._ocad_tree is not None:
+            for i in range(1, len(controls)):
+                cx, cy = controls[i][0], controls[i][1]
+                px, py = controls[i - 1][0], controls[i - 1][1]
+                hr_scores_f.append(self._score_handrail(px, py, cx, cy))
+            handrail_score_f = sum(hr_scores_f) / len(hr_scores_f) if hr_scores_f else 0.5
+
+        W_ATTACK = 8.0
+        W_CATCH = 6.0
+        W_HANDRAIL = 5.0
+        nav_score_i = W_ATTACK * (attack_score_f - 0.5)
+        _w_catch_eff = W_CATCH if _nav.get("catching_required") else W_CATCH * 0.4
+        nav_score_j = _w_catch_eff * (catch_score_f - 0.5)
+        if _nav.get("handrail_required") and hr_scores_f:
+            _cov_min = _nav.get("handrail_coverage_min", 0.0)
+            if handrail_score_f >= _cov_min:
+                nav_score_k = W_HANDRAIL * handrail_score_f
+            else:
+                nav_score_k = -W_HANDRAIL * (_cov_min - handrail_score_f) * 3
+        else:
+            nav_score_k = 0.0
+
+        # Pénalité worst-leg : pénalise si >max_bad_leg_ratio des jambes sous seuil
+        _min_catch = _nav.get("min_leg_catch_score", 0.0)
+        _min_hr = _nav.get("min_leg_handrail_score", 0.0)
+        _max_bad = _nav.get("max_bad_leg_ratio", 1.0)
+        nav_worst_leg = 0.0
+        if _nav.get("catching_required") and catch_scores_f and _min_catch > 0:
+            n_bad = sum(1 for s in catch_scores_f if s < _min_catch)
+            if n_bad / len(catch_scores_f) > _max_bad:
+                nav_worst_leg -= W_CATCH * 2 * (n_bad / len(catch_scores_f))
+        if _nav.get("handrail_required") and hr_scores_f and _min_hr > 0:
+            n_bad_hr = sum(1 for s in hr_scores_f if s < _min_hr)
+            if n_bad_hr / len(hr_scores_f) > _max_bad:
+                nav_worst_leg -= W_HANDRAIL * 2 * (n_bad_hr / len(hr_scores_f))
+
         # ── Score final (à maximiser) ───────────────────────────────────────
         # Seuils depuis FFCORulesEngine si disponible, sinon valeurs historiques
         if self._thresholds is not None:
@@ -1024,6 +1267,7 @@ class GeneticAlgorithm:
             W_RHYTHM = 15.0
             _density_mult = 50.0
         W_SHAPE = 10.0  # forme géométrique — anti-Z/spirale/accordéon
+        W_LEG_PROFILE = 8.0  # conformité longueur jambes au profil format IOF
 
         # Pénalité quadratique si trop peu de postes par rapport à la cible
         n_postes = len(controls) - 2  # hors départ et arrivée
@@ -1035,11 +1279,16 @@ class GeneticAlgorithm:
             - W_DIST * dist_penalty
             - W_ANGLE * angle_penalty
             + W_RHYTHM * rhythm
+            + W_LEG_PROFILE * _leg_conformity
             + W_SHAPE * shape_score
             - density_penalty
             + diversity_bonus
             - forbidden_penalty
             - dplus_penalty
+            + nav_score_i
+            + nav_score_j
+            + nav_score_k
+            + nav_worst_leg
         )
 
     def _compute_shape_score(

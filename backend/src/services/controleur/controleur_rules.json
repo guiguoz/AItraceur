@@ -42,6 +42,32 @@
       "reference": "FFCO Règles Techniques et Sécurité Ed.juin2023 §12, IOF Sprint §5"
     }
   },
+  "navigation_checks": {
+    "C14": {
+      "id": "C14",
+      "name": "attack_point_quality",
+      "description": "Le poste doit avoir un point d'attaque distinct dans le rayon TD",
+      "severity": "warning",
+      "active_td": ["TD2", "TD3", "TD4"],
+      "min_score": 0.3
+    },
+    "C15": {
+      "id": "C15",
+      "name": "catching_feature",
+      "description": "Une ligne d'arrêt doit exister au-delà du poste",
+      "severity": "warning",
+      "active_td": ["TD1", "TD2", "TD3"],
+      "min_score": 0.2
+    },
+    "C16": {
+      "id": "C16",
+      "name": "disorientation_clusters",
+      "description": "Le circuit sprint doit contenir des clusters de désorientation (groupes de 3-4 postes dans 80m)",
+      "severity": "warning",
+      "applies_to": ["sprint"],
+      "reference": "IOF Sprint Course Planning Guidelines §4.5"
+    }
+  },
   "forest": {
     "control_placement": {
       "min_separation_m": 60,

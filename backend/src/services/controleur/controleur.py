@@ -139,6 +139,8 @@ class ControleurSprint:
             all_rules = json.load(f)
         rule_key = "sprint" if circuit_type == "sprint" else "forest"
         self.rules = all_rules.get(rule_key, all_rules.get("sprint", {}))
+        self.all_rules = all_rules  # pour C14/C15/C16 qui lisent navigation_checks
+        self.circuit_type = circuit_type
 
     # ── Point d'entrée ────────────────────────────────────────────────────────
 
@@ -191,6 +193,18 @@ class ControleurSprint:
         issues += self._check_c11_route_choice(ordered, route_analyzer=route_analyzer)
         issues += self._check_c12_parallel_legs(ordered)
         issues += self._check_c13_undescribable(ordered)
+
+        # C14/C15 — navigation quality (warnings, non bloquants)
+        # Scores pré-calculés par GA sur le circuit final, passés via circuit_config
+        _nav_scores = (circuit_config or {}).get("nav_scores", [])
+        _td_key = (circuit_config or {}).get("td_level", "")
+        if _nav_scores and _td_key:
+            issues += self._check_c14_attack_point(ordered, _nav_scores, _td_key)
+            issues += self._check_c15_catching_feature(ordered, _nav_scores, _td_key)
+
+        # C16 — clusters de désorientation (sprint uniquement)
+        if self.circuit_type == "sprint":
+            issues += self._check_c16_disorientation_clusters(ordered, circuit_config)
 
         error_count = sum(1 for i in issues if i.severity == "ERROR")
         warning_count = sum(1 for i in issues if i.severity == "WARNING")
@@ -547,6 +561,147 @@ class ControleurSprint:
                     rule_reference="IOF Control Descriptions 2018 §Col.D / FFCO Description des postes 2018"
                 ))
         return issues
+
+    def _check_c14_attack_point(
+        self, controls: List[Dict], nav_scores: list, td_key: str
+    ) -> List[ControleurIssue]:
+        """C14 — Qualité du point d'attaque insuffisante (warning).
+
+        Actif sur TD2/TD3/TD4. Utilise nav_scores pré-calculés par le GA.
+        """
+        nav_rules = self.all_rules.get("navigation_checks", {}).get("C14", {})
+        active_td = nav_rules.get("active_td", ["TD2", "TD3", "TD4"])
+        min_score = nav_rules.get("min_score", 0.3)
+        if td_key not in active_td:
+            return []
+        issues = []
+        for i, ctrl in enumerate(controls):
+            if ctrl.get("type") in ("start", "finish"):
+                continue
+            leg_idx = i - 1
+            if leg_idx < 0 or leg_idx >= len(nav_scores):
+                continue
+            att = nav_scores[leg_idx].get("attack")
+            if att is not None and att < min_score:
+                issues.append(ControleurIssue(
+                    code="C14", severity="WARNING",
+                    control_index=i, leg_from=leg_idx, leg_to=i,
+                    message=(
+                        f"Poste {ctrl.get('order', i + 1)} : point d'attaque insuffisant "
+                        f"(score {att:.2f} < {min_score})."
+                    ),
+                    suggestion=(
+                        "Déplacer le poste à proximité d'une feature distincte utilisable "
+                        "comme point d'attaque (jonction, coin de bâtiment, talus, rocher)."
+                    ),
+                    rule_reference=f"IOF Guidelines §Attack Point / FFCO {td_key}"
+                ))
+        return issues
+
+    def _check_c15_catching_feature(
+        self, controls: List[Dict], nav_scores: list, td_key: str
+    ) -> List[ControleurIssue]:
+        """C15 — Ligne d'arrêt absente au-delà du poste (warning).
+
+        Actif sur TD1/TD2/TD3. Utilise nav_scores pré-calculés par le GA.
+        """
+        nav_rules = self.all_rules.get("navigation_checks", {}).get("C15", {})
+        active_td = nav_rules.get("active_td", ["TD1", "TD2", "TD3"])
+        min_score = nav_rules.get("min_score", 0.2)
+        if td_key not in active_td:
+            return []
+        issues = []
+        for i, ctrl in enumerate(controls):
+            if ctrl.get("type") in ("start", "finish"):
+                continue
+            leg_idx = i - 1
+            if leg_idx < 0 or leg_idx >= len(nav_scores):
+                continue
+            cat = nav_scores[leg_idx].get("catch")
+            if cat is not None and cat < min_score:
+                issues.append(ControleurIssue(
+                    code="C15", severity="WARNING",
+                    control_index=i, leg_from=leg_idx, leg_to=i,
+                    message=(
+                        f"Poste {ctrl.get('order', i + 1)} : ligne d'arrêt absente "
+                        f"(score {cat:.2f} < {min_score})."
+                    ),
+                    suggestion=(
+                        "Déplacer le poste afin qu'une feature linéaire distincte "
+                        "(chemin, lisière, ruisseau, bord de bâtiment) soit présente "
+                        "au-delà du poste perpendiculairement à la direction d'approche."
+                    ),
+                    rule_reference=f"IOF Guidelines §Catching Feature / FFCO {td_key}"
+                ))
+        return issues
+
+    def _check_c16_disorientation_clusters(
+        self, controls: List[Dict], circuit_config: Optional[Dict]
+    ) -> List[ControleurIssue]:
+        """C16 — Clusters de désorientation sprint insuffisants.
+
+        IOF Sprint Guidelines §4.5 : groupes de 3-4 postes dans 80m qui créent
+        une zone confuse nécessitant une lecture rapide. Config par TD dans
+        placement_rules.json.
+        """
+        td_key = (circuit_config or {}).get("td_level", "TD4")
+        radius_m = 80.0
+        min_cluster_size = 3
+        min_cluster_count = 1
+        try:
+            _pr_path = os.path.join(
+                os.path.dirname(__file__), "..", "knowledge_base", "placement_rules.json"
+            )
+            with open(_pr_path, encoding="utf-8") as _f:
+                _pr = json.load(_f)
+            _td_rules = _pr.get("sprint", {}).get(td_key, {})
+            radius_m = float(_td_rules.get("disorientation_cluster_radius_m", radius_m))
+            min_cluster_size = int(_td_rules.get("disorientation_cluster_size", min_cluster_size))
+            min_cluster_count = int(_td_rules.get("disorientation_cluster_count", min_cluster_count))
+        except Exception:
+            pass
+
+        intermediate = [c for c in controls if c.get("type") == "control"]
+
+        # Comptage des clusters distincts (composantes connexes de taille ≥ min_cluster_size)
+        visited = [False] * len(intermediate)
+        clusters_found = 0
+        for i in range(len(intermediate)):
+            if visited[i]:
+                continue
+            group = [i]
+            queue = [i]
+            visited[i] = True
+            while queue:
+                cur = queue.pop(0)
+                for j in range(len(intermediate)):
+                    if not visited[j] and _haversine_m(
+                        intermediate[cur]["lat"], intermediate[cur]["lng"],
+                        intermediate[j]["lat"], intermediate[j]["lng"],
+                    ) <= radius_m:
+                        visited[j] = True
+                        group.append(j)
+                        queue.append(j)
+            if len(group) >= min_cluster_size:
+                clusters_found += 1
+
+        if clusters_found < min_cluster_count:
+            return [ControleurIssue(
+                code="C16", severity="WARNING",
+                control_index=-1, leg_from=-1, leg_to=-1,
+                message=(
+                    f"Sprint {td_key} : {clusters_found} cluster(s) de désorientation "
+                    f"détecté(s), minimum {min_cluster_count} recommandé "
+                    f"({min_cluster_size} postes dans {radius_m:.0f}m)."
+                ),
+                suggestion=(
+                    f"Grouper {min_cluster_size} postes dans un rayon de {radius_m:.0f}m "
+                    "pour créer une zone de désorientation (rues parallèles, passage rapide, "
+                    "bâtiments identiques, etc.)."
+                ),
+                rule_reference="IOF Sprint Course Planning Guidelines §4.5"
+            )]
+        return []
 
     # ── Méthodes utilitaires ──────────────────────────────────────────────────
 

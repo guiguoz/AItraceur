@@ -59,6 +59,8 @@ class GeneratedCircuit:
     description: str = ""
     leg_route_choices: list = field(default_factory=list)
     # [{leg_idx, n_routes, distances_m, choice_score, similarity_ratio}, ...]
+    nav_scores: list = field(default_factory=list)
+    # [{attack, catch, handrail}] par jambe — rempli une seule fois sur le circuit final
 
 
 # French descriptions for ISOM 2017 codes — displayed to the traceur for each suggested control
@@ -207,6 +209,7 @@ class AIGenerator:
 
         # Initialiser le GA
         ga = GeneticAlgorithm(config=config)
+        self._last_ga = ga  # exposé pour compute_nav_scores post-corrections dans main.py
 
         # Graphe (simplifié)
         graph = GraphBuilder()

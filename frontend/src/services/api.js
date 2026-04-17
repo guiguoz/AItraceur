@@ -81,6 +81,32 @@ export const getCourseElevation = (controls) =>
 export const getRoutesBetweenControls = (params) =>
   api.post('/api/v1/terrain/routes-between', params, { timeout: 60000 });
 
+// ── Mode Compétition ────────────────────────────────────────────────────────
+/** Liste toutes les compétitions sauvegardées. */
+export const listCompetitions = () =>
+  api.get('/api/v1/competition/', { timeout: 10000 });
+
+/**
+ * Sauvegarde ou met à jour une compétition.
+ * @param {{ id?: string, name: string, data: object }} payload
+ */
+export const saveCompetition = (payload) =>
+  api.post('/api/v1/competition/save', payload, { timeout: 15000 });
+
+/**
+ * Charge une compétition par son id.
+ * @param {string} id
+ */
+export const loadCompetition = (id) =>
+  api.get(`/api/v1/competition/${id}`, { timeout: 10000 });
+
+/**
+ * Supprime une compétition.
+ * @param {string} id
+ */
+export const deleteCompetition = (id) =>
+  api.delete(`/api/v1/competition/${id}`, { timeout: 10000 });
+
 // ── OCAD Analyzer (Étape 13c) ────────────────────────────────────────────────
 export const analyzeOcadGeojson = (geojson) =>
   api.post('/api/v1/ocad/analyze', { geojson }, { timeout: 30000 });

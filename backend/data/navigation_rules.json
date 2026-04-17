@@ -1,0 +1,13 @@
+{
+  "_comment": "Mapping configurable couleur FFCO → TD IOF. Source de vérité pour la conversion couleur → paramètres navigation. À valider avec docs FFCO officiels avant déploiement.",
+  "color_to_td": {
+    "blanc":  "TD1",
+    "vert":   "TD1",
+    "bleu":   "TD2",
+    "jaune":  "TD3",
+    "orange": "TD3",
+    "violet": "TD4",
+    "noir":   "TD5"
+  },
+  "_isom_note": "Codes à aligner avec extractCandidatePoints (CLAUDE.md §extractCandidatePoints). Codes 101-103 (lignes de niveau LineString) absents du KDTree — ne pas inclure. Valider que les codes sont bien dans le KDTree avant de les scorer."
+}

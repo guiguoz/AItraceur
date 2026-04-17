@@ -8,7 +8,18 @@
       "max_climb_ratio": 0.01,
       "min_control_separation_m": 25,
       "route_choice_diversity_min": 0.0,
-      "notes": "Circuits enfants/découverte, très court, aucun dog-leg toléré en pratique"
+      "notes": "Circuits enfants/découverte, très court, aucun dog-leg toléré en pratique",
+      "navigation": {
+        "attack_required": false,
+        "handrail_required": true,
+        "catching_required": true,
+        "attack_radius_m": 0,
+        "catching_radius_m": 80,
+        "handrail_coverage_min": 0.7,
+        "min_leg_catch_score": 0.2,
+        "min_leg_handrail_score": 0.3,
+        "max_bad_leg_ratio": 0.2
+      }
     },
     "TD2": {
       "min_leg_m": 30,
@@ -17,7 +28,18 @@
       "max_climb_ratio": 0.02,
       "min_control_separation_m": 30,
       "route_choice_diversity_min": 0.0,
-      "notes": "Débutants confirmés, jambes courtes, terrain simple"
+      "notes": "Débutants confirmés, jambes courtes, terrain simple",
+      "navigation": {
+        "attack_required": true,
+        "handrail_required": true,
+        "catching_required": true,
+        "attack_radius_m": 100,
+        "catching_radius_m": 120,
+        "handrail_coverage_min": 0.5,
+        "min_leg_catch_score": 0.2,
+        "min_leg_handrail_score": 0.3,
+        "max_bad_leg_ratio": 0.2
+      }
     },
     "TD3": {
       "min_leg_m": 50,
@@ -29,7 +51,18 @@
       "disorientation_cluster_radius_m": 80,
       "disorientation_cluster_size": 3,
       "disorientation_cluster_count": 1,
-      "notes": "Niveau régional sprint. Min 1 jambe avec choix d'itinéraire réel. 1 cluster désorientation 3P/80m recommandé."
+      "notes": "Niveau régional sprint. Min 1 jambe avec choix d'itinéraire réel. 1 cluster désorientation 3P/80m recommandé.",
+      "navigation": {
+        "attack_required": true,
+        "handrail_required": false,
+        "catching_required": false,
+        "attack_radius_m": 150,
+        "catching_radius_m": 180,
+        "handrail_coverage_min": 0.0,
+        "min_leg_catch_score": 0.0,
+        "min_leg_handrail_score": 0.0,
+        "max_bad_leg_ratio": 1.0
+      }
     },
     "TD4": {
       "min_leg_m": 60,
@@ -41,7 +74,18 @@
       "disorientation_cluster_radius_m": 80,
       "disorientation_cluster_size": 4,
       "disorientation_cluster_count": 1,
-      "notes": "Niveau national sprint. 1 cluster désorientation 4P/80m recommandé."
+      "notes": "Niveau national sprint. 1 cluster désorientation 4P/80m recommandé.",
+      "navigation": {
+        "attack_required": true,
+        "handrail_required": false,
+        "catching_required": false,
+        "attack_radius_m": 200,
+        "catching_radius_m": 0,
+        "handrail_coverage_min": 0.0,
+        "min_leg_catch_score": 0.0,
+        "min_leg_handrail_score": 0.0,
+        "max_bad_leg_ratio": 1.0
+      }
     },
     "TD5": {
       "min_leg_m": 80,
@@ -53,7 +97,18 @@
       "disorientation_cluster_radius_m": 80,
       "disorientation_cluster_size": 4,
       "disorientation_cluster_count": 2,
-      "notes": "Elite sprint. IOF : pas de dog-leg. 1-2 clusters désorientation 4P/80m recommandés."
+      "notes": "Elite sprint. IOF : pas de dog-leg. 1-2 clusters désorientation 4P/80m recommandés.",
+      "navigation": {
+        "attack_required": false,
+        "handrail_required": false,
+        "catching_required": false,
+        "attack_radius_m": 250,
+        "catching_radius_m": 0,
+        "handrail_coverage_min": 0.0,
+        "min_leg_catch_score": 0.0,
+        "min_leg_handrail_score": 0.0,
+        "max_bad_leg_ratio": 1.0
+      }
     }
   },
   "forest": {
@@ -64,7 +119,18 @@
       "max_climb_ratio": 0.02,
       "min_control_separation_m": 50,
       "route_choice_diversity_min": 0.0,
-      "notes": "Blanc/Jaune — linéaire, postes sur éléments évidents"
+      "notes": "Blanc/Jaune — linéaire, postes sur éléments évidents",
+      "navigation": {
+        "attack_required": false,
+        "handrail_required": true,
+        "catching_required": true,
+        "attack_radius_m": 0,
+        "catching_radius_m": 80,
+        "handrail_coverage_min": 0.7,
+        "min_leg_catch_score": 0.2,
+        "min_leg_handrail_score": 0.3,
+        "max_bad_leg_ratio": 0.2
+      }
     },
     "TD2": {
       "min_leg_m": 100,
@@ -73,7 +139,18 @@
       "max_climb_ratio": 0.03,
       "min_control_separation_m": 60,
       "route_choice_diversity_min": 0.0,
-      "notes": "Orange — semi-linéaire, lecture de carte simple"
+      "notes": "Orange — semi-linéaire, lecture de carte simple",
+      "navigation": {
+        "attack_required": true,
+        "handrail_required": true,
+        "catching_required": true,
+        "attack_radius_m": 100,
+        "catching_radius_m": 120,
+        "handrail_coverage_min": 0.5,
+        "min_leg_catch_score": 0.2,
+        "min_leg_handrail_score": 0.3,
+        "max_bad_leg_ratio": 0.2
+      }
     },
     "TD3": {
       "min_leg_m": 200,
@@ -82,7 +159,18 @@
       "max_climb_ratio": 0.04,
       "min_control_separation_m": 60,
       "route_choice_diversity_min": 0.15,
-      "notes": "Vert/Violet — navigation terrain. Quelques jambes avec choix d'itinéraire"
+      "notes": "Vert/Violet — navigation terrain. Quelques jambes avec choix d'itinéraire",
+      "navigation": {
+        "attack_required": true,
+        "handrail_required": false,
+        "catching_required": false,
+        "attack_radius_m": 150,
+        "catching_radius_m": 180,
+        "handrail_coverage_min": 0.0,
+        "min_leg_catch_score": 0.0,
+        "min_leg_handrail_score": 0.0,
+        "max_bad_leg_ratio": 1.0
+      }
     },
     "TD4": {
       "min_leg_m": 300,
@@ -91,7 +179,18 @@
       "max_climb_ratio": 0.05,
       "min_control_separation_m": 60,
       "route_choice_diversity_min": 0.25,
-      "notes": "Bleu — niveau régional/national. Choix d'itinéraire sur 30% des jambes"
+      "notes": "Bleu — niveau régional/national. Choix d'itinéraire sur 30% des jambes",
+      "navigation": {
+        "attack_required": true,
+        "handrail_required": false,
+        "catching_required": false,
+        "attack_radius_m": 200,
+        "catching_radius_m": 0,
+        "handrail_coverage_min": 0.0,
+        "min_leg_catch_score": 0.0,
+        "min_leg_handrail_score": 0.0,
+        "max_bad_leg_ratio": 1.0
+      }
     },
     "TD5": {
       "min_leg_m": 400,
@@ -100,7 +199,18 @@
       "max_climb_ratio": 0.06,
       "min_control_separation_m": 60,
       "route_choice_diversity_min": 0.30,
-      "notes": "Noir/Elite — IOF : dog-legs interdits, complexité maximale, choix d'itinéraire systématique"
+      "notes": "Noir/Elite — IOF : dog-legs interdits, complexité maximale, choix d'itinéraire systématique",
+      "navigation": {
+        "attack_required": false,
+        "handrail_required": false,
+        "catching_required": false,
+        "attack_radius_m": 250,
+        "catching_radius_m": 0,
+        "handrail_coverage_min": 0.0,
+        "min_leg_catch_score": 0.0,
+        "min_leg_handrail_score": 0.0,
+        "max_bad_leg_ratio": 1.0
+      }
     }
   },
   "md": {
@@ -110,7 +220,18 @@
       "dog_leg_angle_deg": 25,
       "max_climb_ratio": 0.04,
       "min_control_separation_m": 60,
-      "route_choice_diversity_min": 0.15
+      "route_choice_diversity_min": 0.15,
+      "navigation": {
+        "attack_required": true,
+        "handrail_required": false,
+        "catching_required": false,
+        "attack_radius_m": 150,
+        "catching_radius_m": 180,
+        "handrail_coverage_min": 0.0,
+        "min_leg_catch_score": 0.0,
+        "min_leg_handrail_score": 0.0,
+        "max_bad_leg_ratio": 1.0
+      }
     },
     "TD5": {
       "min_leg_m": 300,
@@ -118,7 +239,18 @@
       "dog_leg_angle_deg": 20,
       "max_climb_ratio": 0.05,
       "min_control_separation_m": 60,
-      "route_choice_diversity_min": 0.25
+      "route_choice_diversity_min": 0.25,
+      "navigation": {
+        "attack_required": false,
+        "handrail_required": false,
+        "catching_required": false,
+        "attack_radius_m": 250,
+        "catching_radius_m": 0,
+        "handrail_coverage_min": 0.0,
+        "min_leg_catch_score": 0.0,
+        "min_leg_handrail_score": 0.0,
+        "max_bad_leg_ratio": 1.0
+      }
     }
   },
   "couleur": {
@@ -129,7 +261,18 @@
       "max_climb_ratio": 0.02,
       "min_control_separation_m": 30,
       "route_choice_diversity_min": 0.0,
-      "notes": "Blanc : postes reliés par chemin ou layon, pas de navigation"
+      "notes": "Blanc : postes reliés par chemin ou layon, pas de navigation",
+      "navigation": {
+        "attack_required": false,
+        "handrail_required": true,
+        "catching_required": true,
+        "attack_radius_m": 0,
+        "catching_radius_m": 80,
+        "handrail_coverage_min": 0.7,
+        "min_leg_catch_score": 0.2,
+        "min_leg_handrail_score": 0.3,
+        "max_bad_leg_ratio": 0.2
+      }
     },
     "TD2": {
       "min_leg_m": 60,
@@ -138,7 +281,18 @@
       "max_climb_ratio": 0.03,
       "min_control_separation_m": 50,
       "route_choice_diversity_min": 0.0,
-      "notes": "Jaune : semi-linéaire"
+      "notes": "Jaune : semi-linéaire",
+      "navigation": {
+        "attack_required": true,
+        "handrail_required": true,
+        "catching_required": true,
+        "attack_radius_m": 100,
+        "catching_radius_m": 120,
+        "handrail_coverage_min": 0.5,
+        "min_leg_catch_score": 0.2,
+        "min_leg_handrail_score": 0.3,
+        "max_bad_leg_ratio": 0.2
+      }
     },
     "TD3": {
       "min_leg_m": 100,
@@ -147,7 +301,18 @@
       "max_climb_ratio": 0.04,
       "min_control_separation_m": 60,
       "route_choice_diversity_min": 0.10,
-      "notes": "Orange : lecture carte basique"
+      "notes": "Orange : lecture carte basique",
+      "navigation": {
+        "attack_required": true,
+        "handrail_required": false,
+        "catching_required": false,
+        "attack_radius_m": 150,
+        "catching_radius_m": 180,
+        "handrail_coverage_min": 0.0,
+        "min_leg_catch_score": 0.0,
+        "min_leg_handrail_score": 0.0,
+        "max_bad_leg_ratio": 1.0
+      }
     }
   },
   "_defaults": {

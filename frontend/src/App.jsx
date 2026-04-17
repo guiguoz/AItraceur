@@ -6,7 +6,8 @@ import ControlsList from './components/ControlsList'
 import CircuitCreationModal from './components/CircuitCreationModal'
 import CircuitSelector from './components/CircuitSelector'
 import AISuggestionPanel from './components/AISuggestionPanel'
-import { generateCircuit, getSprintCandidates, generateSprint, getSprintStatus, generateCircuitAsync, getCircuitStatus, uploadOcdForRender, TILE_SERVICE_URL, getRoutesBetweenControls, analyzeOcadGeojson } from './services/api'
+import { generateCircuit, getSprintCandidates, generateSprint, getSprintStatus, generateCircuitAsync, getCircuitStatus, uploadOcdForRender, TILE_SERVICE_URL, getRoutesBetweenControls, analyzeOcadGeojson, saveCompetition, loadCompetition } from './services/api'
+import CompetitionLoadModal from './components/CompetitionLoadModal'
 import DialogueLog from './components/DialogueLog'
 import { buildMapContext } from './services/mapContext'
 import { OcadAnalysisPanel } from './components/OcadAnalysisPanel'
@@ -511,6 +512,8 @@ function App() {
   const [progressLabel, setProgressLabel] = useState('')
   const [routeDisplay, setRouteDisplay] = useState(null) // { legIdx, routes }
   const [legRoutesMap, setLegRoutesMap] = useState({}) // {legIdx: {routes, choiceScore}} auto-affiché post-sprint
+  const [navigationQuality, setNavigationQuality] = useState([]) // [{from_idx,to_idx,nav_score,...}]
+  const [navSummary, setNavSummary] = useState(null) // {mean_attack,mean_catch,mean_handrail,td_level}
   const [lastBbox, setLastBbox] = useState(null) // bbox du dernier appel de génération
 
   // Leaflet map ref — used for viewport bbox when no OCAD loaded
@@ -524,6 +527,9 @@ function App() {
   // Competition mode
   const [competitionMode, setCompetitionMode] = useState(false)
   const [competitionName, setCompetitionName] = useState('')
+  const [competitionId, setCompetitionId] = useState(null)
+  const [showLoadModal, setShowLoadModal] = useState(false)
+  const [competitionSaving, setCompetitionSaving] = useState(false)
 
   // Contexte terrain global (remplace forceMode per-circuit dans CircuitCreationModal)
   const [forceMode, setForceMode] = useState('auto')
@@ -639,10 +645,54 @@ function App() {
       aiSuggestions: [],
       suggestionIdx: 0,
     }
+
+    // Mode compétition : hériter du départ/arrivée du circuit maître (circuits[0])
+    if (competitionMode && circuits.length > 0) {
+      const master = circuits[0]
+      const masterStart = master.controls.find(c => c.type === 'start')
+      const masterFinish = master.controls.find(c => c.type === 'finish')
+      if (masterStart) circuit.controls.push({ ...masterStart })
+      if (masterFinish) circuit.controls.push({ ...masterFinish })
+    }
+
     setCircuits(prev => [...prev, circuit])
     setActiveCircuitId(circuit.id)
     setShowCreationForm(false)
     setActiveTool('start')
+  }
+
+  // ── Compétition save / load ──────────────────────────────────────────────────
+
+  const handleSaveCompetition = async () => {
+    setCompetitionSaving(true)
+    try {
+      const res = await saveCompetition({
+        id: competitionId,
+        name: competitionName || 'Compétition sans nom',
+        data: { schema_version: 1, circuits, activeCircuitId, ocadMapId, ocadBounds },
+      })
+      setCompetitionId(res.data.id)
+    } catch (e) {
+      console.warn('[Competition] Save failed:', e.message)
+    } finally {
+      setCompetitionSaving(false)
+    }
+  }
+
+  const handleLoadCompetition = async (id) => {
+    try {
+      const res = await loadCompetition(id)
+      const comp = res.data
+      setCircuits(comp.data.circuits || [])
+      setActiveCircuitId(comp.data.activeCircuitId || null)
+      if (comp.data.ocadMapId) setOcadMapId(comp.data.ocadMapId)
+      if (comp.data.ocadBounds) setOcadBounds(comp.data.ocadBounds)
+      setCompetitionName(comp.name)
+      setCompetitionId(comp.id)
+      setShowLoadModal(false)
+    } catch (e) {
+      console.warn('[Competition] Load failed:', e.message)
+    }
   }
 
   // Charge un circuit depuis GPX/KMZ directement sur la carte
@@ -697,7 +747,9 @@ function App() {
   }
 
   const handleDeleteControl = (controlId) => {
-    setLegRoutesMap({}) // les index de jambes changent après suppression
+    setLegRoutesMap({})
+    setNavigationQuality([])
+    setNavSummary(null)
     updateActiveCircuit(c => {
       const filtered = c.controls.filter(ctrl => ctrl.id !== controlId)
       return { controls: filtered.map((ctrl, i) => ({ ...ctrl, order: i + 1 })) }
@@ -722,6 +774,8 @@ function App() {
     setSprintWarning(null)
     setSprintDistanceRatio(null)
     setLegRoutesMap({})
+    setNavigationQuality([])
+    setNavSummary(null)
     setProgressLabel('Génération initiale…')
     try {
       // Priority: tile service bounds > OCAD GeoJSON bounds > Leaflet viewport
@@ -863,6 +917,8 @@ function App() {
             })
           setLegRoutesMap(newMap)
         }
+        if (data.navigation_quality?.length) setNavigationQuality(data.navigation_quality)
+        if (data.nav_summary) setNavSummary(data.nav_summary)
       } else {
         setProgressLabel('Génération en cours…')
         const { data: { task_id } } = await generateCircuitAsync(params)
@@ -872,6 +928,8 @@ function App() {
         console.log('[AI Generate] best circuit:', best)
         if (!best?.controls?.length) throw new Error('Aucun circuit généré')
         controls = best.controls
+        if (data.navigation_quality?.length) setNavigationQuality(data.navigation_quality)
+        if (data.nav_summary) setNavSummary(data.nav_summary)
       }
 
       const hasStart = activeCircuit.controls.some(c => c.type === 'start')
@@ -1174,13 +1232,30 @@ function App() {
             </button>
           </div>
           {competitionMode && (
-            <input
-              type="text"
-              value={competitionName}
-              onChange={e => setCompetitionName(e.target.value)}
-              placeholder="Nom de la compétition"
-              className="mt-2 w-full text-xs bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white placeholder-gray-400 focus:outline-none focus:border-blue-400"
-            />
+            <div className="mt-2 space-y-2">
+              <input
+                type="text"
+                value={competitionName}
+                onChange={e => setCompetitionName(e.target.value)}
+                placeholder="Nom de la compétition"
+                className="w-full text-xs bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white placeholder-gray-400 focus:outline-none focus:border-blue-400"
+              />
+              <div className="flex gap-1.5">
+                <button
+                  onClick={handleSaveCompetition}
+                  disabled={competitionSaving}
+                  className="flex-1 text-xs bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded px-2 py-1 transition-colors"
+                >
+                  {competitionSaving ? 'Sauvegarde…' : 'Sauvegarder'}
+                </button>
+                <button
+                  onClick={() => setShowLoadModal(true)}
+                  className="flex-1 text-xs bg-gray-600 hover:bg-gray-500 text-white rounded px-2 py-1 transition-colors"
+                >
+                  Charger
+                </button>
+              </div>
+            </div>
           )}
         </div>
 
@@ -1529,6 +1604,24 @@ function App() {
                       distanceRatio={sprintDistanceRatio}
                     />
 
+                    {navSummary && (
+                      <div className="mt-2 p-2 bg-gray-700/50 rounded-lg border border-gray-600 text-xs">
+                        <div className="font-medium text-gray-300 mb-1">Navigation — {navSummary.td_level}</div>
+                        <div className="flex gap-3 text-gray-400">
+                          {navSummary.mean_attack != null && (
+                            <span title="Point d'attaque moyen">Att: <span className={navSummary.mean_attack >= 0.6 ? 'text-green-400' : navSummary.mean_attack >= 0.4 ? 'text-yellow-400' : 'text-red-400'}>{navSummary.mean_attack.toFixed(2)}</span></span>
+                          )}
+                          {navSummary.mean_catch != null && (
+                            <span title="Ligne d'arrêt moyenne">Arr: <span className={navSummary.mean_catch >= 0.6 ? 'text-green-400' : navSummary.mean_catch >= 0.4 ? 'text-yellow-400' : 'text-red-400'}>{navSummary.mean_catch.toFixed(2)}</span></span>
+                          )}
+                          {navSummary.mean_handrail != null && (
+                            <span title="Main courante moyenne">MC: <span className={navSummary.mean_handrail >= 0.6 ? 'text-green-400' : navSummary.mean_handrail >= 0.4 ? 'text-yellow-400' : 'text-red-400'}>{navSummary.mean_handrail.toFixed(2)}</span></span>
+                          )}
+                        </div>
+                        <div className="mt-1 text-gray-500 text-xs">Jambes colorées sur la carte : vert ≥0.7 · orange ≥0.4 · rouge &lt;0.4</div>
+                      </div>
+                    )}
+
                     <button
                       onClick={handleExportIOF}
                       disabled={controls.length === 0}
@@ -1607,6 +1700,7 @@ function App() {
           onMapReady={(map) => { mapRef.current = map }}
           routeDisplay={routeDisplay}
           legRoutesMap={legRoutesMap}
+          navigationQuality={navigationQuality}
           ocadMode={mapMode === 'ocad' && !!imageData}
           backgroundControls={competitionMode ? getAllExistingControls() : []}
         />
@@ -1619,6 +1713,13 @@ function App() {
         onCreateCircuit={handleCreateCircuit}
         competitionMode={competitionMode}
         existingCircuitCount={circuits.length}
+      />
+
+      {/* Competition load modal */}
+      <CompetitionLoadModal
+        isOpen={showLoadModal}
+        onLoad={handleLoadCompetition}
+        onClose={() => setShowLoadModal(false)}
       />
     </div>
   )

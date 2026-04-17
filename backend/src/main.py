@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from src.core.config import settings
 from src.core.database import get_db, engine, Base
 from src.models.circuit import Circuit, ControlPoint
+from src.models.competition import Competition
 from src.schemas.circuit import (
     CircuitResponse,
     CircuitCreate,
@@ -104,6 +105,23 @@ _sprint_tasks: dict = {}          # {task_id: {"status": "processing"|"completed
 _circuit_tasks: dict = {}         # {task_id: {"status": "processing"|"completed"|"error", ...}}
 _sprint_executor = _SprintTPE(max_workers=3)
 
+# Attractivité injectée dans le KDTree du GA pour les balises déjà posées (mode compétition)
+# Valeur > features ISOM standard (~0.5–0.85) → biais soft vers zones existantes
+EXISTING_CONTROL_ATT: float = 0.95
+
+
+def _normalize_bbox(b: dict) -> dict:
+    """Normalise une bbox {min_x, min_y, max_x, max_y} (WGS84) en garantissant min ≤ max."""
+    min_x = float(b.get("min_x", -180))
+    max_x = float(b.get("max_x", 180))
+    min_y = float(b.get("min_y", -90))
+    max_y = float(b.get("max_y", 90))
+    if min_x > max_x:
+        min_x, max_x = max_x, min_x
+    if min_y > max_y:
+        min_y, max_y = max_y, min_y
+    return {"min_x": min_x, "max_x": max_x, "min_y": min_y, "max_y": max_y}
+
 
 def _cleanup_sprint_tasks(keep: int = 50) -> None:
     """Garde seulement les <keep> dernières tâches sprint en mémoire."""
@@ -161,12 +179,78 @@ def startup_event():
     import threading
     from src.services.learning.model_updater import check_and_download
     threading.Thread(target=check_and_download, daemon=True, name="ml-model-updater").start()
+    _purge_old_heatmap_caches()
 
 
 @app.on_event("shutdown")
 def shutdown_event():
     """Code exécuté à l'arrêt de l'application."""
     print("[X] Application arretee")
+
+
+# ---------------------------------------------------------------------------
+# Helper : cache disque HeatmapCache (évite de rescorer la même carte)
+# ---------------------------------------------------------------------------
+def _heatmap_disk_cache_path(map_id: str, bbox: tuple, step_px: int, scorer: str) -> Path:
+    import hashlib, tempfile
+    key = f"{map_id}|{bbox}|{step_px}|{scorer}"
+    h = hashlib.md5(key.encode()).hexdigest()[:12]
+    return Path(tempfile.gettempdir()) / f"aitraceur_hmc_{h}"
+
+
+def _purge_old_heatmap_caches(max_age_s: float = 86400.0) -> None:
+    """Supprime les fichiers cache HeatmapCache plus vieux que max_age_s (default 24h)."""
+    import tempfile, time
+    _tmp = Path(tempfile.gettempdir())
+    now = time.time()
+    for f in _tmp.glob("aitraceur_hmc_*.npz"):
+        try:
+            if now - f.stat().st_mtime > max_age_s:
+                f.unlink()
+        except Exception:
+            pass
+
+
+def _apply_oob_mask(heatmap_cache: "object", oob_polygons: list, mpp: float) -> None:
+    """
+    Rasterise les polygones OOB OSM sur heatmap_cache.forbidden_mask (in-place).
+    Utilisé par _circuit_impl et _sprint_impl pour uniformiser la logique OOB.
+    """
+    if not oob_polygons or heatmap_cache is None:
+        return
+    try:
+        import numpy as _np_oob
+        from PIL import Image as _PILImg, ImageDraw as _PILDraw
+        from scipy.ndimage import binary_dilation as _bd_oob
+        _mb = heatmap_cache.bbox
+        _mw, _mh = heatmap_cache.map_w, heatmap_cache.map_h
+        _min_lng, _min_lat, _max_lng, _max_lat = _mb
+        _mask_img = _PILImg.new("L", (_mw, _mh), 0)
+        _draw = _PILDraw.Draw(_mask_img)
+        def _to_px(_lng, _lat):
+            return (
+                int((_lng - _min_lng) / max(_max_lng - _min_lng, 1e-9) * _mw),
+                int((1.0 - (_lat - _min_lat) / max(_max_lat - _min_lat, 1e-9)) * _mh),
+            )
+        for _poly in oob_polygons:
+            _pts = [_to_px(p[0], p[1]) for p in _poly if len(p) >= 2]
+            if len(_pts) >= 3:
+                _draw.polygon(_pts, fill=255)
+        _oob_arr = _np_oob.array(_mask_img, dtype=bool)
+        _kpx = max(10, min(40, int(15.0 / max(mpp, 0.1))))
+        _oob_dil = _bd_oob(_oob_arr, structure=_np_oob.ones((_kpx, _kpx), dtype=bool)).astype(bool)
+        if heatmap_cache.forbidden_mask is not None:
+            heatmap_cache.forbidden_mask = heatmap_cache.forbidden_mask | _oob_dil
+        else:
+            heatmap_cache.forbidden_mask = _oob_dil
+        import logging as _log_oob
+        _log_oob.getLogger(__name__).info(
+            "OOBMask: %.1f%% via %d polygones OSM (kernel=%dpx)",
+            float(_oob_dil.mean()) * 100, len(oob_polygons), _kpx,
+        )
+    except Exception as _oob_err:
+        import logging as _log_oob
+        _log_oob.getLogger(__name__).warning("OOBMask ÉCHEC: %s", _oob_err)
 
 
 # =============================================
@@ -191,6 +275,34 @@ def root():
 def health_check():
     """Vérifie que l'API fonctionne."""
     return {"status": "healthy"}
+
+
+@app.get("/api/v1/models/status")
+def models_status():
+    """Statut des modèles ML actifs (CNN ONNX vs XGBoost fallback)."""
+    _base = Path(__file__).parents[1]
+    cnn_file = (_base / "data" / "models" / "control_scorer_cnn.onnx").exists()
+    xgb_file = (_base / "data" / "models" / "patch_scorer_v2.pkl").exists()
+    try:
+        import onnxruntime as _ort
+        ort_ok = True
+        ort_version = _ort.__version__
+    except ImportError:
+        ort_ok = False
+        ort_version = None
+    cnn_active = cnn_file and ort_ok
+    return {
+        "cnn_onnx": {
+            "file": cnn_file,
+            "onnxruntime": ort_ok,
+            "onnxruntime_version": ort_version,
+            "active": cnn_active,
+        },
+        "xgboost": {
+            "file": xgb_file,
+            "active": not cnn_active and xgb_file,
+        },
+    }
 
 
 # =============================================
@@ -1998,8 +2110,22 @@ def _circuit_impl(body: dict) -> dict:
     forbidden_zones_polygons = list(body.get("forbidden_zones_polygons") or [])
     required_controls_raw = body.get("required_controls") or []
     candidate_points = list(body.get("candidate_points") or [])
+    existing_controls = body.get("existing_controls", [])  # mode compétition
     _n_isom = sum(1 for cp in candidate_points if cp.get("isom"))
     print(f"[circuit] candidate_points: {len(candidate_points)} total, {_n_isom} avec isom", flush=True)
+
+    # Mode compétition : injecter les balises existantes comme candidats haute-attractivité
+    # att > features ISOM standard (~0.5–0.85) → GA biaisé vers zones existantes (soft mode)
+    if existing_controls:
+        for _ec in existing_controls:
+            candidate_points.append({
+                "x": float(_ec.get("lng", 0)),
+                "y": float(_ec.get("lat", 0)),
+                "isom": None,
+                "attractiveness": EXISTING_CONTROL_ATT,
+                "_existing": True,
+            })
+        print(f"[circuit] Mode compétition : {len(existing_controls)} balises existantes injectées (att={EXISTING_CONTROL_ATT})", flush=True)
 
     # Mode sprint : enrichir depuis OSM si peu de candidats OCAD
     if (circuit_type == "sprint" or technical_level in ("TD1", "TD2")) and len(candidate_points) < 50 and bounding_box:
@@ -2074,17 +2200,32 @@ def _circuit_impl(body: dict) -> dict:
 
                 if _mapant_result is not None:
                     _map_img, _bbox_wgs84, _mpp = _mapant_result
-                    # _circuit_impl = toujours MD/LD (forêt) → résolution doublée (/ 80)
-                    _step_px = max(20, int(max(_map_img.width, _map_img.height) / 80))
-                    heatmap_cache = _scorer_v2.build_heatmap_cache(
-                        map_img=_map_img,
-                        bbox=_bbox_wgs84,
-                        mpp=_mpp,
-                        step_px=_step_px,
-                        force_mode=force_mode,
-                        cnn_scorer=_cnn_scorer,
+                    # Budget fixe de patches → step_px adaptatif selon taille image
+                    _MAX_PATCHES = {"sprint": 2500, "md": 1600, "ld": 900, "foret": 900}.get(
+                        (circuit_type or "").lower(), 1600
                     )
-                    print(f"[circuit] HeatmapCache CNN {heatmap_cache.scores.shape}", flush=True)
+                    import math as _math_hm
+                    _step_px = max(6, int(_math_hm.sqrt(_map_img.width * _map_img.height / _MAX_PATCHES)))
+                    _scorer_key = "cnn" if _cnn_scorer is not None else "xgb"
+                    _hmc_path = _heatmap_disk_cache_path(map_id or "", _bbox_wgs84, _step_px, _scorer_key)
+                    if _hmc_path.with_suffix(".npz").exists():
+                        from src.services.learning.ocad_patch_scorer import HeatmapCache as _HMC
+                        heatmap_cache = _HMC.load(_hmc_path)
+                        print(f"[circuit] HeatmapCache cache hit {heatmap_cache.scores.shape}", flush=True)
+                    else:
+                        print(f"[circuit] HeatmapCache step_px={_step_px} (mpp={_mpp:.2f}m, budget={_MAX_PATCHES}px)", flush=True)
+                        heatmap_cache = _scorer_v2.build_heatmap_cache(
+                            map_img=_map_img,
+                            bbox=_bbox_wgs84,
+                            mpp=_mpp,
+                            step_px=_step_px,
+                            force_mode=force_mode,
+                            cnn_scorer=_cnn_scorer,
+                        )
+                        heatmap_cache.save(_hmc_path)
+                        print(f"[circuit] HeatmapCache CNN {heatmap_cache.scores.shape}", flush=True)
+                    # OOB vectoriel appliqué après chargement/construction (même logique que sprint)
+                    _apply_oob_mask(heatmap_cache, forbidden_zones_polygons, _mpp)
         except Exception as _hm_err:
             print(f"[circuit] HeatmapCache exception: {_hm_err} → fallback ISOM", flush=True)
 
@@ -2119,6 +2260,79 @@ def _circuit_impl(body: dict) -> dict:
     generator = AIGenerator()
     circuits = generator.generate(request, method=method, num_variants=num_variants)
 
+    # ── Mode compétition : snap post-GA sur balises existantes (seuil 15m) ──────
+    if existing_controls and circuits:
+        import math as _math_c
+        def _hav_c(y1, x1, y2, x2):
+            R = 6371000
+            dlat = _math_c.radians(y2 - y1)
+            dlng = _math_c.radians(x2 - x1)
+            a = _math_c.sin(dlat/2)**2 + _math_c.cos(_math_c.radians(y1)) * _math_c.cos(_math_c.radians(y2)) * _math_c.sin(dlng/2)**2
+            return R * 2 * _math_c.asin(_math_c.sqrt(a))
+        _SNAP_M = 15
+        _bbox = _normalize_bbox(bounding_box) if bounding_box else {}
+        for _circ in circuits:
+            _n_reused = 0
+            for _ctrl in _circ.controls:
+                if _ctrl.get("type") in ("start", "finish"):
+                    continue
+                for _ex in existing_controls:
+                    if _hav_c(_ctrl["y"], _ctrl["x"], float(_ex.get("lat", 0)), float(_ex.get("lng", 0))) <= _SNAP_M:
+                        _nx, _ny = float(_ex["lng"]), float(_ex["lat"])
+                        # Micro-guardrail : revert si hors bbox ou en zone interdite
+                        _in_bbox = (
+                            _bbox.get("min_x", -180) <= _nx <= _bbox.get("max_x", 180) and
+                            _bbox.get("min_y", -90) <= _ny <= _bbox.get("max_y", 90)
+                        )
+                        _forbidden = False
+                        if heatmap_cache is not None:
+                            try:
+                                _forbidden = heatmap_cache.is_forbidden(_nx, _ny)
+                            except Exception:
+                                pass
+                        if not _in_bbox or _forbidden:
+                            print(f"[circuit] snap revert ({_nx:.5f},{_ny:.5f}) in_bbox={_in_bbox} forbidden={_forbidden}", flush=True)
+                            break  # position invalide → pas de snap
+                        _ctrl["x"] = _nx
+                        _ctrl["y"] = _ny
+                        _ctrl["reused"] = True
+                        _ctrl["reused_from"] = _ex.get("circuitName", "")
+                        _n_reused += 1
+                        break
+            if _n_reused:
+                print(f"[circuit] Mode compétition : {_n_reused} poste(s) réutilisé(s)", flush=True)
+    # ────────────────────────────────────────────────────────────────────────────
+
+    # ── Navigation quality (meilleur circuit, post-snap) ─────────────────────
+    _circ_nav_quality: list = []
+    _circ_nav_summary: dict = {}
+    _circ_ga = getattr(generator, "_last_ga", None)
+    if circuits and _circ_ga is not None and _circ_ga._ocad_tree is not None:
+        _best_c = circuits[0]
+        _best_xy = [(ctrl["x"], ctrl["y"]) for ctrl in _best_c.controls]
+        _c_nav_scores = _circ_ga.compute_nav_scores(_best_xy)
+        _best_c.nav_scores = _c_nav_scores
+        _td_key_c = f"TD{technical_level}" if not str(technical_level).startswith("TD") else technical_level
+        for _i, _ns in enumerate(_c_nav_scores):
+            _as = _ns.get("attack"); _cs = _ns.get("catch"); _hs = _ns.get("handrail")
+            _active = [s for s in [_as, _cs, _hs] if s is not None]
+            _circ_nav_quality.append({
+                "from_idx": _i, "to_idx": _i + 1,
+                "attack_score": round(_as, 2) if _as is not None else None,
+                "catch_score": round(_cs, 2) if _cs is not None else None,
+                "handrail_score": round(_hs, 2) if _hs is not None else None,
+                "nav_score": round(sum(_active) / len(_active), 2) if _active else None,
+            })
+        _att_v = [n["attack_score"] for n in _circ_nav_quality if n["attack_score"] is not None]
+        _cat_v = [n["catch_score"] for n in _circ_nav_quality if n["catch_score"] is not None]
+        _hr_v  = [n["handrail_score"] for n in _circ_nav_quality if n["handrail_score"] is not None]
+        _circ_nav_summary = {
+            "mean_attack":   round(sum(_att_v) / len(_att_v), 2) if _att_v else None,
+            "mean_catch":    round(sum(_cat_v) / len(_cat_v), 2) if _cat_v else None,
+            "mean_handrail": round(sum(_hr_v) / len(_hr_v), 2) if _hr_v else None,
+            "td_level": _td_key_c,
+        }
+
     return {
         "request": {
             "category": category,
@@ -2128,6 +2342,8 @@ def _circuit_impl(body: dict) -> dict:
             "method": method,
         },
         "circuits_generated": len(circuits),
+        "navigation_quality": _circ_nav_quality,
+        "nav_summary": _circ_nav_summary,
         "circuits": [
             {
                 "id": c.id,
@@ -3755,6 +3971,10 @@ def _sprint_impl(task_id: str, body: dict) -> None:
             from src.services.learning.ocad_patch_scorer import OcadPatchScorer as _OPS, CnnPatchScorer as _CPS
             _scorer_v2 = _OPS.load()
             _cnn_scorer = _CPS.load()
+            if _cnn_scorer is None:
+                import logging as _log_hm; _log_hm.getLogger(__name__).warning(
+                    "[sprint] CNN ONNX non disponible — fallback XGBoost V3 actif"
+                )
             if _scorer_v2 is not None:
                 _mapant_result = None
                 if map_id and ocad_sw and ocad_ne:
@@ -3794,52 +4014,30 @@ def _sprint_impl(task_id: str, body: dict) -> None:
 
                 if _mapant_result is not None:
                     _map_img, _bbox_wgs84, _mpp = _mapant_result
-                    # Forêt/auto : résolution doublée (/ 80) ; urbain : / 40 (moins de features fines)
-                    _step_px = max(20, int(max(_map_img.width, _map_img.height) / (40 if force_mode == "urban" else 80)))
-                    print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ build_heatmap_cache (step_px={_step_px})...", flush=True)
-                    heatmap_cache = _scorer_v2.build_heatmap_cache(
-                        map_img=_map_img,
-                        bbox=_bbox_wgs84,
-                        mpp=_mpp,
-                        step_px=_step_px,
-                        force_mode=force_mode,
-                        cnn_scorer=_cnn_scorer,
-                    )
-                    print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ✅ HeatmapCache OK {heatmap_cache.scores.shape}", flush=True)
-                    # ── OOBMask : rasterisation des polygones OOB OSM → plus fiable que RGB ──
-                    if oob_polygons:
-                        try:
-                            import numpy as _np_oob
-                            from PIL import Image as _PILImg, ImageDraw as _PILDraw
-                            _mb = heatmap_cache.bbox
-                            _mw, _mh = heatmap_cache.map_w, heatmap_cache.map_h
-                            _min_lng, _min_lat, _max_lng, _max_lat = _mb
-                            _mask_img = _PILImg.new("L", (_mw, _mh), 0)
-                            _draw = _PILDraw.Draw(_mask_img)
-                            def _to_px(_lng, _lat):
-                                return (
-                                    int((_lng - _min_lng) / (_max_lng - _min_lng) * _mw),
-                                    int((1.0 - (_lat - _min_lat) / (_max_lat - _min_lat)) * _mh),
-                                )
-                            for _poly in oob_polygons:
-                                _pts = [_to_px(p[0], p[1]) for p in _poly if len(p) >= 2]
-                                if len(_pts) >= 3:
-                                    _draw.polygon(_pts, fill=255)
-                            _oob_arr = _np_oob.array(_mask_img, dtype=bool)
-                            _kpx = max(10, min(40, int(15.0 / max(_mpp, 0.1))))
-                            from scipy.ndimage import binary_dilation as _bd_oob
-                            _oob_dil = _bd_oob(_oob_arr, structure=_np_oob.ones((_kpx, _kpx), dtype=bool)).astype(bool)
-                            if heatmap_cache.forbidden_mask is not None:
-                                heatmap_cache.forbidden_mask = heatmap_cache.forbidden_mask | _oob_dil
-                            else:
-                                heatmap_cache.forbidden_mask = _oob_dil
-                            print(
-                                f"OOBMask: {float(_oob_dil.mean()) * 100:.1f}% de la carte interdite "
-                                f"via {len(oob_polygons)} polygones OSM (kernel={_kpx}px)",
-                                flush=True,
-                            )
-                        except Exception as _oob_err:
-                            print(f"⚠️ OOBMask ÉCHEC: {_oob_err}", flush=True)
+                    # Budget fixe de patches → step_px adaptatif ; sprint urbain plus dense
+                    _MAX_PATCHES = 2500 if force_mode == "urban" else 1600
+                    import math as _math_hm
+                    _step_px = max(6, int(_math_hm.sqrt(_map_img.width * _map_img.height / _MAX_PATCHES)))
+                    _scorer_key = "cnn" if _cnn_scorer is not None else "xgb"
+                    _hmc_path = _heatmap_disk_cache_path(map_id or "", _bbox_wgs84, _step_px, _scorer_key)
+                    if _hmc_path.with_suffix(".npz").exists():
+                        from src.services.learning.ocad_patch_scorer import HeatmapCache as _HMC
+                        heatmap_cache = _HMC.load(_hmc_path)
+                        print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ✅ HeatmapCache cache hit {heatmap_cache.scores.shape}", flush=True)
+                    else:
+                        print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ build_heatmap_cache step_px={_step_px} (mpp={_mpp:.2f}m, budget={_MAX_PATCHES}px)...", flush=True)
+                        heatmap_cache = _scorer_v2.build_heatmap_cache(
+                            map_img=_map_img,
+                            bbox=_bbox_wgs84,
+                            mpp=_mpp,
+                            step_px=_step_px,
+                            force_mode=force_mode,
+                            cnn_scorer=_cnn_scorer,
+                        )
+                        heatmap_cache.save(_hmc_path)
+                        print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ✅ HeatmapCache OK {heatmap_cache.scores.shape}", flush=True)
+                    # ── OOBMask : rasterisation des polygones OOB OSM ──────────────────
+                    _apply_oob_mask(heatmap_cache, oob_polygons, _mpp)
                     # ────────────────────────────────────────────────────────────────────
                     dialogue.append({
                         "role": "system", "step": 0,
@@ -3873,6 +4071,18 @@ def _sprint_impl(task_id: str, body: dict) -> None:
             _elevation_cache = _build_elev_s(bounding_box, n_cols=30, n_rows=30, timeout=20)
         except Exception as _elev_err:
             print(f"{_tag} ElevationCache exception: {_elev_err} → terme G désactivé", flush=True)
+
+    # Mode compétition : injecter les balises existantes comme candidats haute-attractivité
+    if existing_controls:
+        for _ec in existing_controls:
+            candidate_points.append({
+                "x": float(_ec.get("lng", 0)),
+                "y": float(_ec.get("lat", 0)),
+                "isom": None,
+                "attractiveness": EXISTING_CONTROL_ATT,
+                "_existing": True,
+            })
+        print(f"{_tag} Mode compétition : {len(existing_controls)} balises injectées (att={EXISTING_CONTROL_ATT})", flush=True)
 
     generator = AIGenerator()
     gen_request = GenerationRequest(
@@ -3974,6 +4184,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
         return R * 2 * math.asin(math.sqrt(a))
 
     SNAP_THRESHOLD_M = 15
+    _snap_bbox = _normalize_bbox(bounding_box) if bounding_box else {}
     n_reused = 0
     if existing_controls:
         for ctrl in best_latlng:
@@ -3982,8 +4193,23 @@ def _sprint_impl(task_id: str, body: dict) -> None:
             for ex in existing_controls:
                 d = _haversine_m(ctrl["lat"], ctrl["lng"], ex.get("lat", 0), ex.get("lng", 0))
                 if d <= SNAP_THRESHOLD_M:
-                    ctrl["lat"] = ex["lat"]
-                    ctrl["lng"] = ex["lng"]
+                    _nlng, _nlat = ex.get("lng", 0), ex.get("lat", 0)
+                    # Micro-guardrail : revert si hors bbox ou en zone interdite
+                    _in_bbox = (
+                        _snap_bbox.get("min_x", -180) <= _nlng <= _snap_bbox.get("max_x", 180) and
+                        _snap_bbox.get("min_y", -90) <= _nlat <= _snap_bbox.get("max_y", 90)
+                    )
+                    _forbidden = False
+                    if heatmap_cache is not None:
+                        try:
+                            _forbidden = heatmap_cache.is_forbidden(_nlng, _nlat)
+                        except Exception:
+                            pass
+                    if not _in_bbox or _forbidden:
+                        print(f"{_tag} snap revert ({_nlng:.5f},{_nlat:.5f}) in_bbox={_in_bbox} forbidden={_forbidden}", flush=True)
+                        break  # position invalide → pas de snap
+                    ctrl["lat"] = _nlat
+                    ctrl["lng"] = _nlng
                     ctrl["reused"] = True
                     ctrl["reused_from"] = ex.get("circuitName", "")
                     n_reused += 1
@@ -4100,6 +4326,50 @@ def _sprint_impl(task_id: str, body: dict) -> None:
             })
             current_controls = filtered
 
+    # ── Navigation quality (post-corrections, sur circuit final) ─────────────
+    # Calcul nav_scores une seule fois sur le circuit final — utilise la même GA
+    # avec son KDTree ISOM déjà initialisé. Neutre (vide) si KDTree absent.
+    _nav_quality: list = []
+    _nav_summary: dict = {}
+    _final_nav_scores: list = []
+    _ga = getattr(generator, "_last_ga", None)
+    if _ga is not None and _ga._ocad_tree is not None:
+        _final_xy = [(c["lng"], c["lat"]) for c in current_controls]
+        _final_nav_scores = _ga.compute_nav_scores(_final_xy)
+        _td_key = f"TD{technical_level}" if not str(technical_level).startswith("TD") else technical_level
+        for _i, _ns in enumerate(_final_nav_scores):
+            _as = _ns.get("attack")
+            _cs = _ns.get("catch")
+            _hs = _ns.get("handrail")
+            _active = [s for s in [_as, _cs, _hs] if s is not None]
+            _nav_score = round(sum(_active) / len(_active), 2) if _active else None
+            _nav_quality.append({
+                "from_idx": _i,
+                "to_idx": _i + 1,
+                "attack_score": round(_as, 2) if _as is not None else None,
+                "catch_score": round(_cs, 2) if _cs is not None else None,
+                "handrail_score": round(_hs, 2) if _hs is not None else None,
+                "nav_score": _nav_score,
+            })
+        _att_vals = [n.get("attack") for n in _final_nav_scores if n.get("attack") is not None]
+        _cat_vals = [n.get("catch") for n in _final_nav_scores if n.get("catch") is not None]
+        _hr_vals  = [n.get("handrail") for n in _final_nav_scores if n.get("handrail") is not None]
+        _nav_summary = {
+            "mean_attack":   round(sum(_att_vals) / len(_att_vals), 2) if _att_vals else None,
+            "mean_catch":    round(sum(_cat_vals) / len(_cat_vals), 2) if _cat_vals else None,
+            "mean_handrail": round(sum(_hr_vals) / len(_hr_vals), 2) if _hr_vals else None,
+            "td_level": _td_key,
+        }
+        # Passer nav_scores au dernier rapport contrôleur pour C14/C15
+        if final_report is not None:
+            _final_report_with_nav = controleur.validate(
+                current_controls,
+                oob_polygons=oob_polygons,
+                circuit_config={"category": category, "nav_scores": _final_nav_scores, "td_level": _td_key},
+                route_analyzer=route_analyzer,
+            )
+            final_report = _final_report_with_nav
+
     # ── Résultat ─────────────────────────────────────────────────────────────
     final_report_dict = controleur.to_dict(final_report) if final_report else {}
     final_report_dict["iterations_used"] = len([d for d in dialogue if d["role"] == "traceur"])
@@ -4115,8 +4385,10 @@ def _sprint_impl(task_id: str, body: dict) -> None:
             "is_valid": final_report.is_valid if final_report else False,
             "score": final_report.global_score if final_report else 0,
             "leg_route_choices": gen_result[0].leg_route_choices if gen_result else [],
-            "warning": _generation_warning,         # None si OK, message si distance partielle
-            "distance_ratio": _distance_ratio,      # ratio distance_réelle / distance_cible
+            "navigation_quality": _nav_quality,
+            "nav_summary": _nav_summary,
+            "warning": _generation_warning,
+            "distance_ratio": _distance_ratio,
         }
     }
 
@@ -4222,3 +4494,90 @@ def routes_between_controls(body: dict = Body(...)):
         "diversity_score": round(diversity, 3),
         "is_dogleg": False,  # dogleg only meaningful for 3 consecutive controls
     }
+
+
+# =============================================
+# Mode Compétition — Save / Load
+# =============================================
+
+@app.get(
+    "/api/v1/competition/",
+    summary="Liste toutes les compétitions sauvegardées",
+)
+def list_competitions(db: Session = Depends(get_db)):
+    """Retourne id, name, created_at pour chaque compétition."""
+    rows = db.query(Competition).order_by(Competition.created_at.desc()).all()
+    return [
+        {
+            "id": c.id,
+            "name": c.name,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+        }
+        for c in rows
+    ]
+
+
+@app.post(
+    "/api/v1/competition/save",
+    summary="Sauvegarde ou met à jour une compétition",
+)
+def save_competition(body: dict = Body(...), db: Session = Depends(get_db)):
+    """
+    Body: { id?: string, name: string, data: { circuits, activeCircuitId, ocadMapId, ocadBounds } }
+    Crée si id absent, met à jour sinon. Retourne { id }.
+    """
+    from datetime import datetime as _dt
+
+    comp_id = body.get("id")
+    name = body.get("name", "Compétition sans nom")
+    data = body.get("data", {})
+
+    if comp_id:
+        comp = db.query(Competition).filter(Competition.id == comp_id).first()
+        if comp:
+            comp.name = name
+            comp.data = data
+            comp.updated_at = _dt.utcnow()
+        else:
+            comp = Competition(id=comp_id, name=name, data=data)
+            db.add(comp)
+    else:
+        comp = Competition(name=name, data=data)
+        db.add(comp)
+
+    db.commit()
+    db.refresh(comp)
+    return {"id": comp.id}
+
+
+@app.get(
+    "/api/v1/competition/{competition_id}",
+    summary="Charge une compétition sauvegardée",
+)
+def load_competition(competition_id: str, db: Session = Depends(get_db)):
+    """Retourne la compétition complète (id, name, data)."""
+    comp = db.query(Competition).filter(Competition.id == competition_id).first()
+    if comp is None:
+        raise HTTPException(status_code=404, detail="Compétition introuvable")
+    return {
+        "id": comp.id,
+        "name": comp.name,
+        "created_at": comp.created_at.isoformat() if comp.created_at else None,
+        "updated_at": comp.updated_at.isoformat() if comp.updated_at else None,
+        "data": comp.data,
+    }
+
+
+@app.delete(
+    "/api/v1/competition/{competition_id}",
+    status_code=204,
+    summary="Supprime une compétition",
+)
+def delete_competition(competition_id: str, db: Session = Depends(get_db)):
+    """Supprime la compétition et retourne 204."""
+    comp = db.query(Competition).filter(Competition.id == competition_id).first()
+    if comp is None:
+        raise HTTPException(status_code=404, detail="Compétition introuvable")
+    db.delete(comp)
+    db.commit()

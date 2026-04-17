@@ -1,0 +1,18 @@
+{
+  "_comment": "Bounding boxes (min_lng, min_lat, max_lng, max_lat) des zones urbaines denses. Utilisé par extract_features() pour la feature is_urban (XGBoost fallback). Ajouter une ville ici puis redémarrer uvicorn pour prise en compte.",
+  "zones": [
+    { "name": "Paris",       "bbox": [2.29,  48.80,  2.50,  48.95] },
+    { "name": "Lyon",        "bbox": [4.70,  45.70,  4.95,  45.85] },
+    { "name": "Marseille",   "bbox": [5.30,  43.20,  5.50,  43.40] },
+    { "name": "Toulouse",    "bbox": [1.35,  43.50,  1.60,  43.70] },
+    { "name": "Nice",        "bbox": [7.15,  43.60,  7.35,  43.75] },
+    { "name": "Nantes",      "bbox": [-1.65, 47.15, -1.45,  47.30] },
+    { "name": "Strasbourg",  "bbox": [7.70,  48.50,  7.85,  48.65] },
+    { "name": "Montpellier", "bbox": [3.80,  43.55,  4.00,  43.75] },
+    { "name": "Bordeaux",    "bbox": [-0.70, 44.75, -0.40,  44.95] },
+    { "name": "Lille",       "bbox": [2.95,  50.55,  3.20,  50.75] },
+    { "name": "Leeds",       "bbox": [-1.65, 53.70, -1.40,  53.90] },
+    { "name": "London",      "bbox": [-0.50, 51.30,  0.30,  51.70] },
+    { "name": "Edinburgh",   "bbox": [-3.35, 55.85, -3.10,  56.00] }
+  ]
+}

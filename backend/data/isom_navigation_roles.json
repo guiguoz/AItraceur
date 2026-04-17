@@ -1,0 +1,34 @@
+{
+  "_comment": "Classification des codes ISOM 2017 par rôle de navigation CO. V1 — voir CLAUDE.md §extractCandidatePoints pour la liste des codes présents dans le KDTree.",
+  "attack_point": {
+    "codes": [106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 118,
+              201, 210, 211, 212, 213, 301, 302, 303,
+              401, 402, 403, 404, 405, 406, 501, 502, 516, 517, 518, 519, 521],
+    "quality": {
+      "very_high": [109, 110, 402, 403, 501, 502],
+      "high":      [106, 107, 108, 111, 112, 113, 210, 401, 516, 518],
+      "medium":    [114, 115, 118, 201, 211, 212, 213, 301, 302, 404, 405, 406]
+    },
+    "_comment": "Features distinctes utilisables comme point de départ de la phase finale (100-200m du poste). Codes 101-103 (lignes de niveau LineString) absents du KDTree. Codes 106+ = terrain forms (knolls, pits, gullies) avec centroïde conservé."
+  },
+  "handrail": {
+    "codes": [104, 108, 210, 211, 212, 213, 214, 215, 301, 302, 303,
+              401, 402, 403, 404, 405, 406, 503, 516, 517, 518, 519, 521],
+    "quality": {
+      "very_high": [401, 402, 403, 210, 211, 516, 518],
+      "high":      [404, 405, 406, 212, 213, 301, 302, 517, 519],
+      "medium":    [104, 108, 214, 215, 303, 503]
+    },
+    "_comment": "Features linéaires ou de bordure permettant de s'orienter en les suivant le long d'une jambe"
+  },
+  "catching_feature": {
+    "codes": [201, 202, 210, 211, 212, 301, 302, 303,
+              401, 402, 403, 405, 516, 517, 518, 519, 521],
+    "quality": {
+      "very_high": [201, 401, 402, 210, 516, 518],
+      "high":      [202, 403, 405, 211, 301, 302, 517, 519],
+      "medium":    [212, 303, 521]
+    },
+    "_comment": "Features qui stoppent un coureur ayant dépassé le poste — idéalement perpendiculaires à la direction d'approche (V1 : présence dans le secteur suffit)"
+  }
+}

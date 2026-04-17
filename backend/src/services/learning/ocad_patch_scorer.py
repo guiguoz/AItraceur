@@ -140,6 +140,37 @@ class HeatmapCache:
             candidates.append((lng, lat))
         return candidates
 
+    def save(self, path: "Path") -> None:
+        """Sérialise la HeatmapCache sur disque via np.savez_compressed."""
+        from pathlib import Path as _Path
+        _p = _Path(path).with_suffix(".npz")
+        np.savez_compressed(
+            str(_p),
+            scores=self.scores,
+            forbidden=self.forbidden_mask if self.forbidden_mask is not None else np.array([], dtype=bool),
+            bbox=np.array(self.bbox, dtype=np.float64),
+            step_px=np.array(self.step_px),
+            map_w=np.array(self.map_w),
+            map_h=np.array(self.map_h),
+        )
+        log.debug("HeatmapCache: sauvegardé → %s", _p)
+
+    @classmethod
+    def load(cls, path: "Path") -> "HeatmapCache":
+        """Charge une HeatmapCache depuis disque. Lève FileNotFoundError si absent."""
+        from pathlib import Path as _Path
+        _p = _Path(path).with_suffix(".npz")
+        d = np.load(str(_p), allow_pickle=False)
+        fm = d["forbidden"] if d["forbidden"].ndim == 2 else None
+        return cls(
+            scores=d["scores"].astype(np.float32),
+            bbox=tuple(d["bbox"].tolist()),
+            step_px=int(d["step_px"]),
+            map_w=int(d["map_w"]),
+            map_h=int(d["map_h"]),
+            forbidden_mask=fm,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Legacy: feature names pour le mode OSM (7-dim, déprécié)
@@ -426,12 +457,7 @@ class OcadPatchScorer:
             )
 
         _elapsed = _time.monotonic() - _t0
-        log.info("HeatmapCache: %s scoring %d patches → %.2fs", scorer_label, len(candidates), _elapsed)
         scores_grid = scores_flat.reshape(len(ys), len(xs))
-        print(
-            f"HeatmapCache: done — mean={float(scores_grid.mean()):.3f}, max={float(scores_grid.max()):.3f}",
-            flush=True,
-        )
         # ── Forbidden mask : vert olive + eau + dilatation → absorbe bâtiments enclavés ──
         _forbidden_mask = None
         try:
@@ -448,14 +474,23 @@ class OcadPatchScorer:
             _kernel_px = max(15, min(60, int(30.0 / mpp)))  # cap 60px max (~30m à mpp≥0.5)
             _struct = np.ones((_kernel_px, _kernel_px), dtype=bool)
             _forbidden_mask = binary_dilation(_raw_mask, structure=_struct).astype(bool)
-            print(
-                f"ForbiddenMask: {float(_forbidden_mask.mean()) * 100:.1f}% de la carte interdite "
-                f"(kernel={_kernel_px}px, image {map_img.width}×{map_img.height}px)",
-                flush=True,
-            )
         except Exception as _fm_err:
-            print(f"⚠️ ForbiddenMask ÉCHEC scipy: {_fm_err} — masque désactivé", flush=True)
+            log.warning("ForbiddenMask ÉCHEC scipy: %s — masque désactivé", _fm_err)
             _forbidden_mask = None
+        # ─────────────────────────────────────────────────────────────────────────────────
+        _pct_forbidden = float(_forbidden_mask.mean()) * 100 if _forbidden_mask is not None else 0.0
+        log.info(
+            "HeatmapCache: %s | grid=%dx%d step=%dpx mpp=%.2fm | "
+            "mean=%.3f p50=%.3f p90=%.3f p99=%.3f | forbidden=%.1f%% | %.0f patches/s (%.2fs)",
+            scorer_label,
+            scores_grid.shape[1], scores_grid.shape[0], step_px, mpp,
+            float(scores_grid.mean()),
+            float(np.percentile(scores_grid, 50)),
+            float(np.percentile(scores_grid, 90)),
+            float(np.percentile(scores_grid, 99)),
+            _pct_forbidden,
+            len(candidates) / max(_elapsed, 1e-6), _elapsed,
+        )
         # ─────────────────────────────────────────────────────────────────────────────────
         return HeatmapCache(
             scores=scores_grid,
@@ -687,10 +722,18 @@ class CnnPatchScorer:
             log.debug("CnnPatchScorer: modèle absent (%s) — fallback XGBoost", model_path)
             return None
 
-        session = ort.InferenceSession(
-            str(model_path),
-            providers=["CPUExecutionProvider"],
+        import os as _os
+        _available = ort.get_available_providers()
+        _providers = (
+            ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            if "CUDAExecutionProvider" in _available
+            else ["CPUExecutionProvider"]
         )
+        opts = ort.SessionOptions()
+        opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        opts.intra_op_num_threads = _os.cpu_count() or 4
+        opts.enable_mem_pattern = True
+        session = ort.InferenceSession(str(model_path), sess_options=opts, providers=_providers)
         # Charger SRTM pour les modèles 5 canaux
         srtm_data = None
         try:
@@ -707,7 +750,10 @@ class CnnPatchScorer:
                 log.info("CnnPatchScorer: srtm.py chargé (DEM 5 canaux actif)")
             except ImportError:
                 log.warning("CnnPatchScorer: srtm.py absent (pip install srtm.py) → canaux DEM=0")
-        log.info("CnnPatchScorer: chargé %s (MobileNetV3-Small ONNX, %dch)", model_path.name, in_ch)
+        log.info(
+            "CnnPatchScorer: chargé %s (MobileNetV3-Small ONNX, %dch, provider=%s, threads=%d)",
+            model_path.name, in_ch, session.get_providers()[0], opts.intra_op_num_threads,
+        )
         return cls(session, srtm_data)
 
     # ------------------------------------------------------------------

@@ -23,6 +23,8 @@ Métriques modèle patch_scorer_v2.pkl (XGBoost, 12 368 patches, multi-clubs UK)
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -69,48 +71,28 @@ FEATURE_NAMES: list[str] = [
 ]
 
 
+_URBAN_ZONES: list = []  # cache module-level, chargé au premier appel
+
+
+def _load_urban_zones() -> list:
+    """Charge urban_zones.json une fois depuis data/. Fallback silencieux si absent."""
+    try:
+        p = Path(__file__).parents[3] / "data" / "urban_zones.json"
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return [tuple(z["bbox"]) for z in data.get("zones", [])]
+    except Exception:
+        return []
+
+
 def get_is_urban_feature(lng: float, lat: float) -> int:
     """
-    Retourne 1 si le point (lng, lat) se trouve dans une zone urbaine dense,
-    0 sinon.
-
-    Implémentation heuristique légère : on vérifie si le point se situe
-    dans l'un des bounding boxes pré-definis de grandes villes françaises.
-    Si aucune donnée n'est disponible, on retourne 0 par défaut.
-
-    Cette fonction évite d'utiliser des dépendances lourdes comme OSMnx.
+    Retourne 1 si (lng, lat) est dans une zone urbaine dense, 0 sinon.
+    Zones chargées depuis data/urban_zones.json (prise en compte au redémarrage).
     """
-    # Bounding boxes simplifiées (min_lon, min_lat, max_lon, max_lat) pour quelques villes majeures
-    urban_boxes = [
-        # Paris
-        (2.29, 48.80, 2.50, 48.95),
-        # Lyon
-        (4.70, 45.70, 4.95, 45.85),
-        # Marseille
-        (5.30, 43.20, 5.50, 43.40),
-        # Toulouse
-        (1.35, 43.50, 1.60, 43.70),
-        # Nice
-        (7.15, 43.60, 7.35, 43.75),
-        # Nantes
-        (-1.65, 47.15, -1.45, 47.30),
-        # Strasbourg
-        (7.70, 48.50, 7.85, 48.65),
-        # Montpellier
-        (3.80, 43.55, 4.00, 43.75),
-        # Bordeaux
-        (-0.70, 44.75, -0.40, 44.95),
-        # Lille
-        (2.95, 50.55, 3.20, 50.75),
-        # --- UK Urban Boxes (where RG2 scraper gets data) ---
-        # Leeds (aire club is here)
-        (-1.65, 53.70, -1.40, 53.90),
-        # London
-        (-0.50, 51.30, 0.30, 51.70),
-        # Edinburgh
-        (-3.35, 55.85, -3.10, 56.00),
-    ]
-    for min_lon, min_lat, max_lon, max_lat in urban_boxes:
+    global _URBAN_ZONES
+    if not _URBAN_ZONES:
+        _URBAN_ZONES = _load_urban_zones()
+    for min_lon, min_lat, max_lon, max_lat in _URBAN_ZONES:
         if min_lon <= lng <= max_lon and min_lat <= lat <= max_lat:
             return 1
     return 0

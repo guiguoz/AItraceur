@@ -28,7 +28,7 @@ L'utilisateur accède au frontend sur **5173**. Le backend est sur **8000**, le 
 | `backend/src/main.py` | FastAPI, ~47 endpoints — point d'entrée backend |
 | `backend/src/services/generation/genetic_algo.py` | Algorithme génétique multi-objectifs |
 | `backend/src/services/learning/ocad_patch_scorer.py` | `CnnPatchScorer` + `HeatmapCache` |
-| `backend/src/services/controleur/controleur.py` | `ControleurSprint`, checks C01–C12 IOF/FFCO |
+| `backend/src/services/controleur/controleur.py` | `ControleurSprint`, checks C01–C16 IOF/FFCO |
 | `backend/src/services/optimization/route_analyzer.py` | RouteAnalyzer, A* NetworkX |
 | `backend/data/models/control_scorer_cnn.onnx` | Modèle CNN V4 en prod (6.1 MB) |
 | `frontend/src/App.jsx` | Composant React principal |
@@ -86,7 +86,7 @@ Avant chaque génération GA, une grille 30×30 d'altitudes est précomputée vi
 - Fallback silencieux si IGN inaccessible — terme G fitness désactivé
 - Actif sur `/generate-circuit` **et** `/generate-sprint`
 
-### Fitness GA — termes A→G
+### Fitness GA — termes A→L
 
 | Terme | Critère | Poids |
 |-------|---------|-------|
@@ -97,12 +97,17 @@ Avant chaque génération GA, une grille 30×30 d'altitudes est précomputée vi
 | E | Diversité GPX Vikazimut — gradient `(cv−0.20)×15` | additive |
 | F | Zones interdites forbidden_mask (−50 pts/poste) | additive |
 | G | D+/distance > seuil IOF 4% (ElevationCache) | additive |
+| H | Forme géométrique — anti-Z/spirale/accordéon | ×10 |
+| I | Qualité point d'attaque (KDTree OCAD, si dispo) | ×8 centré 0.5 |
+| J | Ligne d'arrêt (KDTree OCAD, si dispo) | ×6 centré 0.5 |
+| K | Main courante (KDTree OCAD, si dispo) | ×5 |
+| L | Conformité longueur jambes au profil format IOF (Sprint 250m, MD 600m, LD 2000m) | ×8 |
 
 ### Boucle traceur ↔ contrôleur
 
 ```
 GA génère circuit
-  → ControleurSprint.check() (C01–C12 IOF/FFCO)
+  → ControleurSprint.check() (C01–C16 IOF/FFCO)
   → corrections automatiques si violations
   → max 5 itérations
   → retourne dialogue JSON + rapport final
@@ -160,3 +165,14 @@ Le notebook Kaggle embarque le script inline (`%%writefile train_cnn.py`) pour �
 | Moyenne | Segment Crossover spatial (remplacer OX TSP) — quand plateau fitness GA |
 | Basse | Mode Compétition (plusieurs circuits partagent des balises) |
 | Basse | Intercalation V2 : algorithme TSP cheapest-insertion (backend) pour ordre optimal des postes de complétion |
+
+### Améliorations IOF/FFCO — hors scope actuel
+
+Issues identifiées lors de l'audit du document IOF/FFCO (avril 2026) mais non implémentées :
+
+| Sujet | Complexité | Prérequis |
+|-------|-----------|-----------|
+| **Boucles papillon LD** — vérifier et favoriser les formes en 8 (IOF LD §4.4) | Haute — refonte mutations GA + check contrôleur | Opérateur de croisement spatial (Segment Crossover) d'abord |
+| **Scalabilité carte** — adapter seuils de jambes à l'échelle (1:4000 sprint vs 1:15000 forêt) | Moyenne — lire `scale` depuis OCAD metadata | Accès `map_scale` dans `GAConfig` |
+| **Proximité arène/spectateurs sprint** (C17 IOF §3.2) — ≥1 poste visible depuis start/finish | Moyenne — nécessite coordonnées arène dans requête | Paramètre `arena_coords` optionnel dans `GenerationRequest` |
+| **Apprentissage supervisé sur circuits référence** — fine-tuner le CNN sur des circuits d'experts annotés | Haute — dataset annoté requis (WRE/IOF) | CNN V4 déjà base solide (F1=0.814) |

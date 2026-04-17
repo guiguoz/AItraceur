@@ -145,6 +145,7 @@ export function MapViewer({
   onMapReady = null,
   routeDisplay = null,
   legRoutesMap = {},  // {legIdx: {routes, choiceScore}} — choix auto post-sprint
+  navigationQuality = [],  // [{from_idx, to_idx, nav_score, ...}] — coloration par jambe
   ocadMode = false,  // true → masque OSM, affiche uniquement PNG OCAD
   backgroundControls = [],  // mode compétition — postes des autres circuits
 }) {
@@ -284,17 +285,48 @@ export function MapViewer({
           />
         ))}
 
-        {/* Course polyline connecting controls in order */}
-        {orderedPositions.length >= 2 && (
-          <Polyline
-            positions={orderedPositions}
-            pathOptions={{ color: IOF_COLOR, weight: 2, opacity: 0.85 }}
-          />
-        )}
+        {/* Course polyline — par jambe colorée si nav quality disponible, sinon magenta IOF */}
+        {orderedPositions.length >= 2 && navigationQuality.length > 0
+          ? orderedPositions.slice(0, -1).map((pos, i) => {
+              const leg = navigationQuality[i]
+              const score = leg?.nav_score ?? null
+              const color = score === null ? IOF_COLOR
+                : score >= 0.7 ? '#22c55e'
+                : score >= 0.4 ? '#f59e0b'
+                : '#ef4444'
+              return (
+                <Polyline
+                  key={`leg-nav-${i}`}
+                  positions={[pos, orderedPositions[i + 1]]}
+                  pathOptions={{ color, weight: 2, opacity: 0.9 }}
+                >
+                  <Popup>
+                    <div className="text-xs">
+                      <strong>Jambe {i + 1}</strong><br />
+                      {leg?.attack_score != null && <>Attaque : {leg.attack_score.toFixed(2)}<br /></>}
+                      {leg?.catch_score != null && <>Arrêt : {leg.catch_score.toFixed(2)}<br /></>}
+                      {leg?.handrail_score != null && <>Main c. : {leg.handrail_score.toFixed(2)}<br /></>}
+                      {score != null && <>Nav score : {score.toFixed(2)}</>}
+                    </div>
+                  </Popup>
+                </Polyline>
+              )
+            })
+          : orderedPositions.length >= 2 && (
+              <Polyline
+                positions={orderedPositions}
+                pathOptions={{ color: IOF_COLOR, weight: 2, opacity: 0.85 }}
+              />
+            )
+        }
 
 
-        {/* Background controls — autres circuits (mode compétition) */}
-        {backgroundControls.map((ctrl, i) => (
+        {/* Background controls — autres circuits (mode compétition)
+            Dédupliqués par id : une balise partagée (départ/arrivée) a le même id
+            dans le circuit actif → on ne l'affiche pas en doublon. */}
+        {backgroundControls
+          .filter(bg => !controls.some(ac => ac.id && bg.id && ac.id === bg.id))
+          .map((ctrl, i) => (
           <Marker
             key={`bg_${i}`}
             position={[ctrl.lat, ctrl.lng]}

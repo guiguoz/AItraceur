@@ -86,6 +86,18 @@ Avant chaque génération GA, une grille 30×30 d'altitudes est précomputée vi
 - Fallback silencieux si IGN inaccessible — terme G fitness désactivé
 - Actif sur `/generate-circuit` **et** `/generate-sprint`
 
+### map_scale — Propagation échelle OCAD
+
+L'échelle de la carte OCAD est extraite dans `OcadUploader.jsx` via `normalizeScale()` (gère string `"1:10 000"`, objet, number) et propagée jusqu'au `GenerationConfig` :
+
+```
+OcadUploader.scale → App.jsx ocadScale → request body map_scale
+  → _sprint_impl / _circuit_impl → GenerationRequest.map_scale → GenerationConfig.map_scale
+```
+
+- `leg_m` est en **mètres terrain** (Haversine WGS84) → cibles terme L correctes telles quelles
+- `map_scale` est disponible pour futures features (seuils adaptatifs, boucles papillon, etc.)
+
 ### Fitness GA — termes A→L
 
 | Terme | Critère | Poids |
@@ -173,6 +185,6 @@ Issues identifiées lors de l'audit du document IOF/FFCO (avril 2026) mais non i
 | Sujet | Complexité | Prérequis |
 |-------|-----------|-----------|
 | **Boucles papillon LD** — vérifier et favoriser les formes en 8 (IOF LD §4.4) | Haute — refonte mutations GA + check contrôleur | Opérateur de croisement spatial (Segment Crossover) d'abord |
-| **Scalabilité carte** — adapter seuils de jambes à l'échelle (1:4000 sprint vs 1:15000 forêt) | Moyenne — lire `scale` depuis OCAD metadata | Accès `map_scale` dans `GAConfig` |
+| **Scalabilité carte** — utiliser `map_scale` pour adapter seuils (déjà propagé, non utilisé dans terme L) | Faible — `map_scale` disponible dans `GenerationConfig`, reste à câbler aux seuils | — |
 | **Proximité arène/spectateurs sprint** (C17 IOF §3.2) — ≥1 poste visible depuis start/finish | Moyenne — nécessite coordonnées arène dans requête | Paramètre `arena_coords` optionnel dans `GenerationRequest` |
 | **Apprentissage supervisé sur circuits référence** — fine-tuner le CNN sur des circuits d'experts annotés | Haute — dataset annoté requis (WRE/IOF) | CNN V4 déjà base solide (F1=0.814) |

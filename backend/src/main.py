@@ -2111,6 +2111,14 @@ def _circuit_impl(body: dict) -> dict:
     required_controls_raw = body.get("required_controls") or []
     candidate_points = list(body.get("candidate_points") or [])
     existing_controls = body.get("existing_controls", [])  # mode compétition
+    _raw_scale = body.get("map_scale")
+    map_scale: Optional[int] = None
+    if _raw_scale is not None:
+        try:
+            _s = int(_raw_scale)
+            map_scale = _s if 1000 <= _s <= 50000 else None
+        except (ValueError, TypeError):
+            pass
     _n_isom = sum(1 for cp in candidate_points if cp.get("isom"))
     print(f"[circuit] candidate_points: {len(candidate_points)} total, {_n_isom} avec isom", flush=True)
 
@@ -2160,6 +2168,7 @@ def _circuit_impl(body: dict) -> dict:
         required_controls=required_controls_raw,
         candidate_points=candidate_points,
         start_position=tuple(start_position_raw) if start_position_raw and len(start_position_raw) >= 2 else None,
+        map_scale=map_scale,
     )
 
     # ── HeatmapCache CNN (même logique que _sprint_impl) ──────────────────────
@@ -2255,6 +2264,7 @@ def _circuit_impl(body: dict) -> dict:
             start_position=request.start_position,
             heatmap_cache=heatmap_cache,
             elevation_cache=elevation_cache,
+            map_scale=request.map_scale,
         )
 
     generator = AIGenerator()
@@ -3890,6 +3900,14 @@ def _sprint_impl(task_id: str, body: dict) -> None:
     map_id = body.get("map_id", None)        # mapId du tile service (PNG OCAD rendu)
     ocad_sw = body.get("ocad_sw", None)      # [lat, lng] coin SW de la carte OCAD
     ocad_ne = body.get("ocad_ne", None)      # [lat, lng] coin NE de la carte OCAD
+    _raw_scale_s = body.get("map_scale")
+    map_scale: Optional[int] = None
+    if _raw_scale_s is not None:
+        try:
+            _s = int(_raw_scale_s)
+            map_scale = _s if 1000 <= _s <= 50000 else None
+        except (ValueError, TypeError):
+            pass
 
     dialogue = []
     oob_polygons = list(forbidden_zones)
@@ -4100,6 +4118,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
         elevation_cache=_elevation_cache,
         route_analyzer=route_analyzer,   # re-ranker choix d'itinéraire sprint
         rules_engine=_rules_engine,
+        map_scale=map_scale,
     )
 
     print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ GA generate ({len(candidate_points)} candidats)...", flush=True)

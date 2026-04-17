@@ -536,6 +536,7 @@ function App() {
   const [detectedMode, setDetectedMode] = useState(null) // null | 'sprint' | 'forest'
   const [ocadMapId, setOcadMapId] = useState(null)   // mapId retourné par le tile service
   const [ocadBounds, setOcadBounds] = useState(null) // { southWest:[lat,lng], northEast:[lat,lng] }
+  const [ocadScale, setOcadScale] = useState(null)   // échelle OCAD (ex: 4000 pour 1:4000)
 
   const getAllExistingControls = () =>
     circuits
@@ -558,6 +559,7 @@ function App() {
 
   const handleOcadLoaded = (data) => {
     setOcadData(data)
+    setOcadScale(data.scale ?? null)
     setError(null)
     setCircuits([])
     setActiveCircuitId(null)
@@ -870,6 +872,7 @@ function App() {
           ocad_sw: ocadBounds.southWest,
           ocad_ne: ocadBounds.northEast,
         } : {}),
+        ...(ocadScale != null ? { map_scale: ocadScale } : {}),
       }
 
       let controls
@@ -890,6 +893,7 @@ function App() {
             ocad_sw: ocadBounds.southWest,
             ocad_ne: ocadBounds.northEast,
           } : {}),
+          ...(ocadScale != null ? { map_scale: ocadScale } : {}),
         }
         const { data: { task_id } } = await generateSprint(sprintParams)
         const data = await _pollSprintStatus(task_id, setProgressLabel)
@@ -1347,7 +1351,7 @@ function App() {
                       </button>
                     )}
                     <button
-                      onClick={() => { setOcadData(null); setCircuits([]); setActiveCircuitId(null); setImageData(null); setMapMode('osm') }}
+                      onClick={() => { setOcadData(null); setOcadScale(null); setCircuits([]); setActiveCircuitId(null); setImageData(null); setMapMode('osm') }}
                       className="text-xs text-gray-400 hover:text-red-400 transition-colors"
                     >
                       Fermer

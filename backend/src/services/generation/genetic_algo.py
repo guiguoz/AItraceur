@@ -74,6 +74,7 @@ class GenerationConfig:
     # Type et niveau technique — pour charger les seuils IOF/FFCO dynamiques
     circuit_type: str = "forest"  # "sprint", "forest", "md", "couleur"
     technical_level: int = 3      # TD1–TD5
+    map_scale: Optional[int] = None  # échelle OCAD (ex: 4000 pour 1:4000) — infrastructure future
 
     # Grille de scores V2 précomputée (optionnel)
     # Si fourni : Smart Seeding + evaluate_fitness() utilisent le cache pour les lookups O(1).

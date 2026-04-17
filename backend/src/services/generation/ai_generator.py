@@ -43,6 +43,7 @@ class GenerationRequest:
     # RouteAnalyzer OSM — si fourni, active le re-ranker choix d'itinéraire sprint.
     rules_engine: Optional[object] = field(default=None, repr=False)
     # FFCORulesEngine — source de vérité des seuils IOF/FFCO (injecté dans GenerationConfig).
+    map_scale: Optional[int] = None  # échelle OCAD (ex: 4000 pour 1:4000)
 
 
 @dataclass
@@ -205,6 +206,7 @@ class AIGenerator:
             heatmap_cache=request.heatmap_cache,
             elevation_cache=request.elevation_cache,
             rules_engine=request.rules_engine,
+            map_scale=request.map_scale,
         )
 
         # Initialiser le GA

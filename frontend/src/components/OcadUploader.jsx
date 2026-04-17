@@ -75,6 +75,28 @@ const OcadUploader = ({ onOcadLoaded, onLoading, onError }) => {
 
           const symbols = ocadMap.symbols || {};
 
+          const normalizeScale = (raw) => {
+            const candidate = raw?.value ?? raw?.scale ?? raw;
+            let parsed;
+            if (typeof candidate === "string") {
+              const m = candidate.match(/(\d[\d\s]*)\s*$/);
+              parsed = m ? parseInt(m[1].replace(/\s/g, ""), 10) : null;
+            } else {
+              parsed = candidate != null ? Math.round(candidate) : null;
+            }
+            if (!Number.isFinite(parsed)) return null;
+            return (parsed >= 1000 && parsed <= 50000) ? parsed : null;
+          };
+          const rawScale =
+            ocadMap.setup?.scales?.[0]?.value ??
+            ocadMap.setup?.scales?.[0] ??
+            ocadMap.setup?.Scale ??
+            ocadMap.setup?.scale ??
+            ocadMap.header?.scale ??
+            null;
+          const scale = normalizeScale(rawScale);
+          if (!scale) console.warn("[OcadUploader] map_scale introuvable ou hors plage", rawScale);
+
           if (onOcadLoaded) {
             onOcadLoaded({
               fileName: file.name,
@@ -83,7 +105,8 @@ const OcadUploader = ({ onOcadLoaded, onLoading, onError }) => {
               rawOcad: ocadMap,
               geojson,
               symbols,
-              rawFile: file,  // Pass raw file for tile generation
+              rawFile: file,
+              scale,
             });
           }
         } catch (err) {

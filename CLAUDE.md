@@ -96,7 +96,8 @@ OcadUploader.scale → App.jsx ocadScale → request body map_scale
 ```
 
 - `leg_m` est en **mètres terrain** (Haversine WGS84) → cibles terme L correctes telles quelles
-- `map_scale` est disponible pour futures features (seuils adaptatifs, boucles papillon, etc.)
+- `map_scale` adapte `min_control_separation_m` (equity score) et `min_control_distance` (fallback GA) via `scale_min_separation()` (module-level `genetic_algo.py`) : `ceil(base × scale/ref)`, refs IOF sprint=4000 / md=10000 / ld=15000, clamp [15-80m] sprint / [40-150m] md+ld. LD vétérans 1:10000 → clamp bas 40m. Alias "forest"/"foret" → md.
+- Terme L inchangé — distances IOF (250/600/2000m) indépendantes de l'échelle
 
 ### Fitness GA — termes A→L
 
@@ -185,6 +186,6 @@ Issues identifiées lors de l'audit du document IOF/FFCO (avril 2026) mais non i
 | Sujet | Complexité | Prérequis |
 |-------|-----------|-----------|
 | **Boucles papillon LD** — vérifier et favoriser les formes en 8 (IOF LD §4.4) | Haute — refonte mutations GA + check contrôleur | Opérateur de croisement spatial (Segment Crossover) d'abord |
-| **Scalabilité carte** — utiliser `map_scale` pour adapter seuils (déjà propagé, non utilisé dans terme L) | Faible — `map_scale` disponible dans `GenerationConfig`, reste à câbler aux seuils | — |
+| ~~**Scalabilité carte**~~ — ✅ `scale_min_separation()` — refs IOF sprint=4000/md=10000/ld=15000, `ceil`, clamp, alias forest→md | Implémenté 2026-04-25 | — |
 | **Proximité arène/spectateurs sprint** (C17 IOF §3.2) — ≥1 poste visible depuis start/finish | Moyenne — nécessite coordonnées arène dans requête | Paramètre `arena_coords` optionnel dans `GenerationRequest` |
 | **Apprentissage supervisé sur circuits référence** — fine-tuner le CNN sur des circuits d'experts annotés | Haute — dataset annoté requis (WRE/IOF) | CNN V4 déjà base solide (F1=0.814) |

@@ -10,12 +10,12 @@
 - **Génération automatique** de circuits sprint (urbain) et forêt via algorithme génétique multi-objectifs
 - **Sprint asynchrone** : POST retourne `task_id` en <100ms, pipeline en arrière-plan (~35s), polling GET `/sprint-status`
 - **Contexte terrain manuel** : sélecteur [Auto / Urbain / Forêt] pour forcer le mode détection IA
-- **Fitness multicritère V2** : IA Score (HeatmapCache CNN), pénalité distance, détection dog-legs, bonus rythme
+- **Fitness multicritère A→L** : IA Score CNN (HeatmapCache), distance, dog-legs, rythme, diversité, zones interdites, D+/distance, forme géométrique, point d'attaque/arrêt/main courante, longueur jambes IOF
 - **Pipeline OCAD natif** : le fichier `.ocd` uploadé alimente directement l'IA — zones interdites extraites des vecteurs (sym 709/527 ISSprOM/ISOM), image rasterisée normalisée vers la distribution MapAnt d'entraînement
 - **HeatmapCache** : grille de scores V2 précomputée (O(1) lookups GA), Smart Seeding population initiale — source : OCAD tile service (priorité) ou MapAnt (fallback forêt/LD)
 - **Forbidden mask vectoriel** : polygones OOB extraits directement depuis les symboles OCAD (100 % fiable) ; requête Overpass bâtiments skippée → gain ~50s
 - **Ancrage vectoriel ISOM Phase 2** : postes ancrés sur les features OCAD réelles via `scipy.spatial.KDTree` (O(log N)) — pénalité si poste trop loin (rayon 40 m sprint / 80 m forêt), attractivité sémantique `ISOM_ATT` transmise depuis le frontend (`extractCandidatePoints` : contours 101-105 ignorés, chemins forêt 503-508 inclus avec extraction des vertices de changement de direction, ruisseaux 301-303 exclus pour éviter la confusion avec les lignes nord magnétiques)
-- **Contrôleur IOF/FFCO** : validation automatique des règles (dog-legs, jambes C01–C12, TD1-5/PD1-5)
+- **Contrôleur IOF/FFCO** : validation automatique des règles (dog-legs, jambes C01–C16, TD1-5/PD1-5)
 - **Boucle traceur ↔ contrôleur** : dialogue IA avec corrections automatiques (jusqu'à 5 itérations)
 - **FFCORulesEngine** : source de vérité unique pour les seuils FFCO/IOF — distances, TD, temps gagnants par catégorie exposés via `GET /api/v1/categories` ; seuils injectés dans le GA (remplace les constantes hardcodées)
 - **Détection circuit impossible** : score GA < -5000 → erreur explicite ; distance < 70 % cible → `warning` dans la réponse
@@ -23,7 +23,8 @@
 - **DialogueLog** : panneau visuel des échanges traceur↔contrôleur avec score IOF/FFCO par itération
 - **Avertissement génération** : si circuit < 70 % de la distance cible → `warning` + `distance_ratio` affichés dans l'interface (fond orange)
 - **Complétion de circuit** : si le circuit validé est sous la distance cible, l'IA propose des postes supplémentaires via `/generate-circuit` avec `required_controls` — chaque suggestion s'intercale dans la jambe géométriquement la plus proche (`insertAfterId` + label "intercaler entre poste #X → poste #Y"), OCAD params (map_id, candidate_points CNN) transmis pour maintenir la qualité forêt
-- **CNN Scorer V4** : MobileNetV3-Small ONNX, F1=0.814, Recall=0.919 — 428k patches (RG2 UK + Vikazimut FR), entraîné sur Kaggle T4 GPU ; fallback XGBoost V3 (AUC=0.807) si `.onnx` absent
+- **CNN Scorer V4** : MobileNetV3-Small ONNX (6.1 MB), F1=0.814, Recall=0.919 — 428k patches (RG2 UK + Vikazimut FR), entraîné sur Kaggle T4 GPU ; fallback XGBoost V3 (AUC=0.807) si `.onnx` absent
+- **map_scale adaptatif** : échelle OCAD extraite du `.ocd` → `scale_min_separation()` adapte `min_control_separation_m` à l'échelle (refs IOF sprint=4000 / md=10000 / ld=15000, LD vétérans 1:10000 → 40m)
 - **Carte OCAD** : rendu haute-fidélité des fichiers `.ocd` via tile service Node.js
 - **Terrain OSM** : enrichissement automatique depuis Overpass API (highways pour RouteAnalyzer)
 - **Export** : IOF XML 3.0, GPX, PDF, KML/KMZ — à importer dans OCAD pour le tracé final

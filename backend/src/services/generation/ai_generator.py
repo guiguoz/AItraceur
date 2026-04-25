@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from ..learning.ocad_patch_scorer import HeatmapCache
 
 from .graph_builder import GraphBuilder
-from .genetic_algo import GeneticAlgorithm, GenerationConfig
+from .genetic_algo import GeneticAlgorithm, GenerationConfig, scale_min_separation
 
 
 # =============================================
@@ -188,7 +188,11 @@ class AIGenerator:
         """Génère avec l'algorithme génétique."""
         # Mode sprint : circuit de type sprint OU TD1/TD2 (débutants)
         sprint_mode = request.circuit_type == "sprint" or request.technical_level in ("TD1", "TD2")
-        min_dist = 30 if sprint_mode else 60
+        # Fallback dégradé (sans règles JSON) — conservateur
+        _base_dist = 30 if sprint_mode else 60
+        # ct pour scaling = format géographique (circuit_type), pas le niveau TD.
+        # TD1/TD2 affecte _base_dist (placement serré) mais pas la référence échelle/clamp.
+        min_dist = scale_min_separation(_base_dist, request.map_scale, request.circuit_type or "md")
 
         config = GenerationConfig(
             target_length_m=request.target_length_m,

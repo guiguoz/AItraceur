@@ -85,8 +85,8 @@ backend/src/aitraceur/
 | Répertoire | Fichiers clés | Rôle |
 |-----------|---------------|------|
 | `generation/` | `genetic_algo.py`, `ai_generator.py`, `scorer.py` | GA FastAPI-facing, ISOM KDTree Phase 2 |
-| `controleur/` | `controleur.py`, `traceur_corrections.py` | Validation C01–C12 IOF/FFCO, corrections auto |
-| `learning/` | `ocad_patch_scorer.py`, `patch_feature_extractor.py`, `style_normalizer.py` | XGBoost V3, HeatmapCache, normalisation OCAD→MapAnt |
+| `controleur/` | `controleur.py`, `traceur_corrections.py` | Validation C01–C16 IOF/FFCO, corrections auto |
+| `learning/` | `ocad_patch_scorer.py`, `patch_feature_extractor.py`, `style_normalizer.py` | CNN V4 (MobileNetV3-Small ONNX, F1=0.814) + XGBoost V3 fallback, HeatmapCache |
 | `terrain/` | `osm_fetcher.py`, `elevation_fetcher.py`, `mapant_fetcher.py` | OSM Overpass, IGN LIDAR, MapAnt fallback |
 | `optimization/` | `route_analyzer.py`, `route_calculator.py`, `detector.py` | NetworkX A*, diversité Jaccard, dog-legs |
 | `rules/` | `ffco_rules_engine.py` | Source de vérité FFCO/IOF (distances, TD, temps gagnants) |
@@ -165,7 +165,7 @@ aiSuggestions[] → AISuggestionPanel (validation/refus poste par poste)
     │
     ▼
 MapViewer → Polyline IOF magenta (départ→postes→arrivée)
-DialogueLog → échanges traceur↔contrôleur + rapport C01–C12
+DialogueLog → échanges traceur↔contrôleur + rapport C01–C16
 ```
 
 ---
@@ -186,19 +186,16 @@ Upload .ocd  →  ocad-tiler parse  →  PNG pleine carte + GeoJSON vecteurs
 
 ---
 
-## 6. Pipeline ML — Scorer XGBoost V3
+## 6. Pipeline ML — Scorer CNN V4 (MobileNetV3-Small ONNX)
 
 ```
-Données RG2 (scrape_rg2.py)
-    │  370k postes géoréférencés (88 clubs UK)
+Datasets : RG2 UK (226k patches) + Vikazimut FR (201k patches) = 428k total
     ▼
-Patches MapAnt 256×256 → 18 features (patch_feature_extractor.py)
-    │  [ISOM_global×7, ISOM_centre×7, edge, corner, entropy, is_urban]
-    ▼
-XGBoost V3 (train_control_scorer.py)  →  patch_scorer_v2.pkl (AUC=0.807)
-    │
+CNN MobileNetV3-Small — fine-tuning ImageNet, 20 epochs Kaggle T4 GPU
+→ control_scorer_cnn.onnx (6.1 MB) — F1=0.814, Recall=0.919 (epoch 18)
     ▼
 build_heatmap_cache(img, bbox, mpp)
+    │  CnnPatchScorer (priorité) ou XGBoost V3 fallback (patch_scorer_v2.pkl AUC=0.807)
     │  Grille 40×40, source : OCAD PNG (priorité) ou MapAnt (fallback)
     │  OOB mask : vecteurs OCAD sym 709/527 rasterisés (dilation 15m)
     ▼
@@ -211,16 +208,22 @@ HeatmapCache passé au GA → lookups O(1) pendant l'évolution
 
 ## 7. Algorithme génétique — Patterns clés
 
-### 7.1. Fitness multicritère
+### 7.1. Fitness multicritère (termes A→L)
 
-```
-fitness = w_dist × dist_score
-        + w_ml   × heatmap_score       ← XGBoost V3 (O(1) lookup)
-        + w_rythm × rhythm_score
-        - w_dog  × dogleg_penalty       ← A* NetworkX OSM (C01)
-        - w_clust × clustering_penalty
-        + IOFCompliance (TD1-5, PD1-5)
-```
+| Terme | Critère | Poids |
+|-------|---------|-------|
+| A | Score CNN HeatmapCache (O(1)) | ×30 |
+| B | Pénalité distance vs cible | ×40 |
+| C | Dog-legs (−20 pts/violation) | ×1 |
+| D | Rythme CV inter-postes (cap 0.8) | ×15 |
+| E | Diversité GPX Vikazimut | additive |
+| F | Zones interdites (−50 pts/poste) | additive |
+| G | D+/distance > 4% IOF (ElevationCache) | additive |
+| H | Forme géométrique anti-Z/spirale | ×10 |
+| I | Qualité point d'attaque (KDTree OCAD) | ×8 |
+| J | Ligne d'arrêt (KDTree OCAD) | ×6 |
+| K | Main courante (KDTree OCAD) | ×5 |
+| L | Longueur jambes vs profil IOF (Sprint 250m, MD 600m, LD 2000m) | ×8 |
 
 ### 7.2. ISOM KDTree Phase 2
 
@@ -232,7 +235,7 @@ Lors de l'initialisation du GA, un `scipy.spatial.KDTree` est construit sur les 
 GA génère circuit
     │
     ▼
-ControleurSprint.check(circuit)  →  rapport C01–C12
+ControleurSprint.check(circuit)  →  rapport C01–C16
     │  corrections automatiques si C01/C02/C08/C10
     ▼
 apply_corrections(circuit, rapport)

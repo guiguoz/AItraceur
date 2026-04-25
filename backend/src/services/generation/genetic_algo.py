@@ -107,6 +107,41 @@ class GenerationResult:
 
 
 # =============================================
+# Seuils de séparation adaptés à l'échelle OCAD
+# =============================================
+
+# "forest"/"foret"/"forêt" = alias non-IOF → md (ref=10000).
+# Les circuits LD doivent passer circuit_type="ld" explicitement pour bénéficier de ref=15000.
+_SCALE_ALIASES: Dict[str, str] = {"foret": "md", "forest": "md", "forêt": "md"}
+_SCALE_REF: Dict[str, int] = {"sprint": 4000, "md": 10000, "ld": 15000}
+_SCALE_CLAMP: Dict[str, Tuple[int, int]] = {
+    "sprint": (15, 80),
+    "md": (40, 150),
+    "ld": (40, 150),
+}
+
+
+def scale_min_separation(
+    base_m: float,
+    map_scale: Optional[int],
+    circuit_type: Optional[str],
+) -> int:
+    """Scale min separation to maintain constant mm-on-map as scale changes.
+
+    Uses ceil (conservative for a minimum constraint — never round below intended min).
+    base_m assumed calibrated at IOF reference scale (sprint=4000, md=10000, ld=15000).
+    Clamp is always applied, even when map_scale is None.
+    """
+    ct = (circuit_type or "md").lower()
+    ct = _SCALE_ALIASES.get(ct, ct)
+    lo, hi = _SCALE_CLAMP.get(ct, (40, 150))
+    if not map_scale:
+        return int(max(lo, min(hi, math.ceil(base_m))))
+    ref = _SCALE_REF.get(ct, 10000)
+    return int(max(lo, min(hi, math.ceil(base_m * map_scale / ref))))
+
+
+# =============================================
 # Algorithme génétique
 # =============================================
 class GeneticAlgorithm:
@@ -267,6 +302,11 @@ class GeneticAlgorithm:
             rules = category.get(td_key, None)
             if rules is None:
                 rules = data.get("_defaults", defaults)
+            _scale = self.config.map_scale
+            if "min_control_separation_m" in rules:
+                rules = {**rules, "min_control_separation_m": scale_min_separation(
+                    rules["min_control_separation_m"], _scale, ct
+                )}
             return rules
         except Exception:
             return defaults

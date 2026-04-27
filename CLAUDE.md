@@ -116,6 +116,22 @@ OcadUploader.scale → App.jsx ocadScale → request body map_scale
 | K | Main courante (KDTree OCAD, si dispo) | ×5 |
 | L | Conformité longueur jambes au profil format IOF (Sprint 250m, MD 600m, LD 2000m) | ×8 |
 
+### GA — Opérateur de croisement : Segment Crossover spatial (2026-04-27)
+
+`_segment_crossover()` remplace `_ox_crossover()` (OX TSP). L'OX traitait les coordonnées WGS84 comme des symboles de permutation — deux postes géographiquement proches étaient traités comme complètement différents.
+
+**Algorithme :**
+1. Choisir un point de coupe aléatoire `cut` dans les contrôles internes (hors départ/arrivée)
+2. Ancre = `inner1[cut-1]` (dernier contrôle du premier segment de P1)
+3. Trouver `j = argmin distance(ancre, inner2[k])` — le point de jonction naturel dans P2
+4. Rotation de `inner2` : `rotation = (j - cut + 1) % inner_n` → `inner2_rot[cut-1] == inner2[j]`
+5. `child1 = inner1[:cut] + inner2_rot[cut:]` (longueur garantie par construction)
+6. `child2 = inner2_rot[:cut] + inner1[cut:]`
+
+Départ et arrivée (`controls[0]`, `controls[-1]`) préservés depuis chaque parent respectif. Complexité O(inner_n) par paire ≈ O(8) — négligeable. `_ox_crossover()` conservé dans le code, non appelé.
+
+**Prérequis boucles papillon LD satisfait.** Prochaine étape : terme fitness figure-8 + check contrôleur.
+
 ### Boucle traceur ↔ contrôleur
 
 ```
@@ -175,7 +191,7 @@ Le notebook Kaggle embarque le script inline (`%%writefile train_cnn.py`) pour �
 | Priorité | Tâche |
 |----------|-------|
 | Haute | Déploiement prod (CORS, API_BASE, build frontend, rate limiting, clé admin) |
-| Moyenne | Segment Crossover spatial (remplacer OX TSP) — quand plateau fitness GA |
+| ~~Moyenne~~ | ~~Segment Crossover spatial (remplacer OX TSP)~~ — ✅ `_segment_crossover()` implémenté 2026-04-27 |
 | Basse | Mode Compétition (plusieurs circuits partagent des balises) |
 | Basse | Intercalation V2 : algorithme TSP cheapest-insertion (backend) pour ordre optimal des postes de complétion |
 
@@ -185,7 +201,7 @@ Issues identifiées lors de l'audit du document IOF/FFCO (avril 2026) mais non i
 
 | Sujet | Complexité | Prérequis |
 |-------|-----------|-----------|
-| **Boucles papillon LD** — vérifier et favoriser les formes en 8 (IOF LD §4.4) | Haute — refonte mutations GA + check contrôleur | Opérateur de croisement spatial (Segment Crossover) d'abord |
+| **Boucles papillon LD** — vérifier et favoriser les formes en 8 (IOF LD §4.4) | Haute — terme fitness figure-8 + check contrôleur | ~~Segment Crossover~~ ✅ — prérequis satisfait ; reste : terme fitness butterfly + validation contrôleur |
 | ~~**Scalabilité carte**~~ — ✅ `scale_min_separation()` — refs IOF sprint=4000/md=10000/ld=15000, `ceil`, clamp, alias forest→md | Implémenté 2026-04-25 | — |
 | **Proximité arène/spectateurs sprint** (C17 IOF §3.2) — ≥1 poste visible depuis start/finish | Moyenne — nécessite coordonnées arène dans requête | Paramètre `arena_coords` optionnel dans `GenerationRequest` |
 | **Apprentissage supervisé sur circuits référence** — fine-tuner le CNN sur des circuits d'experts annotés | Haute — dataset annoté requis (WRE/IOF) | CNN V4 déjà base solide (F1=0.814) |

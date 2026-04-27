@@ -872,7 +872,7 @@ class GeneticAlgorithm:
         return parents
 
     def _crossover(self, parents: List[Circuit]) -> List[Circuit]:
-        """Effectue le croisement OX."""
+        """Effectue le croisement Segment (spatial)."""
         offspring = []
 
         for i in range(0, len(parents) - 1, 2):
@@ -880,7 +880,7 @@ class GeneticAlgorithm:
             parent2 = parents[i + 1]
 
             if random.random() < self.config.crossover_rate:
-                child1, child2 = self._ox_crossover(parent1, parent2)
+                child1, child2 = self._segment_crossover(parent1, parent2)
                 offspring.append(child1)
                 offspring.append(child2)
             else:
@@ -939,6 +939,48 @@ class GeneticAlgorithm:
         if None in child1_controls or None in child2_controls:
             return Circuit(controls=list(p1.controls)), Circuit(controls=list(p2.controls))
         return Circuit(controls=child1_controls), Circuit(controls=child2_controls)
+
+    def _segment_crossover(self, p1: Circuit, p2: Circuit) -> Tuple[Circuit, Circuit]:
+        """Segment Crossover spatial — remplace OX TSP.
+
+        Trouve le point de jonction naturel entre les deux parents (la paire de contrôles
+        internes la plus proche géographiquement) et effectue le croisement à ce point.
+        Préserve des sous-tours géographiquement cohérents dans les enfants.
+        Longueur du chromosome garantie par construction.
+        """
+        n = len(p1.controls)
+        if n != len(p2.controls) or n < 4:
+            return Circuit(controls=list(p1.controls)), Circuit(controls=list(p2.controls))
+
+        inner_n = n - 2
+        if inner_n < 2:
+            return Circuit(controls=list(p1.controls)), Circuit(controls=list(p2.controls))
+
+        inner1 = list(p1.controls[1:-1])
+        inner2 = list(p2.controls[1:-1])
+
+        # Point de coupe aléatoire dans [1, inner_n-1]
+        cut = random.randint(1, inner_n - 1)
+
+        # Ancre = dernier contrôle du premier segment de P1
+        anchor = inner1[cut - 1]
+
+        # j = contrôle de inner2 le plus proche de l'ancre (point de jonction naturel)
+        j = min(range(inner_n), key=lambda k: self._haversine_m(anchor, inner2[k]))
+
+        # Rotation de inner2 pour aligner inner2[j] à la position cut-1
+        # → inner2_rot[cut-1] == inner2[j] : jonction géographique cohérente
+        rotation = (j - cut + 1) % inner_n
+        inner2_rot = inner2[rotation:] + inner2[:rotation]
+
+        # Enfants : longueur = inner_n garantie (cut + (inner_n - cut) = inner_n)
+        child1_inner = inner1[:cut] + inner2_rot[cut:]
+        child2_inner = inner2_rot[:cut] + inner1[cut:]
+
+        return (
+            Circuit(controls=[p1.controls[0]] + child1_inner + [p1.controls[-1]]),
+            Circuit(controls=[p2.controls[0]] + child2_inner + [p2.controls[-1]]),
+        )
 
     def _mutate(
         self,

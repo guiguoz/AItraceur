@@ -54,7 +54,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     // Use renderSvg directly (not render()) to avoid an oversized intermediate raster.
     // render() internally uses svgResolution = min(R, scale/15000) which at scale 1:5000
     // gives 0.333 m/px → ~300Mpx SVG, exceeding Sharp's pixel limit.
-    const svg = renderSvg(tiler, extent, RESOLUTION, { fill: 'white' })
+    const svg = renderSvg(tiler, extent, RESOLUTION, { fill: 'white', applyGrivation: true })
     const xml = new XMLSerializer().serializeToString(svg)
     await sharp(Buffer.from(xml)).png().toFile(outputPath)
     console.log(`[render] Image saved: ${outputPath}`)

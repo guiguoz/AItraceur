@@ -206,6 +206,13 @@ class ControleurSprint:
         if self.circuit_type == "sprint":
             issues += self._check_c16_disorientation_clusters(ordered, circuit_config)
 
+        # C17 — poste TD1 trop loin d'une feature évidente (chemin, lisière, eau)
+        # Données pré-calculées par GA via compute_td1_path_distances(), passées via circuit_config.
+        # Silencieux si clé absente (pas de carte OCAD, ou TD != 1).
+        _td1_dists = (circuit_config or {}).get("td1_path_distances")
+        if _td1_dists and _td_key == "TD1":
+            issues += self._check_c17_td1_path_feature(ordered, _td1_dists)
+
         error_count = sum(1 for i in issues if i.severity == "ERROR")
         warning_count = sum(1 for i in issues if i.severity == "WARNING")
         info_count = sum(1 for i in issues if i.severity == "INFO")
@@ -702,6 +709,41 @@ class ControleurSprint:
                 rule_reference="IOF Sprint Course Planning Guidelines §4.5"
             )]
         return []
+
+    def _check_c17_td1_path_feature(
+        self, controls: List[Dict], td1_path_distances: dict
+    ) -> List[ControleurIssue]:
+        """C17 — Poste TD1 trop loin d'une feature évidente (chemin, lisière, eau).
+
+        Actif uniquement pour TD1. Utilise les distances pré-calculées par GA via
+        compute_td1_path_distances(), passées dans circuit_config['td1_path_distances'].
+        Seuil depuis controleur_rules.json navigation_checks.C17.max_dist_m.
+        """
+        nav_rules = self.all_rules.get("navigation_checks", {}).get("C17", {})
+        active_td = nav_rules.get("active_td", ["TD1"])
+        max_dist_m = nav_rules.get("max_dist_m", 30)
+        issues = []
+        for i, ctrl in enumerate(controls):
+            if ctrl.get("type") in ("start", "finish"):
+                continue
+            dist = td1_path_distances.get(i)
+            if dist is None:
+                continue
+            if dist > max_dist_m:
+                issues.append(ControleurIssue(
+                    code="C17", severity="WARNING",
+                    control_index=i, leg_from=-1, leg_to=-1,
+                    message=(
+                        f"Poste {ctrl.get('order', i + 1)} : feature évidente (chemin, lisière, eau) "
+                        f"à {dist:.0f}m (seuil TD1 : {max_dist_m}m)."
+                    ),
+                    suggestion=(
+                        "Déplacer le poste sur une jonction de chemins, un virage de sentier, "
+                        "un angle de lisière ou un point d'eau identifiable."
+                    ),
+                    rule_reference="FFCO RTS CO (mai 2025) TD1 — postes sur éléments évidents"
+                ))
+        return issues
 
     # ── Méthodes utilitaires ──────────────────────────────────────────────────
 

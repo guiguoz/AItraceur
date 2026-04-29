@@ -4380,11 +4380,16 @@ def _sprint_impl(task_id: str, body: dict) -> None:
             "td_level": _td_key,
         }
         # Passer nav_scores au dernier rapport contrôleur pour C14/C15
+        # + td1_path_distances pour C17 (TD1 uniquement, calcul léger sur KDTree)
+        _td1_path_dist = _ga.compute_td1_path_distances(_final_xy) if hasattr(_ga, "compute_td1_path_distances") else {}
+        _circuit_cfg = {"category": category, "nav_scores": _final_nav_scores, "td_level": _td_key}
+        if _td1_path_dist:
+            _circuit_cfg["td1_path_distances"] = _td1_path_dist
         if final_report is not None:
             _final_report_with_nav = controleur.validate(
                 current_controls,
                 oob_polygons=oob_polygons,
-                circuit_config={"category": category, "nav_scores": _final_nav_scores, "td_level": _td_key},
+                circuit_config=_circuit_cfg,
                 route_analyzer=route_analyzer,
             )
             final_report = _final_report_with_nav

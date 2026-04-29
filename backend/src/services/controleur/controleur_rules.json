@@ -66,6 +66,15 @@
       "severity": "warning",
       "applies_to": ["sprint"],
       "reference": "IOF Sprint Course Planning Guidelines §4.5"
+    },
+    "C17": {
+      "id": "C17",
+      "name": "td1_on_obvious_feature",
+      "description": "Poste TD1 trop loin d'une feature évidente (chemin, lisière, eau, bâtiment) — distance calculée via KDTree OCAD",
+      "severity": "warning",
+      "active_td": ["TD1"],
+      "max_dist_m": 30,
+      "reference": "FFCO RTS CO (mai 2025) TD1 — postes sur éléments évidents"
     }
   },
   "forest": {

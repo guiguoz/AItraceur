@@ -224,6 +224,18 @@ class GeneticAlgorithm:
         self._nav_params: dict = self._load_nav_params()
         self._nav_cache: dict = {}  # cache (px,py,cx,cy,role) → score, clé arrondie à 4 décimales (~11m)
 
+        # ── TD1 preferred features (postes sur éléments évidents) ──────────────
+        # Actif uniquement pour technical_level == 1. Charge depuis placement_rules.json
+        # navigation.preferred_isom_codes. _best_att_ocad() utilise ce set pour
+        # prioriser les features chemin/lisière/eau avant de fallback sur l'attractivité générique.
+        _prefer_codes = self._nav_params.get("preferred_isom_codes")
+        self._td1_prefer_isom: Optional[set] = (
+            set(_prefer_codes) if _prefer_codes and self.config.technical_level == 1 else None
+        )
+        self._td1_prefer_max_dist_m: float = float(
+            self._nav_params.get("preferred_isom_max_dist_m", 25.0)
+        )
+
     def _load_leg_diversity_db(self) -> list:
         """Charge leg_diversity.json si présent. Retourne [] si absent (fallback silencieux)."""
         import json
@@ -498,6 +510,25 @@ class GeneticAlgorithm:
             result.append({"attack": att, "catch": cat, "handrail": hr})
         return result
 
+    def compute_td1_path_distances(self, controls: list) -> dict:
+        """Calcule la distance à la nearest preferred TD1 feature pour chaque poste.
+
+        Utilisé par le contrôleur C17. Retourne {control_index: dist_m}.
+        Retourne {} si technical_level != 1, _td1_prefer_isom absent, ou KDTree absent.
+        """
+        if self._td1_prefer_isom is None or self._ocad_tree is None:
+            return {}
+        result = {}
+        for i, ctrl in enumerate(controls):
+            cx, cy = ctrl[0], ctrl[1]
+            _, dist_m = self._best_att_ocad(
+                cx, cy, 200.0,
+                prefer_isom=self._td1_prefer_isom,
+                prefer_max_dist_m=200.0,
+            )
+            result[i] = round(dist_m, 1)
+        return result
+
     def set_graph(self, graph):
         """Définit le graphe de navigation."""
         self.graph = graph
@@ -537,12 +568,19 @@ class GeneticAlgorithm:
         dist_m = dist_deg * 111_000  # 1° ≈ 111 km (équateur)
         return self._ocad_pts[idx], dist_m
 
-    def _best_att_ocad(self, x: float, y: float, radius_m: float) -> tuple:
+    def _best_att_ocad(
+        self,
+        x: float,
+        y: float,
+        radius_m: float,
+        prefer_isom: Optional[set] = None,
+        prefer_max_dist_m: Optional[float] = None,
+    ) -> tuple:
         """Retourne (cp_dict, dist_m) du feature OCAD ISOM le plus attractif dans radius_m.
 
-        Utilise query_ball_point() pour récupérer tous les voisins dans le rayon,
-        puis sélectionne celui avec le score d'attractivité ISOM le plus élevé.
-        En cas d'égalité, préfère le plus proche.
+        Si prefer_isom défini : cherche d'abord dans min(radius_m, prefer_max_dist_m)
+        les features dont isom ∈ prefer_isom. Si trouvé, sélectionne parmi ceux-là.
+        Sinon fallback attractivité générique sur radius_m complet (comportement par défaut).
 
         Si KDTree non disponible ou rayon vide → (None, inf).
         """
@@ -552,6 +590,15 @@ class GeneticAlgorithm:
         idxs = self._ocad_tree.query_ball_point([x, y], radius_deg)
         if not idxs:
             return None, float("inf")
+
+        # TD1 preferred: chercher d'abord dans un rayon borné sur les codes cibles
+        if prefer_isom:
+            pref_r_deg = min(radius_deg, (prefer_max_dist_m or radius_m) / 111_000)
+            pref_idxs = self._ocad_tree.query_ball_point([x, y], pref_r_deg)
+            preferred = [i for i in pref_idxs if self._ocad_pts[i].get("isom") in prefer_isom]
+            if preferred:
+                idxs = preferred  # sélectionner uniquement parmi les preferred
+
         best_cp = None
         best_att = -1.0
         best_dist = float("inf")
@@ -753,14 +800,16 @@ class GeneticAlgorithm:
                 nx, ny = random.choice(self._top_candidates)
                 # Chaîner avec KDTree : ancre le candidat CNN sur la feature ISOM la plus attractive
                 if self._ocad_tree is not None:
-                    _cp, _d = self._best_att_ocad(nx, ny, 40)
+                    _cp, _d = self._best_att_ocad(nx, ny, 40,
+                        prefer_isom=self._td1_prefer_isom, prefer_max_dist_m=self._td1_prefer_max_dist_m)
                     if _cp:
                         nx, ny = _cp["x"], _cp["y"]
 
             # Snap vers feature OCAD ISOM la plus attractive dans le rayon (90% si KDTree, sinon 60% O(n))
             # → ancre les postes sur des éléments terrain réels dès l'initialisation
             elif self._ocad_tree is not None and random.random() < 0.90:
-                _cp, _d = self._best_att_ocad(nx, ny, 80)
+                _cp, _d = self._best_att_ocad(nx, ny, 80,
+                    prefer_isom=self._td1_prefer_isom, prefer_max_dist_m=self._td1_prefer_max_dist_m)
                 if _cp:
                     nx, ny = _cp["x"], _cp["y"]
             elif random.random() < 0.60:
@@ -1043,7 +1092,8 @@ class GeneticAlgorithm:
             y = max(bb["min_y"], min(bb["max_y"], y))
         # 60% snap vers la feature OCAD ISOM la plus attractive dans ≤50m
         if self._ocad_tree is not None and random.random() < 0.60:
-            _cp, _d = self._best_att_ocad(x, y, 50)
+            _cp, _d = self._best_att_ocad(x, y, 50,
+                prefer_isom=self._td1_prefer_isom, prefer_max_dist_m=self._td1_prefer_max_dist_m)
             if _cp:
                 x, y = _cp["x"], _cp["y"]
         if not self._is_in_forbidden_zone(x, y, forbidden_zones):
@@ -1105,7 +1155,8 @@ class GeneticAlgorithm:
         # Snap vers la feature OCAD ISOM la plus attractive dans ≤50m
         # → évite d'atterrir dans le vide cartographique après le repositionnement géométrique
         if self._ocad_tree is not None and random.random() < 0.60:
-            _cp, _d = self._best_att_ocad(new_x, new_y, 50)
+            _cp, _d = self._best_att_ocad(new_x, new_y, 50,
+                prefer_isom=self._td1_prefer_isom, prefer_max_dist_m=self._td1_prefer_max_dist_m)
             if _cp:
                 new_x, new_y = _cp["x"], _cp["y"]
 
@@ -1135,7 +1186,8 @@ class GeneticAlgorithm:
             y = max(bb["min_y"], min(bb["max_y"], y))
         # Snap vers la feature OCAD ISOM la plus attractive dans ≤80m
         if self._ocad_tree is not None and random.random() < 0.80:
-            _cp, _d = self._best_att_ocad(x, y, 80)
+            _cp, _d = self._best_att_ocad(x, y, 80,
+                prefer_isom=self._td1_prefer_isom, prefer_max_dist_m=self._td1_prefer_max_dist_m)
             if _cp:
                 x, y = _cp["x"], _cp["y"]
         elif random.random() < 0.40:

@@ -213,6 +213,14 @@ class ControleurSprint:
         if _td1_dists and _td_key == "TD1":
             issues += self._check_c17_td1_path_feature(ordered, _td1_dists)
 
+        # C18/C19/C20 — diversité et équilibre des types de legs
+        # Nécessitent nav_scores enrichis (Phase 2 — decision_points, route_diversity).
+        # Silencieux si nav_scores absent ou vide.
+        if _nav_scores and _td_key:
+            issues += self._check_c18_min_route_choice(ordered, _nav_scores, _td_key)
+            issues += self._check_c19_handrail_excess(ordered, _nav_scores, _td_key)
+            issues += self._check_c20_route_choice_excess(ordered, _nav_scores, _td_key)
+
         error_count = sum(1 for i in issues if i.severity == "ERROR")
         warning_count = sum(1 for i in issues if i.severity == "WARNING")
         info_count = sum(1 for i in issues if i.severity == "INFO")
@@ -744,6 +752,112 @@ class ControleurSprint:
                     rule_reference="FFCO RTS CO (mai 2025) TD1 — postes sur éléments évidents"
                 ))
         return issues
+
+    def _check_c18_min_route_choice(
+        self, controls: List[Dict], nav_scores: list, td_key: str
+    ) -> List[ControleurIssue]:
+        """C18 — Trop peu de legs avec vrai choix d'itinéraire (TD3+).
+
+        Un leg est "route_choice" si son jaccard ≥ min_jaccard (seuil issu de
+        nav_scores[i]["route_diversity"]["jaccard"]).
+        """
+        c18 = self.all_rules.get("navigation_checks", {}).get("C18", {})
+        min_rc = c18.get("min_route_choice_legs", {}).get(td_key)
+        min_jac = float(c18.get("min_jaccard", 0.25))
+        if min_rc is None:
+            return []  # TD non concerné (TD1/TD2)
+        n_legs = len(nav_scores)
+        rc_count = sum(
+            1 for ns in nav_scores
+            if (ns.get("route_diversity") or {}).get("jaccard", 0.0) >= min_jac
+        )
+        if rc_count >= int(min_rc):
+            return []
+        return [ControleurIssue(
+            code="C18", severity="WARNING",
+            control_index=-1, leg_from=-1, leg_to=-1,
+            message=(
+                f"{rc_count}/{n_legs} leg(s) avec choix d'itinéraire "
+                f"(Jaccard ≥ {min_jac}) — minimum {min_rc} requis pour {td_key}."
+            ),
+            suggestion=(
+                "Repositionner des postes pour créer des alternatives de chemin. "
+                "Un bon leg route_choice offre ≥ 2 itinéraires crédibles de longueur comparable."
+            ),
+            rule_reference=c18.get("source", "IOF Guidelines — diversité tactique"),
+        )]
+
+    def _check_c19_handrail_excess(
+        self, controls: List[Dict], nav_scores: list, td_key: str
+    ) -> List[ControleurIssue]:
+        """C19 — Trop de legs guidés par main courante (TD4/TD5).
+
+        Excès de main courante → circuit trop facile pour le niveau TD.
+        """
+        c19 = self.all_rules.get("navigation_checks", {}).get("C19", {})
+        max_ratio = c19.get("max_handrail_ratio", {}).get(td_key)
+        hr_threshold = float(c19.get("handrail_threshold", 0.70))
+        if max_ratio is None:
+            return []
+        n_legs = len(nav_scores)
+        if n_legs == 0:
+            return []
+        hr_count = sum(
+            1 for ns in nav_scores
+            if (ns.get("handrail") or 0.0) >= hr_threshold
+        )
+        ratio = hr_count / n_legs
+        if ratio <= float(max_ratio):
+            return []
+        return [ControleurIssue(
+            code="C19", severity="WARNING",
+            control_index=-1, leg_from=-1, leg_to=-1,
+            message=(
+                f"{hr_count}/{n_legs} legs guidés par main courante "
+                f"({ratio:.0%} > seuil {float(max_ratio):.0%} pour {td_key})."
+            ),
+            suggestion=(
+                "Réduire les legs longeant un linéaire évident. "
+                "Un circuit {td_key} doit exiger de la lecture de carte, pas seulement du suivi."
+            ),
+            rule_reference=c19.get("source", "IOF Guidelines §4.3"),
+        )]
+
+    def _check_c20_route_choice_excess(
+        self, controls: List[Dict], nav_scores: list, td_key: str
+    ) -> List[ControleurIssue]:
+        """C20 — Trop de legs route_choice pour le niveau TD (TD3 principalement).
+
+        Un excès de choix d'itinéraire rend le circuit trop exigeant pour TD3.
+        """
+        c20 = self.all_rules.get("navigation_checks", {}).get("C20", {})
+        max_ratio = c20.get("max_route_choice_ratio", {}).get(td_key)
+        min_jac = float(c20.get("min_jaccard", 0.25))
+        if max_ratio is None:
+            return []
+        n_legs = len(nav_scores)
+        if n_legs == 0:
+            return []
+        rc_count = sum(
+            1 for ns in nav_scores
+            if (ns.get("route_diversity") or {}).get("jaccard", 0.0) >= min_jac
+        )
+        ratio = rc_count / n_legs
+        if ratio <= float(max_ratio):
+            return []
+        return [ControleurIssue(
+            code="C20", severity="WARNING",
+            control_index=-1, leg_from=-1, leg_to=-1,
+            message=(
+                f"{rc_count}/{n_legs} legs avec choix d'itinéraire "
+                f"({ratio:.0%} > seuil {float(max_ratio):.0%} pour {td_key}) — circuit trop exigeant."
+            ),
+            suggestion=(
+                f"Simplifier certains legs pour qu'ils soient plus directifs. "
+                f"Un circuit {td_key} peut comporter du route_choice, mais pas en majorité."
+            ),
+            rule_reference=c20.get("source", "calibration Phase 0"),
+        )]
 
     # ── Méthodes utilitaires ──────────────────────────────────────────────────
 

@@ -6,7 +6,7 @@ import ControlsList from './components/ControlsList'
 import CircuitCreationModal from './components/CircuitCreationModal'
 import CircuitSelector from './components/CircuitSelector'
 import AISuggestionPanel from './components/AISuggestionPanel'
-import { generateCircuit, getSprintCandidates, generateSprint, getSprintStatus, generateCircuitAsync, getCircuitStatus, uploadOcdForRender, TILE_SERVICE_URL, getRoutesBetweenControls, analyzeOcadGeojson, saveCompetition, loadCompetition } from './services/api'
+import { generateCircuit, getSprintCandidates, generateSprint, getSprintStatus, generateCircuitAsync, getCircuitStatus, uploadOcdForRender, TILE_SERVICE_URL, getRoutesBetweenControls, fetchNavContext, analyzeOcadGeojson, saveCompetition, loadCompetition } from './services/api'
 import CompetitionLoadModal from './components/CompetitionLoadModal'
 import DialogueLog from './components/DialogueLog'
 import { buildMapContext } from './services/mapContext'
@@ -515,6 +515,9 @@ function App() {
   const [navigationQuality, setNavigationQuality] = useState([]) // [{from_idx,to_idx,nav_score,...}]
   const [navSummary, setNavSummary] = useState(null) // {mean_attack,mean_catch,mean_handrail,td_level}
   const [lastBbox, setLastBbox] = useState(null) // bbox du dernier appel de génération
+  const [navContext, setNavContext] = useState(null)       // {attack_point, catching_feature, handrail_samples, optimal_route, decision_points, credible_routes}
+  const [navContextCache, setNavContextCache] = useState({})  // clé: "legIdx" → ctx
+  const [lastTaskId, setLastTaskId] = useState(null)       // task_id du dernier sprint généré
 
   // Leaflet map ref — used for viewport bbox when no OCAD loaded
   const mapRef = useRef(null)
@@ -923,6 +926,8 @@ function App() {
         }
         if (data.navigation_quality?.length) setNavigationQuality(data.navigation_quality)
         if (data.nav_summary) setNavSummary(data.nav_summary)
+        setLastTaskId(task_id)
+        setNavContextCache({})  // invalider le cache nav lors d'une nouvelle génération
       } else {
         setProgressLabel('Génération en cours…')
         const { data: { task_id } } = await generateCircuitAsync(params)
@@ -1127,23 +1132,54 @@ function App() {
     })
   }
 
-  // ── Route Analyzer (Étape 10f) ───────────────────────────────────────────────
+  // ── Route Analyzer + Nav Context ────────────────────────────────────────────
 
   const handleShowRoutes = async (legIdx, controlA, controlB) => {
     // Toggle off if same leg
     if (routeDisplay?.legIdx === legIdx) {
       setRouteDisplay(null)
+      setNavContext(null)
       return
     }
-    try {
-      const res = await getRoutesBetweenControls({
+    // Fetch routes (routes-between) + nav context en parallèle
+    const cacheKey = `${legIdx}`
+    const [routesRes, ctxRes] = await Promise.allSettled([
+      getRoutesBetweenControls({
         from: { lat: controlA.lat, lng: controlA.lng },
         to: { lat: controlB.lat, lng: controlB.lng },
         k: 3,
-      })
-      setRouteDisplay({ legIdx, routes: res.data.routes, diversityScore: res.data.diversity_score })
-    } catch (e) {
-      console.error('[RouteAnalyzer]', e)
+      }),
+      navContextCache[cacheKey]
+        ? Promise.resolve({ data: navContextCache[cacheKey].data })
+        : fetchNavContext({
+            task_id: lastTaskId,
+            from: { lat: controlA.lat, lng: controlA.lng },
+            to: { lat: controlB.lat, lng: controlB.lng },
+          }),
+    ])
+
+    if (routesRes.status === 'fulfilled') {
+      setRouteDisplay({ legIdx, routes: routesRes.value.data.routes, diversityScore: routesRes.value.data.diversity_score })
+    } else {
+      console.error('[RouteAnalyzer]', routesRes.reason)
+    }
+
+    if (ctxRes.status === 'fulfilled') {
+      const ctx = ctxRes.value.data
+      setNavContext(ctx)
+      if (!navContextCache[cacheKey]) {
+        setNavContextCache(prev => {
+          const entries = Object.entries(prev)
+          if (entries.length >= 20) {
+            const oldest = entries.sort((a, b) => a[1].ts - b[1].ts)[0][0]
+            const { [oldest]: _, ...rest } = prev
+            return { ...rest, [cacheKey]: { data: ctx, ts: Date.now() } }
+          }
+          return { ...prev, [cacheKey]: { data: ctx, ts: Date.now() } }
+        })
+      }
+    } else {
+      console.error('[NavContext]', ctxRes.reason)
     }
   }
 
@@ -1705,6 +1741,7 @@ function App() {
           routeDisplay={routeDisplay}
           legRoutesMap={legRoutesMap}
           navigationQuality={navigationQuality}
+          navContext={navContext}
           ocadMode={mapMode === 'ocad' && !!imageData}
           backgroundControls={competitionMode ? getAllExistingControls() : []}
         />

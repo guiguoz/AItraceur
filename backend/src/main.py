@@ -2247,6 +2247,20 @@ def _circuit_impl(body: dict) -> dict:
         except Exception as _elev_err:
             print(f"[circuit] ElevationCache exception: {_elev_err} → terme G désactivé", flush=True)
 
+    # ── DEM Enrichissement candidate_points (skip TD1) ───────────────────────
+    _td_level = int(str(technical_level).replace("TD", "")) if technical_level else 0
+    if _td_level > 1 and candidate_points:
+        try:
+            import json as _json
+            from pathlib import Path as _Path
+            from src.services.terrain.lidar_manager import enrich_candidates_with_prominence as _enrich_prom
+            _pr_path = _Path(__file__).parent / "services" / "knowledge_base" / "placement_rules.json"
+            _dem_cfg = _json.loads(_pr_path.read_text(encoding="utf-8")).get("dem_enrichment", {})
+            if _dem_cfg:
+                _enrich_prom(candidate_points, _dem_cfg)
+        except Exception as _dem_err:
+            print(f"[circuit] DEM enrichissement non bloquant: {_dem_err}", flush=True)
+
     if heatmap_cache is not None or elevation_cache is not None:
         request = GenerationRequest(
             bounding_box=request.bounding_box,
@@ -4090,6 +4104,20 @@ def _sprint_impl(task_id: str, body: dict) -> None:
         except Exception as _elev_err:
             print(f"{_tag} ElevationCache exception: {_elev_err} → terme G désactivé", flush=True)
 
+    # ── DEM Enrichissement candidate_points (skip TD1) ───────────────────────
+    _td_level_s = int(str(technical_level).replace("TD", "")) if technical_level else 0
+    if _td_level_s > 1 and candidate_points:
+        try:
+            import json as _json_s
+            from pathlib import Path as _Path_s
+            from src.services.terrain.lidar_manager import enrich_candidates_with_prominence as _enrich_prom_s
+            _pr_path_s = _Path_s(__file__).parent / "services" / "knowledge_base" / "placement_rules.json"
+            _dem_cfg_s = _json_s.loads(_pr_path_s.read_text(encoding="utf-8")).get("dem_enrichment", {})
+            if _dem_cfg_s:
+                _enrich_prom_s(candidate_points, _dem_cfg_s)
+        except Exception as _dem_err_s:
+            print(f"{_tag} DEM enrichissement non bloquant: {_dem_err_s}", flush=True)
+
     # Mode compétition : injecter les balises existantes comme candidats haute-attractivité
     if existing_controls:
         for _ec in existing_controls:
@@ -4413,7 +4441,9 @@ def _sprint_impl(task_id: str, body: dict) -> None:
             "nav_summary": _nav_summary,
             "warning": _generation_warning,
             "distance_ratio": _distance_ratio,
-        }
+        },
+        "_ga": getattr(generator, "_last_ga", None),         # pour endpoint nav-context
+        "_route_analyzer": route_analyzer,                   # pour fallback sans KDTree
     }
 
 
@@ -4518,6 +4548,96 @@ def routes_between_controls(body: dict = Body(...)):
         "diversity_score": round(diversity, 3),
         "is_dogleg": False,  # dogleg only meaningful for 3 consecutive controls
     }
+
+
+# =============================================
+# Nav Context — highlight visuel par jambe
+# =============================================
+
+@app.post(
+    "/api/v1/generation/nav-context",
+    summary="Contexte de navigation pour un leg (point d'attaque, arrêt, main courante, route, décisions)",
+)
+def get_nav_context(body: dict = Body(...)):
+    """
+    Body: {
+      task_id: str | null,   # ID du sprint généré (pour réutiliser le GA + RouteAnalyzer)
+      from: {lat, lng},
+      to: {lat, lng},
+      bbox: {min_x, min_y, max_x, max_y}  # optionnel — pour construire RouteAnalyzer à la volée
+    }
+    """
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FuturesTimeout
+    from src.services.optimization.route_analyzer import RouteAnalyzer as _RouteAnalyzer
+
+    pt_from = body.get("from", {})
+    pt_to = body.get("to", {})
+    task_id = body.get("task_id")
+
+    from_lng, from_lat = float(pt_from.get("lng", 0)), float(pt_from.get("lat", 0))
+    to_lng, to_lat = float(pt_to.get("lng", 0)), float(pt_to.get("lat", 0))
+
+    # ── Récupérer GA + RouteAnalyzer depuis la tâche sprint ──────────────────
+    _ga = None
+    _ra = None
+    if task_id and task_id in _sprint_tasks:
+        task = _sprint_tasks[task_id]
+        _ga = task.get("_ga")
+        _ra = task.get("_route_analyzer")
+
+    # ── Fallback : construire un RouteAnalyzer depuis OSM si absent ───────────
+    if _ra is None:
+        bbox = body.get("bbox", {})
+        if not bbox:
+            margin = 0.006
+            bbox = {
+                "min_x": min(from_lng, to_lng) - margin,
+                "min_y": min(from_lat, to_lat) - margin,
+                "max_x": max(from_lng, to_lng) + margin,
+                "max_y": max(from_lat, to_lat) + margin,
+            }
+        try:
+            _osm = extract_sprint_features(bbox)
+            _hw = _osm.get("highway_ways", [])
+            if _hw:
+                _ra = _RouteAnalyzer(_hw)
+        except Exception:
+            pass
+
+    # ── Calcul avec timeout 8s ────────────────────────────────────────────────
+    def _compute():
+        if _ga is not None:
+            if _ga._route_analyzer is None and _ra is not None:
+                _ga._route_analyzer = _ra
+            return _ga.compute_nav_context(from_lng, from_lat, to_lng, to_lat)
+
+        ctx = {
+            "attack_point": None,
+            "catching_feature": None,
+            "handrail_samples": [],
+            "optimal_route": [],
+            "decision_points": [],
+            "credible_routes": None,
+        }
+        if _ra is not None:
+            try:
+                path = _ra.find_optimal_route(from_lng, from_lat, to_lng, to_lat)
+                if path:
+                    ctx["optimal_route"] = [{"lng": n[0], "lat": n[1]} for n in path]
+                ctx["decision_points"] = _ra.get_decision_point_coords(
+                    from_lng, from_lat, to_lng, to_lat
+                )
+                div = _ra.route_diversity_info(from_lng, from_lat, to_lng, to_lat)
+                ctx["credible_routes"] = div.get("credible_routes")
+            except Exception:
+                pass
+        return ctx
+
+    with ThreadPoolExecutor(max_workers=1) as _pool:
+        try:
+            return _pool.submit(_compute).result(timeout=8.0)
+        except _FuturesTimeout:
+            raise HTTPException(status_code=408, detail="nav-context: timeout")
 
 
 # =============================================

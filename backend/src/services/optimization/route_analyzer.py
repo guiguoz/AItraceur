@@ -48,6 +48,8 @@ class RouteAnalyzer:
             raise ImportError("networkx requis pour RouteAnalyzer")
         self.graph = self._build_graph(highway_ways)
         self._nodes: List[Tuple[float, float]] = list(self.graph.nodes())
+        self._route_cache: dict = {}
+        self._cache_stats: dict = {"hits": 0, "misses": 0, "total_time_ms": 0.0}
 
     # ── Construction du graphe ─────────────────────────────────────────────────
 
@@ -130,7 +132,175 @@ class RouteAnalyzer:
         )
         return min_dist < proximity_m, min_dist
 
+    # ── Cache k-shortest paths ─────────────────────────────────────────────────
+
+    def _k_shortest_cached(
+        self,
+        n_start: tuple,
+        n_end: tuple,
+        k: int,
+        timeout_ms: int = 200,
+    ) -> list:
+        """k-shortest paths avec cache (n_start, n_end, k) et timeout."""
+        import time as _t
+        key = (n_start, n_end, k)
+        if key in self._route_cache:
+            self._cache_stats["hits"] += 1
+            return self._route_cache[key]
+        self._cache_stats["misses"] += 1
+        t0 = _t.time()
+        try:
+            gen = nx.shortest_simple_paths(self.graph, n_start, n_end, weight="weight")
+            paths = []
+            for p in gen:
+                if (_t.time() - t0) * 1000 > timeout_ms:
+                    break
+                paths.append(p)
+                if len(paths) >= k:
+                    break
+        except (nx.NetworkXNoPath, nx.NodeNotFound, nx.NetworkXError):
+            paths = []
+        self._cache_stats["total_time_ms"] += (_t.time() - t0) * 1000
+        self._route_cache[key] = paths
+        return paths
+
+    def get_cache_stats(self) -> dict:
+        """Métriques de performance du cache k-shortest (pour monitoring GA)."""
+        hits = self._cache_stats["hits"]
+        misses = self._cache_stats["misses"]
+        total = max(1, hits + misses)
+        return {
+            "hit_rate": round(hits / total, 3),
+            "total_calls": total,
+            "avg_time_ms": round(self._cache_stats["total_time_ms"] / max(1, misses), 1),
+        }
+
+    # ── Points de décision ────────────────────────────────────────────────────
+
+    def count_decision_points(
+        self,
+        start_lng: float, start_lat: float,
+        end_lng: float, end_lat: float,
+    ) -> int:
+        """
+        Bifurcations significatives sur le chemin A* entre deux postes.
+
+        Un nœud est une bifurcation significative s'il a degré ≥ 3 ET qu'au
+        moins une branche alternative (hors direction d'origine et de destination)
+        diverge de plus de 30° de la direction principale du chemin.
+        Exclut la direction arrière pour éviter les faux positifs sur jonctions
+        en ligne droite avec un léger embranchement.
+        """
+        route = self.find_optimal_route(start_lng, start_lat, end_lng, end_lat)
+        if not route or len(route) < 2:
+            return 0
+        count = 0
+        for idx in range(1, len(route) - 1):
+            node = route[idx]
+            if self.graph.degree(node) < 3:
+                continue
+            if self._has_significant_alternative(node, route[idx - 1], route[idx + 1]):
+                count += 1
+        return count
+
+    def get_decision_point_coords(
+        self,
+        start_lng: float, start_lat: float,
+        end_lng: float, end_lat: float,
+    ) -> List[dict]:
+        """Retourne la liste {lng, lat} des points de décision sur le chemin A*."""
+        route = self.find_optimal_route(start_lng, start_lat, end_lng, end_lat)
+        if not route or len(route) < 3:
+            return []
+        result = []
+        for idx in range(1, len(route) - 1):
+            node = route[idx]
+            if self.graph.degree(node) >= 3 and self._has_significant_alternative(
+                node, route[idx - 1], route[idx + 1]
+            ):
+                result.append({"lng": node[0], "lat": node[1]})
+        return result
+
+    def _has_significant_alternative(
+        self, node: tuple, prev_node: tuple, next_node: tuple
+    ) -> bool:
+        """
+        True si node a un voisin alternatif (hors prev/next) déviant de >30°
+        de la direction principale prev→node→next.
+        """
+        cos_lat = math.cos(math.radians(node[1]))
+        dx_main = (next_node[0] - node[0]) * 111_000 * cos_lat
+        dy_main = (next_node[1] - node[1]) * 111_000
+        mag_main = math.sqrt(dx_main ** 2 + dy_main ** 2)
+        if mag_main == 0:
+            return False
+        ux, uy = dx_main / mag_main, dy_main / mag_main
+        for nb in self.graph.neighbors(node):
+            if nb == prev_node or nb == next_node:
+                continue
+            dx = (nb[0] - node[0]) * 111_000 * cos_lat
+            dy = (nb[1] - node[1]) * 111_000
+            mag = math.sqrt(dx ** 2 + dy ** 2)
+            if mag == 0:
+                continue
+            dot = max(-1.0, min(1.0, ux * dx / mag + uy * dy / mag))
+            if math.degrees(math.acos(dot)) > 30:
+                return True
+        return False
+
+    def _is_significant_fork(self, node: tuple) -> bool:
+        """True si au moins 2 branches du nœud divergent de >30° (sans contexte chemin).
+        Préférer _has_significant_alternative() quand le chemin A* est connu.
+        """
+        neighbors = list(self.graph.neighbors(node))
+        if len(neighbors) < 3:
+            return False
+        cos_lat = math.cos(math.radians(node[1]))
+        vecs = []
+        for nb in neighbors:
+            dx = (nb[0] - node[0]) * 111_000 * cos_lat
+            dy = (nb[1] - node[1]) * 111_000
+            mag = math.sqrt(dx * dx + dy * dy)
+            if mag > 0:
+                vecs.append((dx / mag, dy / mag))
+        for i in range(len(vecs)):
+            for j in range(i + 1, len(vecs)):
+                dot = max(-1.0, min(1.0, vecs[i][0] * vecs[j][0] + vecs[i][1] * vecs[j][1]))
+                if math.degrees(math.acos(dot)) > 30:
+                    return True
+        return False
+
     # ── Score de diversité d'itinéraire ───────────────────────────────────────
+
+    def route_diversity_info(
+        self,
+        start_lng: float, start_lat: float,
+        end_lng: float, end_lat: float,
+        k: int = 3,
+        timeout_ms: int = 200,
+    ) -> dict:
+        """
+        Score Jaccard + nombre de routes crédibles (ratio longueur 0.85–1.30).
+
+        Retourne {"jaccard": float, "credible_routes": int}.
+        Les routes trop longues (> 30% de l'optimale) ou trop courtes (< 85%)
+        sont écartées car non crédibles pour un orienteur.
+        """
+        n_start = self._nearest_node(start_lng, start_lat)
+        n_end = self._nearest_node(end_lng, end_lat)
+        if n_start is None or n_end is None or n_start == n_end:
+            return {"jaccard": 0.0, "credible_routes": 0}
+        paths = self._k_shortest_cached(n_start, n_end, k, timeout_ms)
+        if not paths:
+            return {"jaccard": 0.0, "credible_routes": 0}
+        optimal_len = self.route_length_m(paths[0])
+        credible = [
+            p for p in paths
+            if optimal_len == 0
+            or 0.85 <= self.route_length_m(p) / optimal_len <= 1.30
+        ]
+        jaccard = self._jaccard_from_routes(credible) if len(credible) >= 2 else 0.0
+        return {"jaccard": round(jaccard, 4), "credible_routes": len(credible)}
 
     def route_diversity_score(
         self,
@@ -140,39 +310,10 @@ class RouteAnalyzer:
     ) -> float:
         """
         Score Jaccard de diversité entre les k meilleures routes [0.0, 1.0].
-        0.0 = couloir unique (toutes routes identiques)
-        1.0 = vraies alternatives distinctes
+        0.0 = couloir unique, 1.0 = vraies alternatives distinctes.
+        Utilise le cache interne pour performance GA.
         """
-        n_start = self._nearest_node(start_lng, start_lat)
-        n_end = self._nearest_node(end_lng, end_lat)
-        if n_start is None or n_end is None or n_start == n_end:
-            return 0.0
-        try:
-            gen = nx.shortest_simple_paths(self.graph, n_start, n_end, weight="weight")
-            paths = []
-            for p in gen:
-                paths.append(p)
-                if len(paths) >= k:
-                    break
-        except (nx.NetworkXNoPath, nx.NodeNotFound, nx.NetworkXError):
-            return 0.0
-
-        if len(paths) < 2:
-            return 0.0
-
-        def path_edge_set(p):
-            return frozenset(frozenset([p[i], p[i + 1]]) for i in range(len(p) - 1))
-
-        edge_sets = [path_edge_set(p) for p in paths]
-        diversities = []
-        for i in range(len(edge_sets)):
-            for j in range(i + 1, len(edge_sets)):
-                union = len(edge_sets[i] | edge_sets[j])
-                inter = len(edge_sets[i] & edge_sets[j])
-                if union > 0:
-                    diversities.append(1.0 - inter / union)
-
-        return sum(diversities) / len(diversities) if diversities else 0.0
+        return self.route_diversity_info(start_lng, start_lat, end_lng, end_lat, k)["jaccard"]
 
     # ── Infos graphe ───────────────────────────────────────────────────────────
 
@@ -186,22 +327,13 @@ class RouteAnalyzer:
     ) -> List[List[Tuple[float, float]]]:
         """
         Retourne les k meilleures routes (Yen's algorithm via NetworkX).
-        Chaque route = liste de (lng, lat).
+        Chaque route = liste de (lng, lat). Utilise le cache interne.
         """
         n_start = self._nearest_node(start_lng, start_lat)
         n_end = self._nearest_node(end_lng, end_lat)
         if n_start is None or n_end is None or n_start == n_end:
             return []
-        try:
-            gen = nx.shortest_simple_paths(self.graph, n_start, n_end, weight="weight")
-            routes = []
-            for path in gen:
-                routes.append(path)
-                if len(routes) >= k:
-                    break
-            return routes
-        except (nx.NetworkXNoPath, nx.NodeNotFound, nx.NetworkXError):
-            return []
+        return self._k_shortest_cached(n_start, n_end, k)
 
     def route_length_m(self, route: List[Tuple[float, float]]) -> float:
         """Longueur totale d'une route (liste de (lng, lat)) en mètres."""

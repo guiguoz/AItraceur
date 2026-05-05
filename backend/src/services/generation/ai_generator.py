@@ -209,6 +209,7 @@ class AIGenerator:
             candidate_points=request.candidate_points,
             heatmap_cache=request.heatmap_cache,
             elevation_cache=request.elevation_cache,
+            route_analyzer=request.route_analyzer,
             rules_engine=request.rules_engine,
             map_scale=request.map_scale,
         )

@@ -146,6 +146,7 @@ export function MapViewer({
   routeDisplay = null,
   legRoutesMap = {},  // {legIdx: {routes, choiceScore}} — choix auto post-sprint
   navigationQuality = [],  // [{from_idx, to_idx, nav_score, ...}] — coloration par jambe
+  navContext = null,  // {attack_point, catching_feature, handrail_samples, optimal_route, decision_points}
   ocadMode = false,  // true → masque OSM, affiche uniquement PNG OCAD
   backgroundControls = [],  // mode compétition — postes des autres circuits
 }) {
@@ -408,6 +409,84 @@ export function MapViewer({
               </Polyline>
             );
           })
+        )}
+
+        {/* ── Nav Context overlays (Phase 5) ──────────────────────────────── */}
+
+        {/* Route optimale OSM (gris pointillé) */}
+        {navContext?.optimal_route?.length >= 2 && (
+          <Polyline
+            positions={navContext.optimal_route.map(p => [p.lat, p.lng])}
+            pathOptions={{ color: '#9ca3af', weight: 3, opacity: 0.8, dashArray: '6 4' }}
+          >
+            <Popup><div className="text-xs">Route optimale OSM</div></Popup>
+          </Polyline>
+        )}
+
+        {/* Main courante (vert) — points intermédiaires ayant une feature à ≤50m */}
+        {navContext?.handrail_samples?.length >= 2 && (
+          <Polyline
+            positions={navContext.handrail_samples.map(p => [p.lat, p.lng])}
+            pathOptions={{ color: '#22c55e', weight: 4, opacity: 0.75 }}
+          >
+            <Popup><div className="text-xs">Main courante</div></Popup>
+          </Polyline>
+        )}
+
+        {/* Points de décision (rouge ★) */}
+        {navContext?.decision_points?.map((pt, i) => (
+          <Marker
+            key={`dp-${i}`}
+            position={[pt.lat, pt.lng]}
+            icon={L.divIcon({
+              className: '',
+              html: `<div style="font-size:16px;line-height:1;color:#ef4444;text-shadow:0 0 3px #000">★</div>`,
+              iconSize: [16, 16],
+              iconAnchor: [8, 8],
+            })}
+          >
+            <Popup><div className="text-xs">Point de décision</div></Popup>
+          </Marker>
+        ))}
+
+        {/* Point d'attaque (cercle jaune) */}
+        {navContext?.attack_point && (
+          <Marker
+            position={[navContext.attack_point.lat, navContext.attack_point.lng]}
+            icon={L.divIcon({
+              className: '',
+              html: `<div style="width:14px;height:14px;border-radius:50%;background:#fbbf24;border:2px solid #fff;box-shadow:0 0 4px rgba(0,0,0,.6)"></div>`,
+              iconSize: [14, 14],
+              iconAnchor: [7, 7],
+            })}
+          >
+            <Popup>
+              <div className="text-xs">
+                <strong>Point d'attaque</strong><br />
+                ISOM {navContext.attack_point.isom} — score {navContext.attack_point.score?.toFixed(2)}
+              </div>
+            </Popup>
+          </Marker>
+        )}
+
+        {/* Ligne d'arrêt (cercle bleu) */}
+        {navContext?.catching_feature && (
+          <Marker
+            position={[navContext.catching_feature.lat, navContext.catching_feature.lng]}
+            icon={L.divIcon({
+              className: '',
+              html: `<div style="width:14px;height:14px;border-radius:50%;background:#3b82f6;border:2px solid #fff;box-shadow:0 0 4px rgba(0,0,0,.6)"></div>`,
+              iconSize: [14, 14],
+              iconAnchor: [7, 7],
+            })}
+          >
+            <Popup>
+              <div className="text-xs">
+                <strong>Ligne d'arrêt</strong><br />
+                ISOM {navContext.catching_feature.isom} — score {navContext.catching_feature.score?.toFixed(2)}
+              </div>
+            </Popup>
+          </Marker>
         )}
 
         {/* AI suggestion — draggable purple marker */}

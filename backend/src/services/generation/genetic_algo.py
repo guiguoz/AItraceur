@@ -87,6 +87,14 @@ class GenerationConfig:
     # Si None : terme G absent (aucune régression).
     elevation_cache: Optional[object] = field(default=None, repr=False)
 
+    # RouteAnalyzer OSM — si fourni, active le terme E basé sur la diversité réelle
+    # des itinéraires (Jaccard k-plus-courts). Fallback GPX Vikazimut si None.
+    route_analyzer: Optional[object] = field(default=None, repr=False)
+
+    # Désactive le terme M (leg diversity) sans toucher à technical_level.
+    # Réservé à l'ablation study — ne pas utiliser en production.
+    ablation_disable_leg_diversity: bool = False
+
     # FFCORulesEngine — source de vérité des seuils et pondérations (optionnel).
     # Si None : valeurs historiques hardcodées (aucune régression).
     rules_engine: Optional[object] = field(default=None, repr=False)
@@ -215,6 +223,9 @@ class GeneticAlgorithm:
             print(f"[GA DEBUG] KDTree ISOM: {len(self._ocad_pts)} features", flush=True)
         else:
             print(f"[GA DEBUG] KDTree ISOM: ABSENT (ocad_pts={len(self._ocad_pts)}, threshold>=20)", flush=True)
+
+        # ── RouteAnalyzer (terme E OSM) ────────────────────────────────────────
+        self._route_analyzer = self.config.route_analyzer  # None si absent
 
         # ── Leg Diversity DB (données GPX Vikazimut) ──────────────────────────
         self._leg_diversity_db: list = self._load_leg_diversity_db()
@@ -495,7 +506,8 @@ class GeneticAlgorithm:
         GeneratedCircuit. Ne pas appeler dans evaluate_fitness() (trop coûteux).
 
         Returns:
-            list de dicts [{attack, catch, handrail}] — une entrée par jambe (len = len(controls)-1).
+            list de dicts [{attack, catch, handrail, decision_points, route_diversity}]
+            — une entrée par jambe (len = len(controls)-1).
         """
         nav = self._nav_params
         _r_att = nav.get("attack_radius_m", 0)
@@ -507,7 +519,16 @@ class GeneticAlgorithm:
             att = self._score_attack_point(cx, cy, px, py, _r_att) if _r_att > 0 else None
             cat = self._score_catching_feature(cx, cy, px, py, _r_cat) if _r_cat > 0 else None
             hr = self._score_handrail(px, py, cx, cy) if nav.get("handrail_required") else None
-            result.append({"attack": att, "catch": cat, "handrail": hr})
+            dp = None
+            rd = None
+            if self._route_analyzer is not None:
+                try:
+                    dp = self._route_analyzer.count_decision_points(px, py, cx, cy)
+                    rd = self._route_analyzer.route_diversity_info(px, py, cx, cy)
+                except Exception:
+                    pass
+            result.append({"attack": att, "catch": cat, "handrail": hr,
+                           "decision_points": dp, "route_diversity": rd})
         return result
 
     def compute_td1_path_distances(self, controls: list) -> dict:
@@ -527,6 +548,138 @@ class GeneticAlgorithm:
                 prefer_max_dist_m=200.0,
             )
             result[i] = round(dist_m, 1)
+        return result
+
+    # ── Nav context (Phase 5 — highlight visuel) ─────────────────────────────
+
+    def compute_nav_context(
+        self,
+        from_lng: float, from_lat: float,
+        to_lng: float, to_lat: float,
+    ) -> dict:
+        """Contexte de navigation pour un leg — utilisé par l'endpoint dédié.
+
+        Retourne les coordonnées des features clés + route + points de décision.
+        Sûr à appeler de l'extérieur : ne modifie pas l'état du GA.
+        """
+        nav = self._nav_params
+        _r_att = nav.get("attack_radius_m", 0)
+        _r_cat = nav.get("catching_radius_m", 0)
+
+        attack = self._find_attack_coords(to_lng, to_lat, from_lng, from_lat, _r_att) if _r_att > 0 else None
+        catch = self._find_catch_coords(to_lng, to_lat, from_lng, from_lat, _r_cat) if _r_cat > 0 else None
+        handrail_pts = self._find_handrail_sample_coords(from_lng, from_lat, to_lng, to_lat) \
+            if nav.get("handrail_required") else []
+
+        optimal_route = []
+        decision_pts = []
+        credible_routes = None
+        if self._route_analyzer is not None:
+            try:
+                path = self._route_analyzer.find_optimal_route(from_lng, from_lat, to_lng, to_lat)
+                if path:
+                    optimal_route = [{"lng": n[0], "lat": n[1]} for n in path]
+                decision_pts = self._route_analyzer.get_decision_point_coords(
+                    from_lng, from_lat, to_lng, to_lat
+                )
+                div = self._route_analyzer.route_diversity_info(from_lng, from_lat, to_lng, to_lat)
+                credible_routes = div.get("credible_routes")
+            except Exception:
+                pass
+
+        return {
+            "attack_point": attack,
+            "catching_feature": catch,
+            "handrail_samples": handrail_pts,
+            "optimal_route": optimal_route,
+            "decision_points": decision_pts,
+            "credible_routes": credible_routes,
+        }
+
+    def _find_attack_coords(
+        self, cx: float, cy: float, px: float, py: float, radius_m: float
+    ) -> Optional[dict]:
+        """Retourne {lng, lat, isom, score} du meilleur point d'attaque, ou None."""
+        if self._ocad_tree is None or radius_m == 0:
+            return None
+        LNG_TO_M = 111_000 * math.cos(math.radians(cy))
+        LAT_TO_M = 110_540
+        approach_dx_m = (cx - px) * LNG_TO_M
+        approach_dy_m = (cy - py) * LAT_TO_M
+        radius_deg = radius_m / 111_000
+        idxs = self._ocad_tree.query_ball_point([cx, cy], radius_deg)
+        codes = self._nav_roles.get("attack_point", {}).get("codes", [])
+        best_score, best_cp = 0.0, None
+        for idx in idxs:
+            cp = self._ocad_pts[idx]
+            isom = cp.get("isom")
+            if isom not in codes:
+                continue
+            quality = self._nav_roles_quality(isom, "attack_point")
+            dist_m = math.hypot((cp["x"] - cx) * LNG_TO_M, (cp["y"] - cy) * LAT_TO_M)
+            feat_dx_m = (cp["x"] - cx) * LNG_TO_M
+            feat_dy_m = (cp["y"] - cy) * LAT_TO_M
+            dot = approach_dx_m * feat_dx_m + approach_dy_m * feat_dy_m
+            side_bonus = 1.0 if dot < 0 else 0.6
+            dist_factor = max(0.0, 1.0 - dist_m / radius_m)
+            score = min(quality * side_bonus * dist_factor, 1.0)
+            if score > best_score:
+                best_score, best_cp = score, cp
+        if best_cp is None:
+            return None
+        return {"lng": best_cp["x"], "lat": best_cp["y"],
+                "isom": best_cp.get("isom"), "score": round(best_score, 2)}
+
+    def _find_catch_coords(
+        self, cx: float, cy: float, px: float, py: float, radius_m: float
+    ) -> Optional[dict]:
+        """Retourne {lng, lat, isom, score} de la meilleure ligne d'arrêt, ou None."""
+        if self._ocad_tree is None or radius_m == 0:
+            return None
+        LNG_TO_M = 111_000 * math.cos(math.radians(cy))
+        LAT_TO_M = 110_540
+        approach_dx_m = (cx - px) * LNG_TO_M
+        approach_dy_m = (cy - py) * LAT_TO_M
+        norm_m = max(math.hypot(approach_dx_m, approach_dy_m), 1e-6)
+        overshoot_x = cx + (approach_dx_m / norm_m) * (radius_m * 0.5) / LNG_TO_M
+        overshoot_y = cy + (approach_dy_m / norm_m) * (radius_m * 0.5) / LAT_TO_M
+        radius_deg = radius_m * 0.6 / 111_000
+        idxs = self._ocad_tree.query_ball_point([overshoot_x, overshoot_y], radius_deg)
+        codes = self._nav_roles.get("catching_feature", {}).get("codes", [])
+        best_score, best_cp = 0.0, None
+        for idx in idxs:
+            cp = self._ocad_pts[idx]
+            isom = cp.get("isom")
+            if isom not in codes:
+                continue
+            quality = self._nav_roles_quality(isom, "catching_feature")
+            score = quality * 0.9
+            if score > best_score:
+                best_score, best_cp = score, cp
+        if best_cp is None:
+            return None
+        return {"lng": best_cp["x"], "lat": best_cp["y"],
+                "isom": best_cp.get("isom"), "score": round(best_score, 2)}
+
+    def _find_handrail_sample_coords(
+        self,
+        ax: float, ay: float,
+        bx: float, by: float,
+        n_samples: int = 5,
+    ) -> list:
+        """Retourne [{lng, lat}] des points intermédiaires qui ont une main courante à ≤50m."""
+        if self._ocad_tree is None:
+            return []
+        codes = self._nav_roles.get("handrail", {}).get("codes", [])
+        radius_deg = 50.0 / 111_000
+        result = []
+        for i in range(1, n_samples + 1):
+            t = i / (n_samples + 1)
+            sx = ax + t * (bx - ax)
+            sy = ay + t * (by - ay)
+            idxs = self._ocad_tree.query_ball_point([sx, sy], radius_deg)
+            if any(self._ocad_pts[idx].get("isom") in codes for idx in idxs):
+                result.append({"lng": sx, "lat": sy})
         return result
 
     def set_graph(self, graph):
@@ -655,6 +808,11 @@ class GeneticAlgorithm:
         self.population.sort(key=lambda c: c.fitness, reverse=True)
         self.best_solution = self.population[0]
 
+        if self._route_analyzer is not None:
+            _cov = self._osm_coverage_ratio(self.config.bounding_box)
+            print(f"[GA] OSM coverage {_cov:.2f} — nav metrics "
+                  f"{'enabled' if _cov > 0.40 else 'disabled (sparse OSM)'}")
+
         # Boucle évolutionnaire
         for gen in range(self.config.generations):
             self.generation = gen + 1
@@ -694,6 +852,15 @@ class GeneticAlgorithm:
                 break
 
         elapsed = (datetime.now() - start_time).total_seconds()
+
+        if self._route_analyzer is not None:
+            _cs = self._route_analyzer.get_cache_stats()
+            print(
+                f"[GA] RouteAnalyzer cache: hit_rate={_cs['hit_rate']:.0%}, "
+                f"avg={_cs.get('avg_time_ms', 0):.0f}ms, "
+                f"calls={_cs['total_calls']}",
+                flush=True,
+            )
 
         return GenerationResult(
             circuits=self.population[:10],  # Top 10
@@ -869,6 +1036,55 @@ class GeneticAlgorithm:
         dlng = math.radians(p2[0] - p1[0])
         a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlng / 2) ** 2
         return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    def _classify_leg_type(
+        self,
+        jaccard: Optional[float],
+        handrail: Optional[float],
+        catch: Optional[float],
+    ) -> set:
+        """Étiquettes navigables d'une jambe — SET non exclusif (Terme M).
+
+        Tags possibles : route_choice, handrail, technical_read, direct.
+        Utilise les seuils de placement_rules.json["leg_type_thresholds"].
+        """
+        rules = self._placement_rules.get("leg_type_thresholds", {})
+        types: set = set()
+        if jaccard is not None and jaccard >= rules.get("route_choice_jaccard", 0.30):
+            types.add("route_choice")
+        if handrail is not None and handrail >= rules.get("handrail_coverage", 0.70):
+            types.add("handrail")
+        if catch is not None and catch <= rules.get("low_catch_score", 0.30):
+            types.add("technical_read")
+        return types if types else {"direct"}
+
+    def _osm_coverage_ratio(self, bbox: Optional[dict]) -> float:
+        """Estimation de la densité OSM dans la bbox (heuristique edges/km²).
+
+        Retourne un ratio ∈ [0, 1] — > 0.40 signifie couverture suffisante pour
+        que le RouteAnalyzer produise des scores Jaccard fiables.
+        Retourne 0.0 si RouteAnalyzer absent ou bbox invalide.
+        """
+        if self._route_analyzer is None or not bbox:
+            return 0.0
+        try:
+            g = self._route_analyzer.graph
+            n_edges = g.number_of_edges()
+            if n_edges == 0:
+                return 0.0
+            # Aire approximative en km² (projection rectangulaire — OK pour ~10km)
+            dlng = abs(bbox.get("max_x", 0) - bbox.get("min_x", 0))
+            dlat = abs(bbox.get("max_y", 0) - bbox.get("min_y", 0))
+            mid_lat = (bbox.get("min_y", 0) + bbox.get("max_y", 0)) / 2
+            area_km2 = dlng * math.cos(math.radians(mid_lat)) * 111.0 * dlat * 111.0
+            if area_km2 < 1e-6:
+                return 0.0
+            density = n_edges / area_km2  # edges/km²
+            # Sprint urbain dense ≈ 300–800 ; forêt OSM sparse ≈ 20–80.
+            # Seuil 50 edges/km² → ratio 1.0 (couverture suffisante).
+            return min(1.0, density / 50.0)
+        except Exception:
+            return 0.0
 
     def _is_in_forbidden_zone(
         self,
@@ -1288,16 +1504,35 @@ class GeneticAlgorithm:
         _mean_leg = float(leg_m.mean()) if _n_legs > 0 else _target_leg
         _leg_conformity = 1.0 - min(abs(_mean_leg - _target_leg) / _target_leg, 1.0)
 
-        # ── E. Route diversity (données GPX Vikazimut) ────────────────────────
-        # Signal continu centré sur cv=0.20 (gradient linéaire).
-        # Bonus maximal ≈ +4.5 pts si cv=0.50 ; malus ≈ −3 pts si cv=0.00.
-        # Fallback silencieux si leg_diversity.json absent ou secteur non couvert.
+        # ── E. Route diversity ─────────────────────────────────────────────────
+        # Priorité OSM (RouteAnalyzer) si disponible ET jambe assez longue ET
+        # couverture OSM suffisante. Fallback GPX Vikazimut sinon.
+        # Bonus maximal ≈ +4.5 pts (jaccard=0.50) ; malus ≈ −3 pts (jaccard=0.00).
         diversity_bonus = 0.0
-        if self._leg_diversity_db:
-            for i in range(len(controls) - 1):
-                cv = self._lookup_leg_cv(controls[i], controls[i + 1])
-                if cv is not None:
-                    diversity_bonus += (cv - 0.20) * 15.0
+        _per_leg_jaccard: list = []  # None ou float par jambe — utilisé par Terme M
+        _rc_min = float(
+            self._placement_rules.get("route_choice_leg_min_m", {}).get(_ct, 80.0)
+        )
+        _use_osm = (
+            self._route_analyzer is not None
+            and self._osm_coverage_ratio(config.bounding_box) > 0.40
+        )
+        for i in range(len(controls) - 1):
+            p0, p1 = controls[i], controls[i + 1]
+            _leg_dist = self._haversine_m(p0, p1)
+            if _use_osm and _leg_dist > _rc_min:
+                div = self._route_analyzer.route_diversity_info(
+                    p0[0], p0[1], p1[0], p1[1]
+                )
+                _j = div["jaccard"]
+                _per_leg_jaccard.append(_j)
+                diversity_bonus += (_j - 0.20) * 15.0
+            else:
+                _per_leg_jaccard.append(None)
+                if self._leg_diversity_db:
+                    cv = self._lookup_leg_cv(controls[i], controls[i + 1])
+                    if cv is not None:
+                        diversity_bonus += (cv - 0.20) * 15.0
 
         # ── F. Pénalité zones interdites (HeatmapCache.is_forbidden) ─────────
         # Pénalise les postes qui tombent dans le forbidden_mask (vert olive, eau,
@@ -1318,7 +1553,10 @@ class GeneticAlgorithm:
             max_climb_ratio = float(self._placement_rules.get("max_climb_ratio", 0.04))
             dplus_ratio = estimated_dplus / total_m
             if dplus_ratio > max_climb_ratio:
-                dplus_penalty = (dplus_ratio - max_climb_ratio) * 200.0  # −20 pts pour +10% dépassement
+                _dp_mod = float(
+                    self._placement_rules.get("d_plus_penalty_modulation", {}).get(_ct, 1.0)
+                )
+                dplus_penalty = (dplus_ratio - max_climb_ratio) * 200.0 * _dp_mod
 
         # ── H. Score de forme géométrique (aspect du tracé) ──────────────────
         # Indépendant du terrain — pénalise Z-patterns, spirales, accordéons.
@@ -1387,6 +1625,24 @@ class GeneticAlgorithm:
             if n_bad_hr / len(hr_scores_f) > _max_bad:
                 nav_worst_leg -= W_HANDRAIL * 2 * (n_bad_hr / len(hr_scores_f))
 
+        # ── M. Diversité des types de legs ────────────────────────────────────
+        # Récompense les circuits qui mélangent route choice, main courante et lecture
+        # technique. Neutre (W=0) pour TD ≤ 2 — trop complexe pour les circuits enfants.
+        # Ablation study Phase 0 confirme l'utilité avant d'augmenter le poids.
+        _td_level = config.technical_level or 3
+        W_LEG_DIVERSITY = 0.0 if (_td_level <= 2 or config.ablation_disable_leg_diversity) else 4.0
+        leg_diversity_bonus = 0.0
+        if W_LEG_DIVERSITY > 0:
+            _n_legs = len(controls) - 1
+            _all_tags: set = set()
+            for _i in range(_n_legs):
+                _jac = _per_leg_jaccard[_i] if _i < len(_per_leg_jaccard) else None
+                _hr = hr_scores_f[_i] if _i < len(hr_scores_f) else None
+                _cat = catch_scores_f[_i] if _i < len(catch_scores_f) else None
+                _all_tags.update(self._classify_leg_type(_jac, _hr, _cat))
+            # len ∈ [1,4] → score ∈ [0.25, 1.0]
+            leg_diversity_bonus = W_LEG_DIVERSITY * len(_all_tags) / 4.0
+
         # ── Score final (à maximiser) ───────────────────────────────────────
         # Seuils depuis FFCORulesEngine si disponible, sinon valeurs historiques
         if self._thresholds is not None:
@@ -1424,6 +1680,7 @@ class GeneticAlgorithm:
             + nav_score_j
             + nav_score_k
             + nav_worst_leg
+            + leg_diversity_bonus
         )
 
     def _compute_shape_score(

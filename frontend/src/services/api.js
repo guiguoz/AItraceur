@@ -81,6 +81,10 @@ export const getCourseElevation = (controls) =>
 export const getRoutesBetweenControls = (params) =>
   api.post('/api/v1/terrain/routes-between', params, { timeout: 60000 });
 
+// ── Nav Context (Phase 5 — highlight visuel) ─────────────────────────────────
+export const fetchNavContext = (params) =>
+  api.post('/api/v1/generation/nav-context', params, { timeout: 30000 });
+
 // ── Mode Compétition ────────────────────────────────────────────────────────
 /** Liste toutes les compétitions sauvegardées. */
 export const listCompetitions = () =>

@@ -75,6 +75,33 @@
       "active_td": ["TD1"],
       "max_dist_m": 30,
       "reference": "FFCO RTS CO (mai 2025) TD1 — postes sur éléments évidents"
+    },
+    "C18": {
+      "id": "C18",
+      "name": "min_route_choice_legs",
+      "description": "Trop peu de legs avec vrai choix d'itinéraire (Jaccard OSM ≥ seuil). Un circuit TD3+ doit offrir des alternatives tactiques.",
+      "severity": "warning",
+      "min_route_choice_legs": { "TD3": 1, "TD4": 2, "TD5": 2 },
+      "min_jaccard": 0.25,
+      "source": "calibration Phase 0 — valeurs provisoires"
+    },
+    "C19": {
+      "id": "C19",
+      "name": "handrail_excess",
+      "description": "Trop de legs guidés par main courante pour le niveau TD — circuit trop facile.",
+      "severity": "warning",
+      "max_handrail_ratio": { "TD4": 0.70, "TD5": 0.60 },
+      "handrail_threshold": 0.70,
+      "source": "IOF Guidelines §4.3"
+    },
+    "C20": {
+      "id": "C20",
+      "name": "route_choice_excess",
+      "description": "Trop de legs route_choice pour le niveau TD — circuit trop exigeant pour TD3.",
+      "severity": "warning",
+      "max_route_choice_ratio": { "TD3": 0.60 },
+      "min_jaccard": 0.25,
+      "source": "calibration Phase 0 — valeurs provisoires"
     }
   },
   "forest": {

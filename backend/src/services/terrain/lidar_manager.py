@@ -87,26 +87,45 @@ class ElevationCache:
             + vals[3] * fx * fy
         )
 
-    def estimate_dplus(self, controls: list) -> float:
+    def estimate_dplus(self, controls: list, step_m: float = 20.0) -> float:
         """
-        Estime le D+ d'un circuit (séquence de (lng, lat)).
+        Estime le D+ d'un circuit avec sur-échantillonnage des jambes longues.
 
-        Calcule la somme des dénivelés positifs entre postes consécutifs.
-        Les legs sans données altimétrique sont ignorés (pas de pénalité).
+        Interpole des points intermédiaires tous les step_m mètres sur chaque
+        jambe pour capturer les variations de relief entre postes.
 
         Returns:
             D+ estimé en mètres.
         """
+        if not controls:
+            return 0.0
         d_plus = 0.0
-        prev_alt = None
-        for lng, lat in controls:
-            alt = self.query(lng, lat)
-            if alt is None:
-                prev_alt = None  # rupture de chaîne si données absentes
-                continue
-            if prev_alt is not None and alt > prev_alt:
-                d_plus += alt - prev_alt
-            prev_alt = alt
+        prev_alt: Optional[float] = None
+        prev_lng: Optional[float] = None
+        prev_lat: Optional[float] = None
+        for ctrl in controls:
+            lng, lat = ctrl[0], ctrl[1]
+            if prev_lng is not None:
+                dlng = lng - prev_lng
+                dlat = lat - prev_lat
+                avg_lat = (lat + prev_lat) / 2.0
+                dist_m = math.sqrt(
+                    (dlng * 111000 * math.cos(math.radians(avg_lat))) ** 2
+                    + (dlat * 111000) ** 2
+                )
+                steps = max(1, int(dist_m / step_m))
+                for i in range(1, steps + 1):
+                    t = i / steps
+                    alt = self.query(prev_lng + t * dlng, prev_lat + t * dlat)
+                    if alt is not None:
+                        if prev_alt is not None and alt > prev_alt:
+                            d_plus += alt - prev_alt
+                        prev_alt = alt
+            else:
+                alt = self.query(lng, lat)
+                if alt is not None:
+                    prev_alt = alt
+            prev_lng, prev_lat = lng, lat
         return d_plus
 
 
@@ -180,6 +199,105 @@ def build_elevation_cache(
         bbox=(min_lng, min_lat, max_lng, max_lat),
         n_rows=n_rows,
         n_cols=n_cols,
+    )
+
+
+def enrich_candidates_with_prominence(
+    candidates: list,
+    cfg: dict,
+    timeout: int = 15,
+) -> None:
+    """
+    Enrichit les candidate_points terrain avec la proéminence réelle IGN.
+
+    Pour chaque candidat ISOM knoll/dépression, interroge l'API IGN avec
+    le point central + n_ring points de couronne, calcule la proéminence
+    (alt_centre - moyenne_couronne) et ajuste l'attractivité en place.
+
+    Silencieux si IGN inaccessible. Ne doit pas être appelé pour TD1.
+    """
+    import numpy as _np
+
+    knoll_codes = set(cfg.get("knoll_isom_codes", []))
+    dep_codes = set(cfg.get("depression_isom_codes", []))
+    terrain_codes = knoll_codes | dep_codes
+    boost_thr = cfg.get("prominence_boost_threshold_m", 3.0)
+    kd_thr = cfg.get("prominence_knockdown_threshold_m", 1.0)
+    att_boost = cfg.get("att_boost", 0.15)
+    att_knockdown = cfg.get("att_knockdown", 0.20)
+    radius_m = cfg.get("prominence_radius_m", 35.0)
+    n_ring = cfg.get("prominence_ring_n", 8)
+
+    terrain_cps = [cp for cp in candidates if cp.get("isom") in terrain_codes]
+    if not terrain_cps:
+        print("[DemCache] Enrichissement : aucun candidat terrain", flush=True)
+        return
+
+    # Construire coords : centre + n_ring points de couronne par candidat
+    all_coords: List[Tuple[float, float]] = []
+    for cp in terrain_cps:
+        lng, lat = float(cp["x"]), float(cp["y"])
+        all_coords.append((lng, lat))
+        dlat = radius_m / 111000.0
+        dlng = radius_m / (111000.0 * math.cos(math.radians(lat)))
+        for k in range(n_ring):
+            angle = 2.0 * math.pi * k / n_ring
+            all_coords.append((
+                lng + dlng * math.cos(angle),
+                lat + dlat * math.sin(angle),
+            ))
+
+    try:
+        elevations = get_elevation_profile(all_coords, chunk_size=200)
+    except Exception as e:
+        print(f"[DemCache] IGN API erreur lors enrichissement: {e}", flush=True)
+        return
+
+    pts_per_cp = 1 + n_ring
+    stats = {"boosted": 0, "knockdown": 0, "unchanged": 0, "skipped": 0}
+
+    for i, cp in enumerate(terrain_cps):
+        base_idx = i * pts_per_cp
+        alt_center = elevations[base_idx]
+        ring_vals = [
+            elevations[base_idx + 1 + k]
+            for k in range(n_ring)
+            if elevations[base_idx + 1 + k] is not None
+        ]
+
+        if alt_center is None or len(ring_vals) < n_ring // 2:
+            stats["skipped"] += 1
+            continue
+
+        prom = float(alt_center - _np.mean(ring_vals))
+        cp["dem_prominence"] = round(prom, 2)
+
+        if abs(prom) > 50:
+            print(
+                f"[DemCache] Prominence suspecte {prom:.1f}m ISOM={cp.get('isom')} "
+                f"lng={cp['x']:.5f} lat={cp['y']:.5f}",
+                flush=True,
+            )
+
+        is_knoll = cp.get("isom") in knoll_codes
+        confirmed = prom >= boost_thr if is_knoll else prom <= -boost_thr
+        flat = abs(prom) < kd_thr
+
+        base = float(cp.get("attractiveness", 0.75))
+        if confirmed:
+            cp["attractiveness"] = min(1.0, base + att_boost)
+            stats["boosted"] += 1
+        elif flat:
+            cp["attractiveness"] = max(0.10, base - att_knockdown)
+            stats["knockdown"] += 1
+        else:
+            stats["unchanged"] += 1
+
+    print(
+        f"[DemCache] Enrichissement : {stats['boosted']} boostés, "
+        f"{stats['knockdown']} pénalisés, {stats['unchanged']} inchangés, "
+        f"{stats['skipped']} skippés (IGN nodata)",
+        flush=True,
     )
 
 

@@ -2261,7 +2261,28 @@ def _circuit_impl(body: dict) -> dict:
         except Exception as _dem_err:
             print(f"[circuit] DEM enrichissement non bloquant: {_dem_err}", flush=True)
 
-    if heatmap_cache is not None or elevation_cache is not None:
+    # ── RouteAnalyzer OSM (termes E + N forêt) ────────────────────────────────
+    # Active la diversité Jaccard (Terme E) ET le choix chemin longeant (Terme N)
+    # pour les circuits forêt/MD/LD. Non bloquant.
+    _route_analyzer_circuit = None
+    _ct_lower = (circuit_type or "md").lower()
+    if bounding_box and _ct_lower not in ("sprint",):
+        try:
+            from src.services.terrain.osm_fetcher import extract_sprint_features as _ext_osm
+            from src.services.optimization.route_analyzer import RouteAnalyzer as _RA
+            _osm_fw = _ext_osm(bounding_box)
+            _hw = _osm_fw.get("highway_ways", [])
+            if _hw:
+                _route_analyzer_circuit = _RA(_hw)
+                print(
+                    f"[circuit] RouteAnalyzer: {_route_analyzer_circuit.node_count} nœuds / "
+                    f"{_route_analyzer_circuit.edge_count} arêtes OSM",
+                    flush=True,
+                )
+        except Exception as _ra_err:
+            print(f"[circuit] RouteAnalyzer non bloquant: {_ra_err}", flush=True)
+
+    if heatmap_cache is not None or elevation_cache is not None or _route_analyzer_circuit is not None:
         request = GenerationRequest(
             bounding_box=request.bounding_box,
             category=request.category,
@@ -2278,6 +2299,7 @@ def _circuit_impl(body: dict) -> dict:
             start_position=request.start_position,
             heatmap_cache=heatmap_cache,
             elevation_cache=elevation_cache,
+            route_analyzer=_route_analyzer_circuit,
             map_scale=request.map_scale,
         )
 

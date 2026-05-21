@@ -333,7 +333,8 @@
     "_comment": "Seuils de classification des types de legs (Terme M). Valeurs provisoires — à calibrer en Phase 0.",
     "route_choice_jaccard": 0.30,
     "handrail_coverage": 0.70,
-    "low_catch_score": 0.30
+    "low_catch_score": 0.30,
+    "parallel_path_score": 0.40
   },
   "route_choice_leg_min_m": {
     "_comment": "Longueur minimale (m) d'une jambe pour activer le terme E OSM (RouteAnalyzer). En dessous, le Jaccard est peu significatif (peu d'alternatives crédibles). Calibration Phase 0 — valeurs provisoires.",
@@ -341,6 +342,13 @@
     "forest": 150,
     "md": 150,
     "ld": 200
+  },
+  "parallel_path_min_leg_m": {
+    "_comment": "Jambe minimale (m) pour activer le Terme N (chemin longeant l'interposte). Forêt MD/LD uniquement — pas sprint.",
+    "md": 200,
+    "ld": 400,
+    "forest": 200,
+    "foret": 200
   },
   "d_plus_penalty_modulation": {
     "_comment": "Modulation du terme G (D+/distance ×200). Forêt/LD = D+ naturel → pénalité réduite.",

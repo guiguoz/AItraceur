@@ -49,6 +49,7 @@ class RouteAnalyzer:
         self.graph = self._build_graph(highway_ways)
         self._nodes: List[Tuple[float, float]] = list(self.graph.nodes())
         self._route_cache: dict = {}
+        self._parallel_path_cache: dict = {}
         self._cache_stats: dict = {"hits": 0, "misses": 0, "total_time_ms": 0.0}
 
     # ── Construction du graphe ─────────────────────────────────────────────────
@@ -300,7 +301,23 @@ class RouteAnalyzer:
             or 0.85 <= self.route_length_m(p) / optimal_len <= 1.30
         ]
         jaccard = self._jaccard_from_routes(credible) if len(credible) >= 2 else 0.0
-        return {"jaccard": round(jaccard, 4), "credible_routes": len(credible)}
+
+        # similarity_ratio : min_dist / max_dist parmi les routes crédibles.
+        # Proche de 1.0 = les deux itinéraires semblent de longueur identique
+        # → dilemme gauche/droite visuellement ambigu (sprint). Coût nul : longueurs
+        # déjà calculées pour le filtre credible ci-dessus.
+        if len(credible) >= 2:
+            lengths = [self.route_length_m(p) for p in credible]
+            min_l, max_l = min(lengths), max(lengths)
+            similarity_ratio = round(min_l / max_l, 4) if max_l > 0 else 1.0
+        else:
+            similarity_ratio = 0.0
+
+        return {
+            "jaccard": round(jaccard, 4),
+            "credible_routes": len(credible),
+            "similarity_ratio": similarity_ratio,
+        }
 
     def route_diversity_score(
         self,
@@ -314,6 +331,146 @@ class RouteAnalyzer:
         Utilise le cache interne pour performance GA.
         """
         return self.route_diversity_info(start_lng, start_lat, end_lng, end_lat, k)["jaccard"]
+
+    def score_parallel_path_choice(
+        self,
+        start_lng: float, start_lat: float,
+        end_lng: float, end_lat: float,
+        min_leg_m: float = 200.0,
+    ) -> float:
+        """
+        Score ∈ [0, 1] : qualité du choix d'itinéraire "tout droit vs chemin longeant".
+
+        Détecte si un chemin OSM longe l'interposte forêt — même côté, même direction,
+        offset latéral créant un vrai dilemme tactique (détour crédible mais pas trivial).
+
+        Distinct du Terme E (Jaccard k-routes A→B) : ici le chemin NE relie PAS A à B,
+        il longe la jambe sans la connecter. Forêt MD/LD uniquement.
+
+        Cache par paire (start, end) arrondie à 4 décimales (~11m) pour performance GA.
+        """
+        cache_key = (
+            round(start_lng, 4), round(start_lat, 4),
+            round(end_lng, 4), round(end_lat, 4),
+        )
+        if cache_key in self._parallel_path_cache:
+            return self._parallel_path_cache[cache_key]
+
+        result = self._compute_parallel_path_score(
+            start_lng, start_lat, end_lng, end_lat, min_leg_m
+        )
+        self._parallel_path_cache[cache_key] = result
+        return result
+
+    def _compute_parallel_path_score(
+        self,
+        start_lng: float, start_lat: float,
+        end_lng: float, end_lat: float,
+        min_leg_m: float,
+    ) -> float:
+        """Calcul effectif du score chemin parallèle (appelé une seule fois par paire).
+
+        Agrège la couverture de TOUTES les arêtes qualifiantes d'un même côté via
+        l'union des intervalles t-projetés sur [0, 1]. Gère correctement les chemins
+        OSM fragmentés (nombreuses arêtes courtes de 20-100m).
+        """
+        cos_lat = math.cos(math.radians((start_lat + end_lat) / 2))
+        k_lng = 111_000 * cos_lat
+        k_lat = 111_000
+
+        ax, ay = start_lng * k_lng, start_lat * k_lat
+        bx, by = end_lng * k_lng, end_lat * k_lat
+        leg_m = math.sqrt((bx - ax) ** 2 + (by - ay) ** 2)
+
+        if leg_m < min_leg_m:
+            return 0.0
+
+        ux, uy = (bx - ax) / leg_m, (by - ay) / leg_m  # vecteur jambe normé
+        px, py = -uy, ux                                 # perpendiculaire (gauche)
+
+        # Buffers latéraux adaptatifs : 7 %–30 % de la longueur jambe
+        buf_min = max(30.0, 0.07 * leg_m)
+        buf_max = min(400.0, 0.30 * leg_m)
+
+        # Collecter les arêtes qualifiantes côté gauche (perp > 0) et droite (perp < 0)
+        # Chaque entrée : (t_lo, t_hi, avg_lat_m)
+        left_segs: list = []
+        right_segs: list = []
+
+        for n1, n2 in self.graph.edges():
+            nx1, ny1 = n1[0] * k_lng, n1[1] * k_lat
+            nx2, ny2 = n2[0] * k_lng, n2[1] * k_lat
+
+            # Direction : l'arête doit être dans ≤ 50° de la direction de la jambe
+            ex, ey = nx2 - nx1, ny2 - ny1
+            edge_len = math.sqrt(ex * ex + ey * ey)
+            if edge_len < 5.0:
+                continue
+            cos_angle = abs((ex * ux + ey * uy) / edge_len)
+            if cos_angle < 0.64:
+                continue
+
+            # Projection sur axe jambe
+            t1 = ((nx1 - ax) * ux + (ny1 - ay) * uy) / leg_m
+            t2 = ((nx2 - ax) * ux + (ny2 - ay) * uy) / leg_m
+            t_lo_raw, t_hi_raw = min(t1, t2), max(t1, t2)
+
+            # L'arête doit avoir une projection qui chevauche [0, 1]
+            t_lo = max(0.0, t_lo_raw)
+            t_hi = min(1.0, t_hi_raw)
+            if t_hi - t_lo < 0.04:  # seuil bas : 4 % de jambe (ex. 24m sur 600m)
+                continue
+
+            # Projection sur axe perpendiculaire
+            perp1 = (nx1 - ax) * px + (ny1 - ay) * py
+            perp2 = (nx2 - ax) * px + (ny2 - ay) * py
+
+            abs_p1, abs_p2 = abs(perp1), abs(perp2)
+            avg_lat = (abs_p1 + abs_p2) / 2
+
+            # Au moins une extrémité dans le buffer latéral (l'autre peut être dehors
+            # si le chemin s'éloigne progressivement — tolérance en entrée/sortie)
+            if avg_lat < buf_min or avg_lat > buf_max:
+                continue
+            if perp1 * perp2 < 0:  # côtés opposés → chemin traversant, pas longeant
+                continue
+
+            seg = (t_lo, t_hi, avg_lat)
+            if perp1 >= 0:
+                left_segs.append(seg)
+            else:
+                right_segs.append(seg)
+
+        def _score_side(segs: list) -> float:
+            if not segs:
+                return 0.0
+            # Union des intervalles t sur [0, 1]
+            intervals = sorted((s[0], s[1]) for s in segs)
+            merged = []
+            cur_lo, cur_hi = intervals[0]
+            for lo, hi in intervals[1:]:
+                if lo <= cur_hi:
+                    cur_hi = max(cur_hi, hi)
+                else:
+                    merged.append((cur_lo, cur_hi))
+                    cur_lo, cur_hi = lo, hi
+            merged.append((cur_lo, cur_hi))
+            coverage = sum(hi - lo for lo, hi in merged)
+
+            # Offset latéral moyen pondéré par la longueur de chaque segment qualifiant
+            total_span = sum(s[1] - s[0] for s in segs)
+            avg_lat_m = sum(s[2] * (s[1] - s[0]) for s in segs) / max(total_span, 1e-6)
+
+            # Ratio de détour : aller-retour au chemin / longueur jambe
+            detour_ratio = 2.0 * avg_lat_m / leg_m
+            # Gaussienne centrée sur 18 % de détour idéal (σ = 0.15)
+            balance = math.exp(-((detour_ratio - 0.18) ** 2) / (2 * 0.15 ** 2))
+
+            return coverage * balance
+
+        best_score = max(_score_side(left_segs), _score_side(right_segs))
+        # Normalisation : score brut ≥ 0.40 → score retourné = 1.0
+        return min(1.0, best_score / 0.40)
 
     # ── Infos graphe ───────────────────────────────────────────────────────────
 

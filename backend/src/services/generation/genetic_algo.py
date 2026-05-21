@@ -1042,10 +1042,11 @@ class GeneticAlgorithm:
         jaccard: Optional[float],
         handrail: Optional[float],
         catch: Optional[float],
+        pp_score: Optional[float] = None,
     ) -> set:
         """Étiquettes navigables d'une jambe — SET non exclusif (Terme M).
 
-        Tags possibles : route_choice, handrail, technical_read, direct.
+        Tags possibles : route_choice, handrail, technical_read, parallel_path, direct.
         Utilise les seuils de placement_rules.json["leg_type_thresholds"].
         """
         rules = self._placement_rules.get("leg_type_thresholds", {})
@@ -1056,6 +1057,8 @@ class GeneticAlgorithm:
             types.add("handrail")
         if catch is not None and catch <= rules.get("low_catch_score", 0.30):
             types.add("technical_read")
+        if pp_score is not None and pp_score >= rules.get("parallel_path_score", 0.40):
+            types.add("parallel_path")
         return types if types else {"direct"}
 
     def _osm_coverage_ratio(self, bbox: Optional[dict]) -> float:
@@ -1510,6 +1513,7 @@ class GeneticAlgorithm:
         # Bonus maximal ≈ +4.5 pts (jaccard=0.50) ; malus ≈ −3 pts (jaccard=0.00).
         diversity_bonus = 0.0
         _per_leg_jaccard: list = []  # None ou float par jambe — utilisé par Terme M
+        _per_leg_pp: list = []       # None ou float par jambe — Terme N (chemin parallèle)
         _rc_min = float(
             self._placement_rules.get("route_choice_leg_min_m", {}).get(_ct, 80.0)
         )
@@ -1526,7 +1530,17 @@ class GeneticAlgorithm:
                 )
                 _j = div["jaccard"]
                 _per_leg_jaccard.append(_j)
-                diversity_bonus += (_j - 0.20) * 15.0
+                if _ct == "sprint":
+                    # En sprint : récompenser spécifiquement les choix G/D où les deux
+                    # itinéraires semblent de distance similaire (dilemme visuel).
+                    # similarity_ratio = min_dist/max_dist ∈ [0, 1] — 1.0 = longueurs
+                    # identiques, < 0.85 = l'un est clairement plus long (choix évident).
+                    _sim = div.get("similarity_ratio", 0.0)
+                    _sim_bonus = 1.0 if _sim >= 0.85 else (_sim / 0.85)
+                    _choice_score = _j * _sim_bonus  # ∈ [0, 1]
+                    diversity_bonus += (_choice_score - 0.15) * 15.0
+                else:
+                    diversity_bonus += (_j - 0.20) * 15.0
             else:
                 _per_leg_jaccard.append(None)
                 if self._leg_diversity_db:
@@ -1625,6 +1639,37 @@ class GeneticAlgorithm:
             if n_bad_hr / len(hr_scores_f) > _max_bad:
                 nav_worst_leg -= W_HANDRAIL * 2 * (n_bad_hr / len(hr_scores_f))
 
+        # ── N. Chemin longeant l'interposte (forêt MD/LD uniquement) ────────────
+        # Récompense les jambes où un chemin OSM longe la ligne directe sans la relier :
+        # l'orienteur choisit entre foncer tout droit (risque de déviation) ou emprunter
+        # le chemin (plus long mais sécurisé). Inactif en sprint.
+        _is_forest_ct = _ct in {"md", "ld", "forest", "foret"}
+        W_PARALLEL = 6.0
+        parallel_bonus = 0.0
+        if _is_forest_ct and self._route_analyzer is not None:
+            _pp_min = float(
+                self._placement_rules.get("parallel_path_min_leg_m", {}).get(_ct, 250.0)
+            )
+            pp_scores: list = []
+            for i in range(len(controls) - 1):
+                _leg_m_pp = self._haversine_m(controls[i], controls[i + 1])
+                if _leg_m_pp >= _pp_min:
+                    _pp_s = self._route_analyzer.score_parallel_path_choice(
+                        controls[i][0], controls[i][1],
+                        controls[i + 1][0], controls[i + 1][1],
+                        min_leg_m=_pp_min,
+                    )
+                    pp_scores.append(_pp_s)
+                    _per_leg_pp.append(_pp_s)
+                else:
+                    _per_leg_pp.append(None)
+            if pp_scores:
+                _pp_threshold = self._placement_rules.get(
+                    "leg_type_thresholds", {}
+                ).get("parallel_path_score", 0.40)
+                good_pp = sum(1 for s in pp_scores if s >= _pp_threshold)
+                parallel_bonus = W_PARALLEL * (good_pp / len(pp_scores))
+
         # ── M. Diversité des types de legs ────────────────────────────────────
         # Récompense les circuits qui mélangent route choice, main courante et lecture
         # technique. Neutre (W=0) pour TD ≤ 2 — trop complexe pour les circuits enfants.
@@ -1639,9 +1684,10 @@ class GeneticAlgorithm:
                 _jac = _per_leg_jaccard[_i] if _i < len(_per_leg_jaccard) else None
                 _hr = hr_scores_f[_i] if _i < len(hr_scores_f) else None
                 _cat = catch_scores_f[_i] if _i < len(catch_scores_f) else None
-                _all_tags.update(self._classify_leg_type(_jac, _hr, _cat))
-            # len ∈ [1,4] → score ∈ [0.25, 1.0]
-            leg_diversity_bonus = W_LEG_DIVERSITY * len(_all_tags) / 4.0
+                _pp = _per_leg_pp[_i] if _i < len(_per_leg_pp) else None
+                _all_tags.update(self._classify_leg_type(_jac, _hr, _cat, _pp))
+            # len ∈ [1,5] → score ∈ [0.20, 1.0] (5 tags possibles désormais)
+            leg_diversity_bonus = W_LEG_DIVERSITY * len(_all_tags) / 5.0
 
         # ── Score final (à maximiser) ───────────────────────────────────────
         # Seuils depuis FFCORulesEngine si disponible, sinon valeurs historiques
@@ -1680,6 +1726,7 @@ class GeneticAlgorithm:
             + nav_score_j
             + nav_score_k
             + nav_worst_leg
+            + parallel_bonus
             + leg_diversity_bonus
         )
 

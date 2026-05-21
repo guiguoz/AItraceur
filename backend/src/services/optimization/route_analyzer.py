@@ -50,6 +50,7 @@ class RouteAnalyzer:
         self._nodes: List[Tuple[float, float]] = list(self.graph.nodes())
         self._route_cache: dict = {}
         self._parallel_path_cache: dict = {}
+        self._line_crossing_cache: dict = {}
         self._cache_stats: dict = {"hits": 0, "misses": 0, "total_time_ms": 0.0}
 
     # ── Construction du graphe ─────────────────────────────────────────────────
@@ -331,6 +332,123 @@ class RouteAnalyzer:
         Utilise le cache interne pour performance GA.
         """
         return self.route_diversity_info(start_lng, start_lat, end_lng, end_lat, k)["jaccard"]
+
+    # ── Saut de ligne ─────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _segment_cross_t(
+        ax: float, ay: float, bx: float, by: float,
+        px: float, py: float, qx: float, qy: float,
+    ) -> Tuple[Optional[float], Optional[float]]:
+        """
+        Intersection stricte des segments AB et PQ en coordonnées Cartésiennes.
+
+        Retourne (t, s) si les segments se croisent strictement (0 < t,s < 1),
+        sinon (None, None).  t = position sur AB, s = position sur PQ.
+        """
+        d1x, d1y = bx - ax, by - ay
+        d2x, d2y = qx - px, qy - py
+        denom = d1x * d2y - d1y * d2x
+        if abs(denom) < 1e-10:
+            return None, None
+        dx, dy = px - ax, py - ay
+        t = (dx * d2y - dy * d2x) / denom
+        s = (dx * d1y - dy * d1x) / denom
+        if 0.0 < t < 1.0 and 0.0 < s < 1.0:
+            return t, s
+        return None, None
+
+    def score_line_crossing(
+        self,
+        start_lng: float, start_lat: float,
+        end_lng: float, end_lat: float,
+        min_leg_m: float = 150.0,
+    ) -> float:
+        """
+        Score ∈ [0, 1] : qualité des sauts de ligne sur l'interposte (forêt).
+
+        Détecte les arêtes OSM qui CROISENT la jambe à angle significatif
+        (> 50° de la direction de la jambe) — technique de navigation où le
+        franchissement d'un sentier/lisière/clôture confirme la position du
+        coureur en cours de jambe.
+
+        Distinct du Terme K (main courante = arête PARALLÈLE).
+        Forêt MD/LD uniquement ; cache par paire de postes.
+        """
+        cache_key = (
+            round(start_lng, 4), round(start_lat, 4),
+            round(end_lng, 4), round(end_lat, 4),
+        )
+        if cache_key in self._line_crossing_cache:
+            return self._line_crossing_cache[cache_key]
+        result = self._compute_line_crossing_score(
+            start_lng, start_lat, end_lng, end_lat, min_leg_m
+        )
+        self._line_crossing_cache[cache_key] = result
+        return result
+
+    def _compute_line_crossing_score(
+        self,
+        start_lng: float, start_lat: float,
+        end_lng: float, end_lat: float,
+        min_leg_m: float,
+    ) -> float:
+        """Calcul effectif du score saut de ligne."""
+        cos_lat = math.cos(math.radians((start_lat + end_lat) / 2))
+        k_lng = 111_000 * cos_lat
+        k_lat = 111_000
+
+        ax, ay = start_lng * k_lng, start_lat * k_lat
+        bx, by = end_lng * k_lng, end_lat * k_lat
+        leg_m = math.sqrt((bx - ax) ** 2 + (by - ay) ** 2)
+
+        if leg_m < min_leg_m:
+            return 0.0
+
+        # Vecteur jambe normé — pour calculer l'angle d'intersection
+        ux, uy = (bx - ax) / leg_m, (by - ay) / leg_m
+
+        total_quality = 0.0
+
+        for n1, n2 in self.graph.edges():
+            px, py = n1[0] * k_lng, n1[1] * k_lat
+            qx, qy = n2[0] * k_lng, n2[1] * k_lat
+
+            # Test d'intersection stricte segment jambe ∩ segment arête
+            t, s = self._segment_cross_t(ax, ay, bx, by, px, py, qx, qy)
+            if t is None:
+                continue
+
+            # Position le long de la jambe : doit être dans le corps [0.10, 0.90]
+            # (pas à l'arrivée ni au départ — la feature serait attack/catch)
+            if t < 0.10 or t > 0.90:
+                continue
+
+            # Angle de croisement : doit être > 50° (cos < 0.64)
+            # Distingue saut de ligne (perpendiculaire) de main courante (parallèle)
+            ex, ey = qx - px, qy - py
+            edge_len = math.sqrt(ex * ex + ey * ey)
+            if edge_len < 5.0:
+                continue
+            cos_angle = abs((ex * ux + ey * uy) / edge_len)
+            if cos_angle >= 0.64:  # trop parallèle → c'est une main courante, pas un saut
+                continue
+
+            # Qualité de position : maximale au milieu de la jambe
+            position_quality = 1.0 - 2.0 * abs(t - 0.5)  # ∈ [0, 1]
+
+            # Qualité d'angle : meilleur quand perpendiculaire (cos_angle → 0)
+            angle_quality = (0.64 - cos_angle) / 0.64  # ∈ [0, 1]
+
+            crossing_quality = position_quality * angle_quality
+            total_quality += crossing_quality
+
+            if total_quality >= 0.80:  # arrêt anticipé : score déjà excellent
+                break
+
+        # Normalisation : 0.80 de score brut → score retourné = 1.0
+        # (2 bons croisements × ~0.4 chacun ≈ 1.0)
+        return min(1.0, total_quality / 0.80)
 
     def score_parallel_path_choice(
         self,

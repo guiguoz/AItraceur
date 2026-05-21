@@ -1043,10 +1043,12 @@ class GeneticAlgorithm:
         handrail: Optional[float],
         catch: Optional[float],
         pp_score: Optional[float] = None,
+        lc_score: Optional[float] = None,
     ) -> set:
         """Étiquettes navigables d'une jambe — SET non exclusif (Terme M).
 
-        Tags possibles : route_choice, handrail, technical_read, parallel_path, direct.
+        Tags possibles : route_choice, handrail, technical_read, parallel_path,
+        line_crossing, direct.
         Utilise les seuils de placement_rules.json["leg_type_thresholds"].
         """
         rules = self._placement_rules.get("leg_type_thresholds", {})
@@ -1059,6 +1061,8 @@ class GeneticAlgorithm:
             types.add("technical_read")
         if pp_score is not None and pp_score >= rules.get("parallel_path_score", 0.40):
             types.add("parallel_path")
+        if lc_score is not None and lc_score >= rules.get("line_crossing_score", 0.35):
+            types.add("line_crossing")
         return types if types else {"direct"}
 
     def _osm_coverage_ratio(self, bbox: Optional[dict]) -> float:
@@ -1519,6 +1523,7 @@ class GeneticAlgorithm:
         diversity_bonus = 0.0
         _per_leg_jaccard: list = []  # None ou float par jambe — utilisé par Terme M
         _per_leg_pp: list = []       # None ou float par jambe — Terme N (chemin parallèle)
+        _per_leg_lc: list = []       # None ou float par jambe — Terme O (saut de ligne)
         _rc_min = float(
             self._placement_rules.get("route_choice_leg_min_m", {}).get(_ct, 80.0)
         )
@@ -1676,6 +1681,36 @@ class GeneticAlgorithm:
                 good_pp = sum(1 for s in pp_scores if s >= _pp_threshold)
                 parallel_bonus = W_PARALLEL * (good_pp / len(pp_scores))
 
+        # ── O. Saut de ligne (forêt MD/LD, TD≥3) ─────────────────────────────
+        # Récompense les jambes qui croisent perpendiculairement une voie OSM :
+        # technique IOF "confirmation de position" — distinct de la main courante
+        # (K = parallèle) et du chemin longeant (N = latéral).
+        W_LINE_CROSSING = 5.0
+        line_crossing_bonus = 0.0
+        if _is_forest_ct and self._route_analyzer is not None and _td_level >= 3:
+            _lc_min = float(
+                self._placement_rules.get("line_crossing_min_leg_m", {}).get(_ct, 150.0)
+            )
+            lc_scores: list = []
+            for i in range(len(controls) - 1):
+                _leg_m_lc = self._haversine_m(controls[i], controls[i + 1])
+                if _leg_m_lc >= _lc_min:
+                    _lc_s = self._route_analyzer.score_line_crossing(
+                        controls[i][0], controls[i][1],
+                        controls[i + 1][0], controls[i + 1][1],
+                        min_leg_m=_lc_min,
+                    )
+                    lc_scores.append(_lc_s)
+                    _per_leg_lc.append(_lc_s)
+                else:
+                    _per_leg_lc.append(None)
+            if lc_scores:
+                _lc_threshold = self._placement_rules.get(
+                    "leg_type_thresholds", {}
+                ).get("line_crossing_score", 0.35)
+                good_lc = sum(1 for s in lc_scores if s >= _lc_threshold)
+                line_crossing_bonus = W_LINE_CROSSING * (good_lc / len(lc_scores))
+
         # ── M. Diversité des types de legs ────────────────────────────────────
         # Récompense les circuits qui mélangent route choice, main courante et lecture
         # technique. Neutre (W=0) pour TD ≤ 2 — trop complexe pour les circuits enfants.
@@ -1690,9 +1725,10 @@ class GeneticAlgorithm:
                 _hr = hr_scores_f[_i] if _i < len(hr_scores_f) else None
                 _cat = catch_scores_f[_i] if _i < len(catch_scores_f) else None
                 _pp = _per_leg_pp[_i] if _i < len(_per_leg_pp) else None
-                _all_tags.update(self._classify_leg_type(_jac, _hr, _cat, _pp))
-            # len ∈ [1,5] → score ∈ [0.20, 1.0] (5 tags possibles désormais)
-            leg_diversity_bonus = W_LEG_DIVERSITY * len(_all_tags) / 5.0
+                _lc = _per_leg_lc[_i] if _i < len(_per_leg_lc) else None
+                _all_tags.update(self._classify_leg_type(_jac, _hr, _cat, _pp, _lc))
+            # len ∈ [1,6] → score ∈ [0.17, 1.0] (6 tags possibles désormais)
+            leg_diversity_bonus = W_LEG_DIVERSITY * len(_all_tags) / 6.0
 
         # ── Score final (à maximiser) ───────────────────────────────────────
         # Seuils depuis FFCORulesEngine si disponible, sinon valeurs historiques
@@ -1732,6 +1768,7 @@ class GeneticAlgorithm:
             + nav_score_k
             + nav_worst_leg
             + parallel_bonus
+            + line_crossing_bonus
             + leg_diversity_bonus
         )
 

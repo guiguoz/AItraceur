@@ -334,7 +334,8 @@
     "route_choice_jaccard": 0.30,
     "handrail_coverage": 0.70,
     "low_catch_score": 0.30,
-    "parallel_path_score": 0.40
+    "parallel_path_score": 0.40,
+    "line_crossing_score": 0.35
   },
   "route_choice_leg_min_m": {
     "_comment": "Longueur minimale (m) d'une jambe pour activer le terme E OSM (RouteAnalyzer). En dessous, le Jaccard est peu significatif (peu d'alternatives crédibles). Calibration Phase 0 — valeurs provisoires.",
@@ -349,6 +350,13 @@
     "ld": 400,
     "forest": 200,
     "foret": 200
+  },
+  "line_crossing_min_leg_m": {
+    "_comment": "Jambe minimale (m) pour activer le Terme O (saut de ligne). Forêt MD/LD uniquement — pas sprint (trop de croisements en ville).",
+    "md": 150,
+    "ld": 300,
+    "forest": 150,
+    "foret": 150
   },
   "d_plus_penalty_modulation": {
     "_comment": "Modulation du terme G (D+/distance ×200). Forêt/LD = D+ naturel → pénalité réduite.",

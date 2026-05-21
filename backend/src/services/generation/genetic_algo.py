@@ -1507,9 +1507,14 @@ class GeneticAlgorithm:
         _mean_leg = float(leg_m.mean()) if _n_legs > 0 else _target_leg
         _leg_conformity = 1.0 - min(abs(_mean_leg - _target_leg) / _target_leg, 1.0)
 
+        # Niveau TD (1-5) — utilisé par les termes E, N, M pour gater les règles
+        # de choix d'itinéraire inadaptées aux jeunes/débutants (TD1=Blanc, TD2=Orange).
+        _td_level = int(config.technical_level or 3)
+
         # ── E. Route diversity ─────────────────────────────────────────────────
         # Priorité OSM (RouteAnalyzer) si disponible ET jambe assez longue ET
         # couverture OSM suffisante. Fallback GPX Vikazimut sinon.
+        # Inactif pour TD≤2 (circuits linéaires, aucun choix tactique attendu).
         # Bonus maximal ≈ +4.5 pts (jaccard=0.50) ; malus ≈ −3 pts (jaccard=0.00).
         diversity_bonus = 0.0
         _per_leg_jaccard: list = []  # None ou float par jambe — utilisé par Terme M
@@ -1530,20 +1535,21 @@ class GeneticAlgorithm:
                 )
                 _j = div["jaccard"]
                 _per_leg_jaccard.append(_j)
-                if _ct == "sprint":
-                    # En sprint : récompenser spécifiquement les choix G/D où les deux
-                    # itinéraires semblent de distance similaire (dilemme visuel).
-                    # similarity_ratio = min_dist/max_dist ∈ [0, 1] — 1.0 = longueurs
-                    # identiques, < 0.85 = l'un est clairement plus long (choix évident).
-                    _sim = div.get("similarity_ratio", 0.0)
-                    _sim_bonus = 1.0 if _sim >= 0.85 else (_sim / 0.85)
-                    _choice_score = _j * _sim_bonus  # ∈ [0, 1]
-                    diversity_bonus += (_choice_score - 0.15) * 15.0
-                else:
-                    diversity_bonus += (_j - 0.20) * 15.0
+                if _td_level >= 3:
+                    if _ct == "sprint":
+                        # En sprint TD3+ : récompenser les choix G/D visuellement ambigus.
+                        # similarity_ratio = min_dist/max_dist — 1.0 = longueurs identiques.
+                        # Inactif en TD1/TD2 : jeunes coureurs sur parcours linéaires.
+                        _sim = div.get("similarity_ratio", 0.0)
+                        _sim_bonus = 1.0 if _sim >= 0.85 else (_sim / 0.85)
+                        _choice_score = _j * _sim_bonus  # ∈ [0, 1]
+                        diversity_bonus += (_choice_score - 0.15) * 15.0
+                    else:
+                        diversity_bonus += (_j - 0.20) * 15.0
+                # TD1/TD2 : jaccard enregistré pour Terme M, mais aucun bonus/malus.
             else:
                 _per_leg_jaccard.append(None)
-                if self._leg_diversity_db:
+                if self._leg_diversity_db and _td_level >= 3:
                     cv = self._lookup_leg_cv(controls[i], controls[i + 1])
                     if cv is not None:
                         diversity_bonus += (cv - 0.20) * 15.0
@@ -1646,7 +1652,7 @@ class GeneticAlgorithm:
         _is_forest_ct = _ct in {"md", "ld", "forest", "foret"}
         W_PARALLEL = 6.0
         parallel_bonus = 0.0
-        if _is_forest_ct and self._route_analyzer is not None:
+        if _is_forest_ct and self._route_analyzer is not None and _td_level >= 3:
             _pp_min = float(
                 self._placement_rules.get("parallel_path_min_leg_m", {}).get(_ct, 250.0)
             )
@@ -1674,7 +1680,6 @@ class GeneticAlgorithm:
         # Récompense les circuits qui mélangent route choice, main courante et lecture
         # technique. Neutre (W=0) pour TD ≤ 2 — trop complexe pour les circuits enfants.
         # Ablation study Phase 0 confirme l'utilité avant d'augmenter le poids.
-        _td_level = config.technical_level or 3
         W_LEG_DIVERSITY = 0.0 if (_td_level <= 2 or config.ablation_disable_leg_diversity) else 4.0
         leg_diversity_bonus = 0.0
         if W_LEG_DIVERSITY > 0:

@@ -2110,7 +2110,13 @@ def _circuit_impl(body: dict) -> dict:
     forbidden_zones_polygons = list(body.get("forbidden_zones_polygons") or [])
     required_controls_raw = body.get("required_controls") or []
     candidate_points = list(body.get("candidate_points") or [])
-    ocad_line_segments = list(body.get("ocad_line_segments") or [])
+    _raw_features = list(body.get("ocad_geojson_features") or [])
+    if _raw_features:
+        from src.services.ocad.geojson_extractor import extract_line_segments as _extract_segs
+        _bbox_lat = (bounding_box.get("min_y", 48.0) + bounding_box.get("max_y", 48.0)) / 2
+        ocad_line_segments = _extract_segs(_raw_features, center_lat=_bbox_lat)
+    else:
+        ocad_line_segments = []
     existing_controls = body.get("existing_controls", [])  # mode compétition
     _raw_scale = body.get("map_scale")
     map_scale: Optional[int] = None
@@ -3947,6 +3953,13 @@ def _sprint_impl(task_id: str, body: dict) -> None:
             map_scale = _s if 1000 <= _s <= 50000 else None
         except (ValueError, TypeError):
             pass
+    _raw_features_s = list(body.get("ocad_geojson_features") or [])
+    if _raw_features_s:
+        from src.services.ocad.geojson_extractor import extract_line_segments as _extract_segs_s
+        _bbox_lat_s = (bounding_box.get("min_y", 48.0) + bounding_box.get("max_y", 48.0)) / 2
+        ocad_line_segments_sprint = _extract_segs_s(_raw_features_s, center_lat=_bbox_lat_s)
+    else:
+        ocad_line_segments_sprint = []
 
     dialogue = []
     oob_polygons = list(forbidden_zones)
@@ -4172,6 +4185,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
         route_analyzer=route_analyzer,   # re-ranker choix d'itinéraire sprint
         rules_engine=_rules_engine,
         map_scale=map_scale,
+        ocad_line_segments=ocad_line_segments_sprint,
     )
 
     print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ GA generate ({len(candidate_points)} candidats)...", flush=True)

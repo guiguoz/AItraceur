@@ -11,6 +11,7 @@
 # =============================================
 
 import json
+import math
 import os
 import subprocess
 import tempfile
@@ -83,14 +84,56 @@ def extract_geojson_from_ocd(ocd_bytes: bytes) -> Optional[List[Dict]]:
 # Codes ISOM à extraire pour les segments de navigation (termes N, O, P)
 _LINE_SEG_CODES = {101, 102, 103, 201, 215, 305, 306, 501, 502, 503, 504, 505, 506, 507, 508, 516}
 
+# Codes contours — simplification RDP avant segmentation pour éviter le bruit
+_CONTOUR_CODES = {101, 102, 103}
 
-def extract_line_segments(features: List[Dict], codes: Optional[set] = None) -> List[Dict]:
+# Tolérance RDP par code (mètres terrain) :
+#   102 index_contour : 1.5m — structure perceptuelle forte, préserver les inflexions
+#   101 contour       : 3.0m — bruit moyen, simplification modérée
+#   103 form_line     : 5.0m — détail fin, simplification agressive
+_RDP_EPSILON_M = {101: 3.0, 102: 1.5, 103: 5.0}
+
+
+def _rdp_epsilon_deg(m: float, lat: float = 48.0) -> float:
+    """Convertit une tolérance métrique en degrés WGS84 (axe longitude, lat fixe)."""
+    return m / (111320.0 * math.cos(math.radians(lat)))
+
+
+def _rdp_simplify(coords: list, epsilon: float) -> list:
+    """Ramer-Douglas-Peucker — retourne une sous-liste de coordonnées simplifiée."""
+    if len(coords) < 3:
+        return coords
+    start, end = coords[0], coords[-1]
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    norm = math.sqrt(dx * dx + dy * dy) or 1e-10
+    max_dist, max_idx = 0.0, 1
+    for i in range(1, len(coords) - 1):
+        d = abs(dy * coords[i][0] - dx * coords[i][1] + end[0] * start[1] - end[1] * start[0]) / norm
+        if d > max_dist:
+            max_dist, max_idx = d, i
+    if max_dist > epsilon:
+        left = _rdp_simplify(coords[:max_idx + 1], epsilon)
+        right = _rdp_simplify(coords[max_idx:], epsilon)
+        return left[:-1] + right
+    return [coords[0], coords[-1]]
+
+
+def extract_line_segments(
+    features: List[Dict],
+    codes: Optional[set] = None,
+    center_lat: float = 48.0,
+) -> List[Dict]:
     """
     Extrait les segments de LineString OCAD pertinents pour l'analyse des jambes.
 
+    Les polylines de courbes de niveau (101-103) sont simplifiées via RDP avant
+    décomposition pour éviter le sur-comptage dans les termes O et P.
+
     Args:
-        features: Liste de features GeoJSON (depuis extract_geojson_from_ocd)
+        features: Liste de features GeoJSON (bruts depuis le frontend ou extract_geojson_from_ocd)
         codes: Set de codes ISOM à retenir (défaut : _LINE_SEG_CODES)
+        center_lat: Latitude centrale pour convertir les epsilon métriques en degrés
 
     Returns:
         Liste de segments [{p0: [lng, lat], p1: [lng, lat], isom_code: int}]
@@ -112,6 +155,9 @@ def extract_line_segments(features: List[Dict], codes: Optional[set] = None) -> 
         if code not in codes:
             continue
         coords = geom.get("coordinates", [])
+        if code in _CONTOUR_CODES and len(coords) >= 3:
+            eps_deg = _rdp_epsilon_deg(_RDP_EPSILON_M.get(code, 3.0), center_lat)
+            coords = _rdp_simplify(coords, eps_deg)
         for i in range(len(coords) - 1):
             p0, p1 = coords[i], coords[i + 1]
             if len(p0) >= 2 and len(p1) >= 2:

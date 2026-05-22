@@ -422,6 +422,20 @@ function extractCandidatePoints(geojson, max = 600, sprintMode = false) {
   return dedupAll.slice(0, max)
 }
 
+const LINE_SEG_CODES = new Set([101, 102, 103, 201, 215, 305, 306, 501, 502, 503, 504, 505, 506, 507, 508, 516])
+
+function filterOcadLineFeatures(geojson) {
+  const features = []
+  for (const f of geojson?.features ?? []) {
+    if (f.geometry?.type !== 'LineString') continue
+    const sym = f.properties?.sym
+    if (!sym) continue
+    const isom = sym > 10000 ? Math.floor(sym / 1000) : Math.floor(sym)
+    if (LINE_SEG_CODES.has(isom)) features.push(f)
+  }
+  return features
+}
+
 const tools = [
   { id: 'view', icon: '🖐️', label: 'Déplacer' },
   { id: 'start', icon: '🔺', label: 'Départ' },
@@ -815,6 +829,9 @@ function App() {
       const ocadOobZones = ocadData?.geojson ? extractOobZones(ocadData.geojson) : []
       const oobZones = [...activeCircuit.forbiddenZones, ...ocadOobZones]
 
+      // Segments linéaires OCAD pour termes N/O/P (extraction domaine côté backend)
+      const ocadLineFeatures = ocadData?.geojson ? filterOcadLineFeatures(ocadData.geojson) : []
+
       // Candidats OCAD si disponibles, sinon vide (OSM auto-enrichment côté serveur)
       let candidatePoints = ocadData?.geojson
         ? extractCandidatePoints(ocadData.geojson, 600, isSprintCircuit)
@@ -869,6 +886,7 @@ function App() {
           .map(c => ({ lat: c.lat, lng: c.lng })),
         // OCAD/OSM feature candidates for terrain-aware placement
         candidate_points: candidatePoints.slice(0, 600),
+        ocad_geojson_features: ocadLineFeatures,
         // OCAD map pour HeatmapCache CNN (même logique que sprint)
         ...(ocadMapId && ocadBounds ? {
           map_id: ocadMapId,
@@ -887,6 +905,7 @@ function App() {
           ...(startControl && { start_position: [startControl.lng, startControl.lat] }),
           forbidden_zones_polygons: oobZones,
           candidate_points: candidatePoints.slice(0, 600),
+          ocad_geojson_features: ocadLineFeatures,
           existing_controls: competitionMode
             ? getAllExistingControls().map(c => ({ lat: c.lat, lng: c.lng, circuitName: c.circuitName }))
             : [],
@@ -1086,6 +1105,7 @@ function App() {
           target_controls: Math.ceil(missing * 1.5),
           required_controls: placed.map(c => ({ lat: c.lat, lng: c.lng })),
           candidate_points: candidatePoints.slice(0, 600),
+          ocad_geojson_features: ocadLineFeatures,
           ...(ocadMapId && ocadBounds ? {
             map_id: ocadMapId,
             ocad_sw: ocadBounds.southWest,

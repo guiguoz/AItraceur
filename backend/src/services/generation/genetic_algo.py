@@ -99,6 +99,10 @@ class GenerationConfig:
     # Si None : valeurs historiques hardcodées (aucune régression).
     rules_engine: Optional[object] = field(default=None, repr=False)
 
+    # Segments LineString OCAD [{p0, p1, isom_code}] — termes N/O/P forêt.
+    # Vide si pas d'OCAD chargé (fallback OSM ou inactif selon le terme).
+    ocad_line_segments: list = field(default_factory=list)
+
     # Timeout en secondes pour la boucle évolutionnaire (évite les boucles infinies)
     timeout_seconds: float = 90.0
 
@@ -234,6 +238,12 @@ class GeneticAlgorithm:
         self._nav_roles: dict = self._load_nav_roles()
         self._nav_params: dict = self._load_nav_params()
         self._nav_cache: dict = {}  # cache (px,py,cx,cy,role) → score, clé arrondie à 4 décimales (~11m)
+
+        # ── ISOM sémantique (termes N, O, P) ──────────────────────────────────────
+        import json as _json_isom
+        import pathlib as _pathlib_isom
+        _sem_path = _pathlib_isom.Path(__file__).parent.parent / "knowledge_base" / "isom_semantics.json"
+        self._isom_sem: dict = _json_isom.loads(_sem_path.read_text()) if _sem_path.exists() else {}
 
         # ── TD1 preferred features (postes sur éléments évidents) ──────────────
         # Actif uniquement pour technical_level == 1. Charge depuis placement_rules.json
@@ -1037,6 +1047,249 @@ class GeneticAlgorithm:
         a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlng / 2) ** 2
         return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
+    def _isom_profile(self, code: int) -> dict:
+        """Profil sémantique d'un code ISOM depuis isom_semantics.json."""
+        return self._isom_sem.get(str(code), {
+            "mobility_weight": 0.3, "crossing_salience": 0.4,
+            "misleading_potential": 0.3, "handrail_strength": 0.2,
+        })
+
+    @staticmethod
+    def _seg_cross_t(
+        ax: float, ay: float, bx: float, by: float,
+        px: float, py: float, qx: float, qy: float,
+    ):
+        """Intersection paramétrique de AB × PQ. Retourne (t, s) ou (None, None)."""
+        d1x, d1y = bx - ax, by - ay
+        d2x, d2y = qx - px, qy - py
+        denom = d1x * d2y - d1y * d2x
+        if abs(denom) < 1e-10:
+            return None, None
+        dx, dy = px - ax, py - ay
+        t = (dx * d2y - dy * d2x) / denom
+        s = (dx * d1y - dy * d1x) / denom
+        if 0.0 < t < 1.0 and 0.0 < s < 1.0:
+            return t, s
+        return None, None
+
+    def _score_pp_ocad(
+        self,
+        lng0: float, lat0: float, lng1: float, lat1: float,
+        ocad_segs: list,
+        heatmap_cache,
+    ) -> float:
+        """Terme N OCAD : chemin longeant la jambe (segments OCAD praticables).
+
+        Remplace score_parallel_path_choice (OSM) en forêt.
+        Retourne un score ∈ [0, 1].
+        """
+        m_per_lat = 111000.0
+        m_per_lng = 111000.0 * math.cos(math.radians((lat0 + lat1) / 2))
+        bx_m = (lng1 - lng0) * m_per_lng
+        by_m = (lat1 - lat0) * m_per_lat
+        leg_m = math.sqrt(bx_m ** 2 + by_m ** 2)
+        if leg_m < 1.0:
+            return 0.0
+
+        buf_min_m = max(30.0, 0.07 * leg_m)
+        buf_max_m = min(400.0, 0.30 * leg_m)
+        _mobile_codes = {501, 502, 503, 504, 505, 507, 508, 516, 305}
+
+        intervals_left: list = []
+        intervals_right: list = []
+
+        for seg in ocad_segs:
+            isom_code = seg.get("isom_code", 0)
+            if isom_code not in _mobile_codes:
+                continue
+            profile = self._isom_profile(isom_code)
+            if profile["mobility_weight"] <= 0:
+                continue
+
+            p0, p1 = seg["p0"], seg["p1"]
+            p0x = (p0[0] - lng0) * m_per_lng
+            p0y = (p0[1] - lat0) * m_per_lat
+            p1x = (p1[0] - lng0) * m_per_lng
+            p1y = (p1[1] - lat0) * m_per_lat
+
+            # Parallélisme : cosine ≥ 0.64
+            sdx, sdy = p1x - p0x, p1y - p0y
+            seg_len = math.sqrt(sdx ** 2 + sdy ** 2)
+            if seg_len < 0.5:
+                continue
+            cos_a = abs(sdx * bx_m + sdy * by_m) / (seg_len * leg_m)
+            if cos_a < 0.64:
+                continue
+
+            # Projection t sur l'axe de la jambe [0,1]
+            t0 = (p0x * bx_m + p0y * by_m) / (leg_m ** 2)
+            t1 = (p1x * bx_m + p1y * by_m) / (leg_m ** 2)
+            t_min, t_max = min(t0, t1), max(t0, t1)
+            if t_max < 0 or t_min > 1:
+                continue
+            t_min, t_max = max(0.0, t_min), min(1.0, t_max)
+
+            # Distance latérale au milieu du segment
+            mx, my = (p0x + p1x) / 2, (p0y + p1y) / 2
+            cross = mx * by_m - my * bx_m
+            lat_dist_m = abs(cross) / leg_m
+            if lat_dist_m < buf_min_m or lat_dist_m > buf_max_m:
+                continue
+
+            # Poids effectif (runnabilité multi-point)
+            base_w = profile["mobility_weight"]
+            if heatmap_cache is not None:
+                samples = [
+                    heatmap_cache.get_score(
+                        p0[0] + t * (p1[0] - p0[0]),
+                        p0[1] + t * (p1[1] - p0[1]),
+                    )
+                    for t in (0.25, 0.5, 0.75)
+                ]
+                local_run = sum(samples) / 3
+                eff_w = base_w * (0.5 + 0.5 * local_run)
+            else:
+                eff_w = base_w
+
+            if cross >= 0:
+                intervals_left.append((t_min, t_max, eff_w))
+            else:
+                intervals_right.append((t_min, t_max, eff_w))
+
+        def _union_w(intervals):
+            if not intervals:
+                return 0.0
+            ivs = sorted(intervals)
+            cs, ce, cw = ivs[0]
+            total = 0.0
+            for s, e, w in ivs[1:]:
+                if s <= ce:
+                    ce, cw = max(ce, e), max(cw, w)
+                else:
+                    total += (ce - cs) * cw
+                    cs, ce, cw = s, e, w
+            total += (ce - cs) * cw
+            return total
+
+        best = max(_union_w(intervals_left), _union_w(intervals_right))
+        return min(best / 0.50, 1.0)
+
+    def _score_lc_ocad(
+        self,
+        lng0: float, lat0: float, lng1: float, lat1: float,
+        ocad_segs: list,
+    ) -> float:
+        """Terme O OCAD : saut de ligne via segments OCAD (courbes, fossés, chemins).
+
+        Remplace score_line_crossing (OSM) en forêt.
+        Retourne un score ∈ [0, 1].
+        """
+        qualities: list = []
+        m_per_lng = 111000.0 * math.cos(math.radians((lat0 + lat1) / 2))
+        m_per_lat = 111000.0
+        dlng_m = (lng1 - lng0) * m_per_lng
+        dlat_m = (lat1 - lat0) * m_per_lat
+        leg_m = math.sqrt(dlng_m ** 2 + dlat_m ** 2)
+        if leg_m < 1.0:
+            return 0.0
+
+        for seg in ocad_segs:
+            isom_code = seg.get("isom_code", 0)
+            profile = self._isom_profile(isom_code)
+            if profile["crossing_salience"] <= 0:
+                continue
+            p0, p1 = seg["p0"], seg["p1"]
+            t, _ = self._seg_cross_t(lng0, lat0, lng1, lat1, p0[0], p0[1], p1[0], p1[1])
+            if t is None or not (0.10 <= t <= 0.90):
+                continue
+
+            sdlng_m = (p1[0] - p0[0]) * m_per_lng
+            sdlat_m = (p1[1] - p0[1]) * m_per_lat
+            seg_len_m = math.sqrt(sdlng_m ** 2 + sdlat_m ** 2)
+            if seg_len_m < 0.5:
+                continue
+            cos_a = abs(dlng_m * sdlng_m + dlat_m * sdlat_m) / (leg_m * seg_len_m)
+            if cos_a >= 0.64:
+                continue
+
+            angle_q = 1.0 - cos_a / 0.64
+            pos_q = 1.0 - abs(t - 0.5) * 2.0
+            quality = profile["crossing_salience"] * pos_q * angle_q
+            qualities.append(quality)
+
+        if not qualities:
+            return 0.0
+        return min(sum(qualities) / len(qualities) / 0.80, 1.0)
+
+    def _score_exit_clarity(
+        self,
+        ctrl_lng: float, ctrl_lat: float,
+        next_lng: float, next_lat: float,
+        ocad_segs: list,
+    ) -> float:
+        """Terme P : clarté de sortie de balise.
+
+        Mesure l'ambiguïté directionnelle dans un rayon de 60m autour du poste.
+        Retourne un score ∈ [0, 1] — 1.0 = sortie sans ambiguïté.
+        """
+        m_per_lat = 111000.0
+        m_per_lng = 111000.0 * math.cos(math.radians(ctrl_lat))
+        _ec_radius_m = 60.0
+        radius_lat = _ec_radius_m / m_per_lat
+        radius_lng = _ec_radius_m / m_per_lng
+
+        exit_bearing = math.degrees(math.atan2(
+            (next_lng - ctrl_lng) * m_per_lng,
+            (next_lat - ctrl_lat) * m_per_lat,
+        )) % 360
+
+        reinforcing = 0.0
+        misleading = 0.0
+
+        for seg in ocad_segs:
+            p0, p1 = seg["p0"], seg["p1"]
+            mid_lng = (p0[0] + p1[0]) / 2
+            mid_lat = (p0[1] + p1[1]) / 2
+            if abs(mid_lng - ctrl_lng) > radius_lng * 2 or abs(mid_lat - ctrl_lat) > radius_lat * 2:
+                continue
+
+            # Distance du poste au point le plus proche sur le segment
+            sdlng = p1[0] - p0[0]
+            sdlat = p1[1] - p0[1]
+            seg_len_sq = sdlng ** 2 + sdlat ** 2
+            if seg_len_sq < 1e-20:
+                d_lng = (p0[0] - ctrl_lng) * m_per_lng
+                d_lat = (p0[1] - ctrl_lat) * m_per_lat
+            else:
+                t_c = ((ctrl_lng - p0[0]) * sdlng + (ctrl_lat - p0[1]) * sdlat) / seg_len_sq
+                t_c = max(0.0, min(1.0, t_c))
+                cl = p0[0] + t_c * sdlng
+                cla = p0[1] + t_c * sdlat
+                d_lng = (cl - ctrl_lng) * m_per_lng
+                d_lat = (cla - ctrl_lat) * m_per_lat
+
+            dist_m = math.sqrt(d_lng ** 2 + d_lat ** 2)
+            if dist_m > _ec_radius_m:
+                continue
+
+            isom_code = seg.get("isom_code", 505)
+            profile = self._isom_profile(isom_code)
+            strength = profile["misleading_potential"] * math.exp(-dist_m / 30.0)
+
+            # Angle (bidirectionnel : segment a deux directions)
+            seg_bearing = math.degrees(math.atan2(sdlng * m_per_lng, sdlat * m_per_lat)) % 360
+            delta = abs(seg_bearing - exit_bearing) % 360
+            if delta > 180:
+                delta = 360 - delta
+            delta = min(delta, 180 - delta)  # 0-90°: 0=parallel, 90=perpendicular
+
+            if delta < 45:
+                reinforcing += strength * (1.0 - delta / 45)
+            else:
+                misleading += strength * min((delta - 45) / 45, 1.0)
+
+        return reinforcing / (reinforcing + misleading + 1e-6)
+
     def _classify_leg_type(
         self,
         jaccard: Optional[float],
@@ -1044,11 +1297,12 @@ class GeneticAlgorithm:
         catch: Optional[float],
         pp_score: Optional[float] = None,
         lc_score: Optional[float] = None,
+        clarity_score: Optional[float] = None,
     ) -> set:
         """Étiquettes navigables d'une jambe — SET non exclusif (Terme M).
 
         Tags possibles : route_choice, handrail, technical_read, parallel_path,
-        line_crossing, direct.
+        line_crossing, clear_exit, direct.
         Utilise les seuils de placement_rules.json["leg_type_thresholds"].
         """
         rules = self._placement_rules.get("leg_type_thresholds", {})
@@ -1063,6 +1317,8 @@ class GeneticAlgorithm:
             types.add("parallel_path")
         if lc_score is not None and lc_score >= rules.get("line_crossing_score", 0.35):
             types.add("line_crossing")
+        if clarity_score is not None and clarity_score >= 0.65:
+            types.add("clear_exit")
         return types if types else {"direct"}
 
     def _osm_coverage_ratio(self, bbox: Optional[dict]) -> float:
@@ -1521,9 +1777,11 @@ class GeneticAlgorithm:
         # Inactif pour TD≤2 (circuits linéaires, aucun choix tactique attendu).
         # Bonus maximal ≈ +4.5 pts (jaccard=0.50) ; malus ≈ −3 pts (jaccard=0.00).
         diversity_bonus = 0.0
-        _per_leg_jaccard: list = []  # None ou float par jambe — utilisé par Terme M
-        _per_leg_pp: list = []       # None ou float par jambe — Terme N (chemin parallèle)
-        _per_leg_lc: list = []       # None ou float par jambe — Terme O (saut de ligne)
+        _per_leg_jaccard: list = []   # None ou float — Terme M
+        _per_leg_pp: list = []        # None ou float — Terme N (chemin parallèle)
+        _per_leg_lc: list = []        # None ou float — Terme O (saut de ligne)
+        _per_leg_clarity: list = []   # None ou float — Terme P (exit clarity)
+        _ocad_segs: list = getattr(config, "ocad_line_segments", [])
         _rc_min = float(
             self._placement_rules.get("route_choice_leg_min_m", {}).get(_ct, 80.0)
         )
@@ -1650,26 +1908,36 @@ class GeneticAlgorithm:
             if n_bad_hr / len(hr_scores_f) > _max_bad:
                 nav_worst_leg -= W_HANDRAIL * 2 * (n_bad_hr / len(hr_scores_f))
 
-        # ── N. Chemin longeant l'interposte (forêt MD/LD uniquement) ────────────
-        # Récompense les jambes où un chemin OSM longe la ligne directe sans la relier :
-        # l'orienteur choisit entre foncer tout droit (risque de déviation) ou emprunter
-        # le chemin (plus long mais sécurisé). Inactif en sprint.
+        # ── N. Chemin longeant l'interposte (forêt MD/LD, TD≥3) ─────────────────
+        # Source : segments OCAD en forêt (chemins praticables + poids sémantique).
+        # Fallback OSM si ocad_line_segments vide et route_analyzer disponible.
         _is_forest_ct = _ct in {"md", "ld", "forest", "foret"}
         W_PARALLEL = 6.0
         parallel_bonus = 0.0
-        if _is_forest_ct and self._route_analyzer is not None and _td_level >= 3:
+        if _is_forest_ct and _td_level >= 3:
             _pp_min = float(
                 self._placement_rules.get("parallel_path_min_leg_m", {}).get(_ct, 250.0)
             )
             pp_scores: list = []
+            _use_ocad_n = bool(_ocad_segs)
             for i in range(len(controls) - 1):
                 _leg_m_pp = self._haversine_m(controls[i], controls[i + 1])
                 if _leg_m_pp >= _pp_min:
-                    _pp_s = self._route_analyzer.score_parallel_path_choice(
-                        controls[i][0], controls[i][1],
-                        controls[i + 1][0], controls[i + 1][1],
-                        min_leg_m=_pp_min,
-                    )
+                    if _use_ocad_n:
+                        _pp_s = self._score_pp_ocad(
+                            controls[i][0], controls[i][1],
+                            controls[i + 1][0], controls[i + 1][1],
+                            _ocad_segs, config.heatmap_cache,
+                        )
+                    elif self._route_analyzer is not None:
+                        _pp_s = self._route_analyzer.score_parallel_path_choice(
+                            controls[i][0], controls[i][1],
+                            controls[i + 1][0], controls[i + 1][1],
+                            min_leg_m=_pp_min,
+                        )
+                    else:
+                        _per_leg_pp.append(None)
+                        continue
                     pp_scores.append(_pp_s)
                     _per_leg_pp.append(_pp_s)
                 else:
@@ -1682,24 +1950,34 @@ class GeneticAlgorithm:
                 parallel_bonus = W_PARALLEL * (good_pp / len(pp_scores))
 
         # ── O. Saut de ligne (forêt MD/LD, TD≥3) ─────────────────────────────
-        # Récompense les jambes qui croisent perpendiculairement une voie OSM :
-        # technique IOF "confirmation de position" — distinct de la main courante
-        # (K = parallèle) et du chemin longeant (N = latéral).
+        # Source : segments OCAD (courbes, fossés, chemins) — distinct de K (parallèle).
+        # Fallback OSM si ocad_line_segments vide.
         W_LINE_CROSSING = 5.0
         line_crossing_bonus = 0.0
-        if _is_forest_ct and self._route_analyzer is not None and _td_level >= 3:
+        if _is_forest_ct and _td_level >= 3:
             _lc_min = float(
                 self._placement_rules.get("line_crossing_min_leg_m", {}).get(_ct, 150.0)
             )
             lc_scores: list = []
+            _use_ocad_o = bool(_ocad_segs)
             for i in range(len(controls) - 1):
                 _leg_m_lc = self._haversine_m(controls[i], controls[i + 1])
                 if _leg_m_lc >= _lc_min:
-                    _lc_s = self._route_analyzer.score_line_crossing(
-                        controls[i][0], controls[i][1],
-                        controls[i + 1][0], controls[i + 1][1],
-                        min_leg_m=_lc_min,
-                    )
+                    if _use_ocad_o:
+                        _lc_s = self._score_lc_ocad(
+                            controls[i][0], controls[i][1],
+                            controls[i + 1][0], controls[i + 1][1],
+                            _ocad_segs,
+                        )
+                    elif self._route_analyzer is not None:
+                        _lc_s = self._route_analyzer.score_line_crossing(
+                            controls[i][0], controls[i][1],
+                            controls[i + 1][0], controls[i + 1][1],
+                            min_leg_m=_lc_min,
+                        )
+                    else:
+                        _per_leg_lc.append(None)
+                        continue
                     lc_scores.append(_lc_s)
                     _per_leg_lc.append(_lc_s)
                 else:
@@ -1710,6 +1988,26 @@ class GeneticAlgorithm:
                 ).get("line_crossing_score", 0.35)
                 good_lc = sum(1 for s in lc_scores if s >= _lc_threshold)
                 line_crossing_bonus = W_LINE_CROSSING * (good_lc / len(lc_scores))
+
+        # ── P. Clarté de sortie (exit clarity) ──────────────────────────────────
+        # Modélise l'ambiguïté directionnelle dans les 30 premières secondes après balise.
+        # Actif si ocad_line_segments disponibles, TD ≥ 2, tout type de circuit.
+        W_EXIT_CLARITY = 4.0
+        exit_clarity_bonus = 0.0
+        if _ocad_segs and _td_level >= 2 and len(controls) >= 2:
+            clarity_scores_raw: list = []
+            for i in range(len(controls) - 1):
+                _cl_s = self._score_exit_clarity(
+                    controls[i][0], controls[i][1],
+                    controls[i + 1][0], controls[i + 1][1],
+                    _ocad_segs,
+                )
+                clarity_scores_raw.append(_cl_s)
+                _per_leg_clarity.append(_cl_s)
+            if clarity_scores_raw:
+                exit_clarity_bonus = W_EXIT_CLARITY * (
+                    sum(clarity_scores_raw) / len(clarity_scores_raw)
+                )
 
         # ── M. Diversité des types de legs ────────────────────────────────────
         # Récompense les circuits qui mélangent route choice, main courante et lecture
@@ -1726,9 +2024,10 @@ class GeneticAlgorithm:
                 _cat = catch_scores_f[_i] if _i < len(catch_scores_f) else None
                 _pp = _per_leg_pp[_i] if _i < len(_per_leg_pp) else None
                 _lc = _per_leg_lc[_i] if _i < len(_per_leg_lc) else None
-                _all_tags.update(self._classify_leg_type(_jac, _hr, _cat, _pp, _lc))
-            # len ∈ [1,6] → score ∈ [0.17, 1.0] (6 tags possibles désormais)
-            leg_diversity_bonus = W_LEG_DIVERSITY * len(_all_tags) / 6.0
+                _cl = _per_leg_clarity[_i] if _i < len(_per_leg_clarity) else None
+                _all_tags.update(self._classify_leg_type(_jac, _hr, _cat, _pp, _lc, _cl))
+            # len ∈ [1,7] → score ∈ [0.14, 1.0] (7 tags possibles désormais)
+            leg_diversity_bonus = W_LEG_DIVERSITY * len(_all_tags) / 7.0
 
         # ── Score final (à maximiser) ───────────────────────────────────────
         # Seuils depuis FFCORulesEngine si disponible, sinon valeurs historiques
@@ -1744,7 +2043,7 @@ class GeneticAlgorithm:
             W_ANGLE = 1.0    # multiplicateur × 20 par dog-leg → éliminatoire
             W_RHYTHM = 15.0
             _density_mult = 50.0
-        W_SHAPE = 10.0  # forme géométrique — anti-Z/spirale/accordéon
+        W_SHAPE = 15.0  # forme géométrique — anti-Z/spirale/accordéon (H5 actif)
         W_LEG_PROFILE = 8.0  # conformité longueur jambes au profil format IOF
 
         # Pénalité quadratique si trop peu de postes par rapport à la cible
@@ -1769,6 +2068,7 @@ class GeneticAlgorithm:
             + nav_worst_leg
             + parallel_bonus
             + line_crossing_bonus
+            + exit_clarity_bonus
             + leg_diversity_bonus
         )
 
@@ -1848,7 +2148,23 @@ class GeneticAlgorithm:
         else:
             h4 = 0.5
 
-        return 0.35 * h1 + 0.30 * h2 + 0.20 * h3 + 0.15 * h4
+        # ── H5 : Pénalité accordéon (retours en arrière > 120°) ──────────────
+        bearings_h5 = []
+        for i in range(n - 1):
+            bearings_h5.append(math.atan2(
+                controls[i + 1][0] - controls[i][0],
+                controls[i + 1][1] - controls[i][1],
+            ))
+        reversals = 0
+        for i in range(1, len(bearings_h5)):
+            delta_deg = abs(math.degrees(bearings_h5[i] - bearings_h5[i - 1]))
+            delta_deg = min(delta_deg, 360 - delta_deg)
+            if delta_deg > 120:
+                reversals += 1
+        reversal_ratio = reversals / max(len(bearings_h5) - 1, 1)
+        h5 = max(0.0, 1.0 - reversal_ratio * 2.5)
+
+        return 0.28 * h1 + 0.22 * h2 + 0.15 * h3 + 0.15 * h4 + 0.20 * h5
 
     def _terrain_quality_score_isom(self, controls: List[Tuple[float, float]]) -> float:
         """

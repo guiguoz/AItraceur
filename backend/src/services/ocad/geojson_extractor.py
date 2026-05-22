@@ -78,3 +78,42 @@ def extract_geojson_from_ocd(ocd_bytes: bytes) -> Optional[List[Dict]]:
                 os.unlink(tmp)
             except Exception:
                 pass
+
+
+# Codes ISOM à extraire pour les segments de navigation (termes N, O, P)
+_LINE_SEG_CODES = {101, 102, 103, 201, 215, 305, 306, 501, 502, 503, 504, 505, 506, 507, 508, 516}
+
+
+def extract_line_segments(features: List[Dict], codes: Optional[set] = None) -> List[Dict]:
+    """
+    Extrait les segments de LineString OCAD pertinents pour l'analyse des jambes.
+
+    Args:
+        features: Liste de features GeoJSON (depuis extract_geojson_from_ocd)
+        codes: Set de codes ISOM à retenir (défaut : _LINE_SEG_CODES)
+
+    Returns:
+        Liste de segments [{p0: [lng, lat], p1: [lng, lat], isom_code: int}]
+    """
+    if codes is None:
+        codes = _LINE_SEG_CODES
+
+    segments: List[Dict] = []
+    for feat in features or []:
+        geom = feat.get("geometry", {})
+        if geom.get("type") != "LineString":
+            continue
+        props = feat.get("properties", {})
+        sym = props.get("sym", 0)
+        try:
+            code = int(sym) // 1000 if int(sym) > 10000 else int(sym)
+        except (TypeError, ValueError):
+            continue
+        if code not in codes:
+            continue
+        coords = geom.get("coordinates", [])
+        for i in range(len(coords) - 1):
+            p0, p1 = coords[i], coords[i + 1]
+            if len(p0) >= 2 and len(p1) >= 2:
+                segments.append({"p0": [p0[0], p0[1]], "p1": [p1[0], p1[1]], "isom_code": code})
+    return segments

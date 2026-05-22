@@ -44,6 +44,8 @@ class GenerationRequest:
     rules_engine: Optional[object] = field(default=None, repr=False)
     # FFCORulesEngine — source de vérité des seuils IOF/FFCO (injecté dans GenerationConfig).
     map_scale: Optional[int] = None  # échelle OCAD (ex: 4000 pour 1:4000)
+    ocad_line_segments: List[Dict] = field(default_factory=list)
+    # Segments LineString OCAD [{p0, p1, isom_code}] — termes N/O/P forêt.
 
 
 @dataclass
@@ -212,6 +214,7 @@ class AIGenerator:
             route_analyzer=request.route_analyzer,
             rules_engine=request.rules_engine,
             map_scale=request.map_scale,
+            ocad_line_segments=request.ocad_line_segments,
         )
 
         # Initialiser le GA

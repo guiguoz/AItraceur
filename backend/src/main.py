@@ -2110,6 +2110,7 @@ def _circuit_impl(body: dict) -> dict:
     forbidden_zones_polygons = list(body.get("forbidden_zones_polygons") or [])
     required_controls_raw = body.get("required_controls") or []
     candidate_points = list(body.get("candidate_points") or [])
+    ocad_line_segments = list(body.get("ocad_line_segments") or [])
     existing_controls = body.get("existing_controls", [])  # mode compétition
     _raw_scale = body.get("map_scale")
     map_scale: Optional[int] = None
@@ -2169,6 +2170,7 @@ def _circuit_impl(body: dict) -> dict:
         candidate_points=candidate_points,
         start_position=tuple(start_position_raw) if start_position_raw and len(start_position_raw) >= 2 else None,
         map_scale=map_scale,
+        ocad_line_segments=ocad_line_segments,
     )
 
     # ── HeatmapCache CNN (même logique que _sprint_impl) ──────────────────────
@@ -2301,6 +2303,7 @@ def _circuit_impl(body: dict) -> dict:
             elevation_cache=elevation_cache,
             route_analyzer=_route_analyzer_circuit,
             map_scale=request.map_scale,
+            ocad_line_segments=request.ocad_line_segments,
         )
 
     generator = AIGenerator()

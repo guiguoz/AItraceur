@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "501": { "label": "road",             "mobility_weight": 1.00, "crossing_salience": 1.00, "misleading_potential": 1.00, "handrail_strength": 0.90 },
+  "502": { "label": "wide_ride",        "mobility_weight": 0.90, "crossing_salience": 0.85, "misleading_potential": 0.85, "handrail_strength": 0.85 },
+  "503": { "label": "ride",             "mobility_weight": 0.80, "crossing_salience": 0.80, "misleading_potential": 0.80, "handrail_strength": 0.75 },
+  "504": { "label": "narrow_ride",      "mobility_weight": 0.60, "crossing_salience": 0.65, "misleading_potential": 0.60, "handrail_strength": 0.60 },
+  "505": { "label": "path",             "mobility_weight": 0.50, "crossing_salience": 0.70, "misleading_potential": 0.70, "handrail_strength": 0.60 },
+  "506": { "label": "animal_path",      "mobility_weight": 0.20, "crossing_salience": 0.30, "misleading_potential": 0.20, "handrail_strength": 0.20 },
+  "507": { "label": "unclear_path",     "mobility_weight": 0.30, "crossing_salience": 0.40, "misleading_potential": 0.30, "handrail_strength": 0.30 },
+  "508": { "label": "narrow_ride_2",    "mobility_weight": 0.55, "crossing_salience": 0.60, "misleading_potential": 0.55, "handrail_strength": 0.55 },
+  "516": { "label": "unpaved_road",     "mobility_weight": 0.85, "crossing_salience": 0.90, "misleading_potential": 0.80, "handrail_strength": 0.85 },
+  "305": { "label": "dry_ditch",        "mobility_weight": 0.30, "crossing_salience": 0.80, "misleading_potential": 0.40, "handrail_strength": 0.35 },
+  "306": { "label": "impassable_ditch", "mobility_weight": 0.00, "crossing_salience": 0.90, "misleading_potential": 0.50, "handrail_strength": 0.40 },
+  "102": { "label": "index_contour",    "mobility_weight": 0.00, "crossing_salience": 0.70, "misleading_potential": 0.10, "handrail_strength": 0.00 },
+  "101": { "label": "contour",          "mobility_weight": 0.00, "crossing_salience": 0.35, "misleading_potential": 0.05, "handrail_strength": 0.00 },
+  "103": { "label": "form_line",        "mobility_weight": 0.00, "crossing_salience": 0.20, "misleading_potential": 0.05, "handrail_strength": 0.00 },
+  "201": { "label": "open_land",        "mobility_weight": 0.00, "crossing_salience": 0.45, "misleading_potential": 0.30, "handrail_strength": 0.20 },
+  "215": { "label": "vegetation_edge",  "mobility_weight": 0.00, "crossing_salience": 0.50, "misleading_potential": 0.35, "handrail_strength": 0.25 }
+}

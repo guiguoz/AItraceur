@@ -103,6 +103,10 @@ class GenerationConfig:
     # Vide si pas d'OCAD chargé (fallback OSM ou inactif selon le terme).
     ocad_line_segments: list = field(default_factory=list)
 
+    # Index spatial pré-construit (SegmentSpatialIndex) — optionnel.
+    # Si fourni par preprocess-ocad, évite la reconstruction à chaque génération.
+    segment_index: Optional[object] = field(default=None, repr=False)
+
     # Timeout en secondes pour la boucle évolutionnaire (évite les boucles infinies)
     timeout_seconds: float = 90.0
 
@@ -244,6 +248,19 @@ class GeneticAlgorithm:
         import pathlib as _pathlib_isom
         _sem_path = _pathlib_isom.Path(__file__).parent.parent / "knowledge_base" / "isom_semantics.json"
         self._isom_sem: dict = _json_isom.loads(_sem_path.read_text()) if _sem_path.exists() else {}
+
+        # ── Index spatial perceptuel (SegmentSpatialIndex) ────────────────────
+        from .perceptual_model import build_segment_index as _build_seg_idx
+        if config.segment_index is not None:
+            self._seg_index = config.segment_index  # pré-construit par preprocess-ocad
+        elif config.ocad_line_segments:
+            _center_lat = (
+                (config.bounding_box.get("min_y", 48.0) + config.bounding_box.get("max_y", 48.0)) / 2
+                if config.bounding_box else 48.0
+            )
+            self._seg_index = _build_seg_idx(config.ocad_line_segments, self._isom_sem, _center_lat)
+        else:
+            self._seg_index = None
 
         # ── TD1 preferred features (postes sur éléments évidents) ──────────────
         # Actif uniquement pour technical_level == 1. Charge depuis placement_rules.json
@@ -1099,14 +1116,12 @@ class GeneticAlgorithm:
         intervals_right: list = []
 
         for seg in ocad_segs:
-            isom_code = seg.get("isom_code", 0)
-            if isom_code not in _mobile_codes:
+            if seg.isom_code not in _mobile_codes:
                 continue
-            profile = self._isom_profile(isom_code)
-            if profile["mobility_weight"] <= 0:
+            if seg.mobility_weight <= 0:
                 continue
 
-            p0, p1 = seg["p0"], seg["p1"]
+            p0, p1 = seg.p0, seg.p1
             p0x = (p0[0] - lng0) * m_per_lng
             p0y = (p0[1] - lat0) * m_per_lat
             p1x = (p1[0] - lng0) * m_per_lng
@@ -1137,7 +1152,7 @@ class GeneticAlgorithm:
                 continue
 
             # Poids effectif (runnabilité multi-point)
-            base_w = profile["mobility_weight"]
+            base_w = seg.mobility_weight
             if heatmap_cache is not None:
                 samples = [
                     heatmap_cache.get_score(
@@ -1194,11 +1209,9 @@ class GeneticAlgorithm:
             return 0.0
 
         for seg in ocad_segs:
-            isom_code = seg.get("isom_code", 0)
-            profile = self._isom_profile(isom_code)
-            if profile["crossing_salience"] <= 0:
+            if seg.crossing_salience <= 0:
                 continue
-            p0, p1 = seg["p0"], seg["p1"]
+            p0, p1 = seg.p0, seg.p1
             t, _ = self._seg_cross_t(lng0, lat0, lng1, lat1, p0[0], p0[1], p1[0], p1[1])
             if t is None or not (0.10 <= t <= 0.90):
                 continue
@@ -1214,7 +1227,7 @@ class GeneticAlgorithm:
 
             angle_q = 1.0 - cos_a / 0.64
             pos_q = 1.0 - abs(t - 0.5) * 2.0
-            quality = profile["crossing_salience"] * pos_q * angle_q
+            quality = seg.crossing_salience * pos_q * angle_q
             qualities.append(quality)
 
         if not qualities:
@@ -1247,11 +1260,7 @@ class GeneticAlgorithm:
         misleading = 0.0
 
         for seg in ocad_segs:
-            p0, p1 = seg["p0"], seg["p1"]
-            mid_lng = (p0[0] + p1[0]) / 2
-            mid_lat = (p0[1] + p1[1]) / 2
-            if abs(mid_lng - ctrl_lng) > radius_lng * 2 or abs(mid_lat - ctrl_lat) > radius_lat * 2:
-                continue
+            p0, p1 = seg.p0, seg.p1
 
             # Distance du poste au point le plus proche sur le segment
             sdlng = p1[0] - p0[0]
@@ -1272,9 +1281,7 @@ class GeneticAlgorithm:
             if dist_m > _ec_radius_m:
                 continue
 
-            isom_code = seg.get("isom_code", 505)
-            profile = self._isom_profile(isom_code)
-            strength = profile["misleading_potential"] * math.exp(-dist_m / 30.0)
+            strength = seg.misleading_potential * math.exp(-dist_m / 30.0)
 
             # Angle (bidirectionnel : segment a deux directions)
             seg_bearing = math.degrees(math.atan2(sdlng * m_per_lng, sdlat * m_per_lat)) % 360
@@ -1289,6 +1296,32 @@ class GeneticAlgorithm:
                 misleading += strength * min((delta - 45) / 45, 1.0)
 
         return reinforcing / (reinforcing + misleading + 1e-6)
+
+    def _build_leg_cognitive_profile(
+        self,
+        lng0: float, lat0: float,
+        lng1: float, lat1: float,
+        heatmap_cache,
+    ):
+        """Construit un LegCognitiveProfile via l'index spatial pré-filtré."""
+        from .perceptual_model import LegCognitiveProfile
+        if self._seg_index is None:
+            return LegCognitiveProfile()
+
+        m_per_lat = 111000.0
+        m_per_lng = 111000.0 * math.cos(math.radians((lat0 + lat1) / 2))
+        leg_m = math.sqrt(((lng1 - lng0) * m_per_lng) ** 2 + ((lat1 - lat0) * m_per_lat) ** 2)
+
+        # Corridor partagé N/O : max(half_width_N, 50m pour O)
+        half_w = max(max(30.0, 0.30 * leg_m), 50.0)
+        corridor = self._seg_index.query_corridor(lng0, lat0, lng1, lat1, half_w)
+        exit_near = self._seg_index.query_radius(lng0, lat0, 60.0)
+
+        return LegCognitiveProfile(
+            parallel_affordance=self._score_pp_ocad(lng0, lat0, lng1, lat1, corridor, heatmap_cache),
+            crossing_density=self._score_lc_ocad(lng0, lat0, lng1, lat1, corridor),
+            exit_clarity=self._score_exit_clarity(lng0, lat0, lng1, lat1, exit_near),
+        )
 
     def _classify_leg_type(
         self,
@@ -1908,106 +1941,92 @@ class GeneticAlgorithm:
             if n_bad_hr / len(hr_scores_f) > _max_bad:
                 nav_worst_leg -= W_HANDRAIL * 2 * (n_bad_hr / len(hr_scores_f))
 
-        # ── N. Chemin longeant l'interposte (forêt MD/LD, TD≥3) ─────────────────
-        # Source : segments OCAD en forêt (chemins praticables + poids sémantique).
-        # Fallback OSM si ocad_line_segments vide et route_analyzer disponible.
+        # ── N / O / P — via LegCognitiveProfile ──────────────────────────────────
+        # OCAD : index spatial pré-filtré (O(log n + k) par jambe).
+        # Fallback OSM pour N/O si pas d'index OCAD et route_analyzer disponible.
         _is_forest_ct = _ct in {"md", "ld", "forest", "foret"}
         W_PARALLEL = 6.0
-        parallel_bonus = 0.0
-        if _is_forest_ct and _td_level >= 3:
-            _pp_min = float(
-                self._placement_rules.get("parallel_path_min_leg_m", {}).get(_ct, 250.0)
-            )
-            pp_scores: list = []
-            _use_ocad_n = bool(_ocad_segs)
-            for i in range(len(controls) - 1):
-                _leg_m_pp = self._haversine_m(controls[i], controls[i + 1])
-                if _leg_m_pp >= _pp_min:
-                    if _use_ocad_n:
-                        _pp_s = self._score_pp_ocad(
-                            controls[i][0], controls[i][1],
-                            controls[i + 1][0], controls[i + 1][1],
-                            _ocad_segs, config.heatmap_cache,
-                        )
-                    elif self._route_analyzer is not None:
-                        _pp_s = self._route_analyzer.score_parallel_path_choice(
-                            controls[i][0], controls[i][1],
-                            controls[i + 1][0], controls[i + 1][1],
-                            min_leg_m=_pp_min,
-                        )
-                    else:
-                        _per_leg_pp.append(None)
-                        continue
-                    pp_scores.append(_pp_s)
-                    _per_leg_pp.append(_pp_s)
-                else:
-                    _per_leg_pp.append(None)
-            if pp_scores:
-                _pp_threshold = self._placement_rules.get(
-                    "leg_type_thresholds", {}
-                ).get("parallel_path_score", 0.40)
-                good_pp = sum(1 for s in pp_scores if s >= _pp_threshold)
-                parallel_bonus = W_PARALLEL * (good_pp / len(pp_scores))
-
-        # ── O. Saut de ligne (forêt MD/LD, TD≥3) ─────────────────────────────
-        # Source : segments OCAD (courbes, fossés, chemins) — distinct de K (parallèle).
-        # Fallback OSM si ocad_line_segments vide.
         W_LINE_CROSSING = 5.0
-        line_crossing_bonus = 0.0
-        if _is_forest_ct and _td_level >= 3:
-            _lc_min = float(
-                self._placement_rules.get("line_crossing_min_leg_m", {}).get(_ct, 150.0)
-            )
-            lc_scores: list = []
-            _use_ocad_o = bool(_ocad_segs)
-            for i in range(len(controls) - 1):
-                _leg_m_lc = self._haversine_m(controls[i], controls[i + 1])
-                if _leg_m_lc >= _lc_min:
-                    if _use_ocad_o:
-                        _lc_s = self._score_lc_ocad(
-                            controls[i][0], controls[i][1],
-                            controls[i + 1][0], controls[i + 1][1],
-                            _ocad_segs,
-                        )
-                    elif self._route_analyzer is not None:
-                        _lc_s = self._route_analyzer.score_line_crossing(
-                            controls[i][0], controls[i][1],
-                            controls[i + 1][0], controls[i + 1][1],
-                            min_leg_m=_lc_min,
-                        )
-                    else:
-                        _per_leg_lc.append(None)
-                        continue
-                    lc_scores.append(_lc_s)
-                    _per_leg_lc.append(_lc_s)
-                else:
-                    _per_leg_lc.append(None)
-            if lc_scores:
-                _lc_threshold = self._placement_rules.get(
-                    "leg_type_thresholds", {}
-                ).get("line_crossing_score", 0.35)
-                good_lc = sum(1 for s in lc_scores if s >= _lc_threshold)
-                line_crossing_bonus = W_LINE_CROSSING * (good_lc / len(lc_scores))
-
-        # ── P. Clarté de sortie (exit clarity) ──────────────────────────────────
-        # Modélise l'ambiguïté directionnelle dans les 30 premières secondes après balise.
-        # Actif si ocad_line_segments disponibles, TD ≥ 2, tout type de circuit.
         W_EXIT_CLARITY = 4.0
-        exit_clarity_bonus = 0.0
-        if _ocad_segs and _td_level >= 2 and len(controls) >= 2:
-            clarity_scores_raw: list = []
-            for i in range(len(controls) - 1):
-                _cl_s = self._score_exit_clarity(
+        parallel_bonus = line_crossing_bonus = exit_clarity_bonus = 0.0
+
+        _pp_min = float(self._placement_rules.get("parallel_path_min_leg_m", {}).get(_ct, 250.0))
+        _lc_min = float(self._placement_rules.get("line_crossing_min_leg_m", {}).get(_ct, 150.0))
+        _pp_thr = self._placement_rules.get("leg_type_thresholds", {}).get("parallel_path_score", 0.40)
+        _lc_thr = self._placement_rules.get("leg_type_thresholds", {}).get("line_crossing_score", 0.35)
+        _use_cog = self._seg_index is not None
+
+        pp_scores: list = []
+        lc_scores: list = []
+        clarity_scores_raw: list = []
+
+        for i in range(len(controls) - 1):
+            _leg_m_i = self._haversine_m(controls[i], controls[i + 1])
+
+            if _use_cog and _td_level >= 2:
+                cog = self._build_leg_cognitive_profile(
                     controls[i][0], controls[i][1],
                     controls[i + 1][0], controls[i + 1][1],
-                    _ocad_segs,
+                    config.heatmap_cache,
                 )
-                clarity_scores_raw.append(_cl_s)
-                _per_leg_clarity.append(_cl_s)
-            if clarity_scores_raw:
-                exit_clarity_bonus = W_EXIT_CLARITY * (
-                    sum(clarity_scores_raw) / len(clarity_scores_raw)
-                )
+                clarity_scores_raw.append(cog.exit_clarity)
+                _per_leg_clarity.append(cog.exit_clarity)
+
+                if _is_forest_ct and _td_level >= 3:
+                    if _leg_m_i >= _pp_min:
+                        pp_scores.append(cog.parallel_affordance)
+                        _per_leg_pp.append(cog.parallel_affordance)
+                    else:
+                        _per_leg_pp.append(None)
+                    if _leg_m_i >= _lc_min:
+                        lc_scores.append(cog.crossing_density)
+                        _per_leg_lc.append(cog.crossing_density)
+                    else:
+                        _per_leg_lc.append(None)
+                else:
+                    _per_leg_pp.append(None)
+                    _per_leg_lc.append(None)
+
+            else:
+                # Fallback OSM pour N/O (pas d'index OCAD)
+                _per_leg_clarity.append(None)
+                if _is_forest_ct and _td_level >= 3:
+                    if _leg_m_i >= _pp_min:
+                        if self._route_analyzer is not None:
+                            _pp_s = self._route_analyzer.score_parallel_path_choice(
+                                controls[i][0], controls[i][1],
+                                controls[i + 1][0], controls[i + 1][1],
+                                min_leg_m=_pp_min,
+                            )
+                            pp_scores.append(_pp_s)
+                            _per_leg_pp.append(_pp_s)
+                        else:
+                            _per_leg_pp.append(None)
+                    else:
+                        _per_leg_pp.append(None)
+                    if _leg_m_i >= _lc_min:
+                        if self._route_analyzer is not None:
+                            _lc_s = self._route_analyzer.score_line_crossing(
+                                controls[i][0], controls[i][1],
+                                controls[i + 1][0], controls[i + 1][1],
+                                min_leg_m=_lc_min,
+                            )
+                            lc_scores.append(_lc_s)
+                            _per_leg_lc.append(_lc_s)
+                        else:
+                            _per_leg_lc.append(None)
+                    else:
+                        _per_leg_lc.append(None)
+                else:
+                    _per_leg_pp.append(None)
+                    _per_leg_lc.append(None)
+
+        if pp_scores:
+            parallel_bonus = W_PARALLEL * sum(1 for s in pp_scores if s >= _pp_thr) / len(pp_scores)
+        if lc_scores:
+            line_crossing_bonus = W_LINE_CROSSING * sum(1 for s in lc_scores if s >= _lc_thr) / len(lc_scores)
+        if clarity_scores_raw:
+            exit_clarity_bonus = W_EXIT_CLARITY * sum(clarity_scores_raw) / len(clarity_scores_raw)
 
         # ── M. Diversité des types de legs ────────────────────────────────────
         # Récompense les circuits qui mélangent route choice, main courante et lecture

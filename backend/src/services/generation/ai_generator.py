@@ -46,6 +46,8 @@ class GenerationRequest:
     map_scale: Optional[int] = None  # échelle OCAD (ex: 4000 pour 1:4000)
     ocad_line_segments: List[Dict] = field(default_factory=list)
     # Segments LineString OCAD [{p0, p1, isom_code}] — termes N/O/P forêt.
+    segment_index: Optional[object] = field(default=None, repr=False)
+    # SegmentSpatialIndex pré-construit (depuis preprocess-ocad) — évite la reconstruction en GA.
 
 
 @dataclass
@@ -215,6 +217,7 @@ class AIGenerator:
             rules_engine=request.rules_engine,
             map_scale=request.map_scale,
             ocad_line_segments=request.ocad_line_segments,
+            segment_index=request.segment_index,
         )
 
         # Initialiser le GA

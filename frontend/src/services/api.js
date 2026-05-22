@@ -66,6 +66,10 @@ export const generateSprint = (params) =>
 export const getSprintStatus = (taskId) =>
   api.get(`/api/v1/generation/sprint-status/${taskId}`, { timeout: 10000 });
 
+// Pré-traitement OCAD → SegmentSpatialIndex (retourne segment_cache_id)
+export const preprocessOcad = (payload) =>
+  api.post('/api/v1/generation/preprocess-ocad', payload, { timeout: 30000 });
+
 // Génération MD/LD async (pattern Task-Status)
 export const generateCircuitAsync = (params) =>
   api.post('/api/v1/generation/generate-circuit', params, { timeout: 15000 });

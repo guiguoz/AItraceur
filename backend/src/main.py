@@ -109,6 +109,10 @@ _sprint_executor = _SprintTPE(max_workers=3)
 # Valeur > features ISOM standard (~0.5–0.85) → biais soft vers zones existantes
 EXISTING_CONTROL_ATT: float = 0.95
 
+# ── Cache SegmentSpatialIndex (endpoint preprocess-ocad) ─────────────────────
+_seg_index_cache: dict = {}   # {uuid: SegmentSpatialIndex}
+_SEG_CACHE_MAX: int = 30
+
 
 def _normalize_bbox(b: dict) -> dict:
     """Normalise une bbox {min_x, min_y, max_x, max_y} (WGS84) en garantissant min ≤ max."""
@@ -2110,8 +2114,10 @@ def _circuit_impl(body: dict) -> dict:
     forbidden_zones_polygons = list(body.get("forbidden_zones_polygons") or [])
     required_controls_raw = body.get("required_controls") or []
     candidate_points = list(body.get("candidate_points") or [])
+    _seg_cache_id = body.get("segment_cache_id")
+    _seg_index_circuit = _seg_index_cache.get(_seg_cache_id) if _seg_cache_id else None
     _raw_features = list(body.get("ocad_geojson_features") or [])
-    if _raw_features:
+    if _raw_features and _seg_index_circuit is None:
         from src.services.ocad.geojson_extractor import extract_line_segments as _extract_segs
         _bbox_lat = (bounding_box.get("min_y", 48.0) + bounding_box.get("max_y", 48.0)) / 2
         ocad_line_segments = _extract_segs(_raw_features, center_lat=_bbox_lat)
@@ -2177,6 +2183,7 @@ def _circuit_impl(body: dict) -> dict:
         start_position=tuple(start_position_raw) if start_position_raw and len(start_position_raw) >= 2 else None,
         map_scale=map_scale,
         ocad_line_segments=ocad_line_segments,
+        segment_index=_seg_index_circuit,
     )
 
     # ── HeatmapCache CNN (même logique que _sprint_impl) ──────────────────────
@@ -2310,6 +2317,7 @@ def _circuit_impl(body: dict) -> dict:
             route_analyzer=_route_analyzer_circuit,
             map_scale=request.map_scale,
             ocad_line_segments=request.ocad_line_segments,
+            segment_index=request.segment_index,
         )
 
     generator = AIGenerator()
@@ -2445,6 +2453,38 @@ def get_circuit_status(task_id: str):
     if task_id not in _circuit_tasks:
         raise HTTPException(status_code=404, detail="Task not found")
     return _circuit_tasks[task_id]
+
+
+@app.post(
+    "/api/v1/generation/preprocess-ocad",
+    summary="Pré-traite les features OCAD en index spatial",
+    description=(
+        "Accepte ocad_geojson_features (LineString filtrées), construit un SegmentSpatialIndex "
+        "en mémoire et retourne un segment_cache_id UUID. Le GA réutilise l'index sans retransmettre "
+        "les features. Cache LRU 30 entrées — TTL implicite par rotation."
+    ),
+)
+def preprocess_ocad(payload: dict = Body(...)):
+    import json as _json
+    import pathlib as _pl
+    from src.services.ocad.geojson_extractor import extract_line_segments as _exs
+    from src.services.generation.perceptual_model import build_segment_index as _bsi
+
+    raw_features = list(payload.get("ocad_geojson_features") or [])
+    center_lat = float(payload.get("center_lat", 48.0))
+
+    _sem_path = _pl.Path(__file__).parent / "services" / "knowledge_base" / "isom_semantics.json"
+    isom_sem = _json.loads(_sem_path.read_text(encoding="utf-8")) if _sem_path.exists() else {}
+
+    segments = _exs(raw_features, center_lat=center_lat)
+    index = _bsi(segments, isom_sem, center_lat=center_lat)
+
+    cache_id = str(uuid.uuid4())
+    _seg_index_cache[cache_id] = index
+    if len(_seg_index_cache) > _SEG_CACHE_MAX:
+        _seg_index_cache.pop(next(iter(_seg_index_cache)))
+
+    return {"segment_cache_id": cache_id, "segment_count": index.segment_count}
 
 
 @app.post(
@@ -3953,8 +3993,10 @@ def _sprint_impl(task_id: str, body: dict) -> None:
             map_scale = _s if 1000 <= _s <= 50000 else None
         except (ValueError, TypeError):
             pass
+    _seg_cache_id_s = body.get("segment_cache_id")
+    _seg_index_sprint = _seg_index_cache.get(_seg_cache_id_s) if _seg_cache_id_s else None
     _raw_features_s = list(body.get("ocad_geojson_features") or [])
-    if _raw_features_s:
+    if _raw_features_s and _seg_index_sprint is None:
         from src.services.ocad.geojson_extractor import extract_line_segments as _extract_segs_s
         _bbox_lat_s = (bounding_box.get("min_y", 48.0) + bounding_box.get("max_y", 48.0)) / 2
         ocad_line_segments_sprint = _extract_segs_s(_raw_features_s, center_lat=_bbox_lat_s)
@@ -4186,6 +4228,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
         rules_engine=_rules_engine,
         map_scale=map_scale,
         ocad_line_segments=ocad_line_segments_sprint,
+        segment_index=_seg_index_sprint,
     )
 
     print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ GA generate ({len(candidate_points)} candidats)...", flush=True)

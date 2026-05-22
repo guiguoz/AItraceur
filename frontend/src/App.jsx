@@ -6,7 +6,7 @@ import ControlsList from './components/ControlsList'
 import CircuitCreationModal from './components/CircuitCreationModal'
 import CircuitSelector from './components/CircuitSelector'
 import AISuggestionPanel from './components/AISuggestionPanel'
-import { generateCircuit, getSprintCandidates, generateSprint, getSprintStatus, generateCircuitAsync, getCircuitStatus, uploadOcdForRender, TILE_SERVICE_URL, getRoutesBetweenControls, fetchNavContext, analyzeOcadGeojson, saveCompetition, loadCompetition } from './services/api'
+import { generateCircuit, getSprintCandidates, generateSprint, getSprintStatus, generateCircuitAsync, getCircuitStatus, uploadOcdForRender, TILE_SERVICE_URL, getRoutesBetweenControls, fetchNavContext, analyzeOcadGeojson, saveCompetition, loadCompetition, preprocessOcad } from './services/api'
 import CompetitionLoadModal from './components/CompetitionLoadModal'
 import DialogueLog from './components/DialogueLog'
 import { buildMapContext } from './services/mapContext'
@@ -554,6 +554,7 @@ function App() {
   const [ocadMapId, setOcadMapId] = useState(null)   // mapId retourné par le tile service
   const [ocadBounds, setOcadBounds] = useState(null) // { southWest:[lat,lng], northEast:[lat,lng] }
   const [ocadScale, setOcadScale] = useState(null)   // échelle OCAD (ex: 4000 pour 1:4000)
+  const [segmentCacheId, setSegmentCacheId] = useState(null) // UUID retourné par preprocess-ocad
 
   const getAllExistingControls = () =>
     circuits
@@ -645,6 +646,28 @@ function App() {
     // Courbes de niveau = signature ISOM forte (quasi-absentes en sprint)
     const mode = (contours > 10 || isomScore > isspromScore * 2) ? 'forest' : 'sprint'
     setDetectedMode(mode)
+  }, [ocadData])
+
+  // Pré-traitement OCAD → SegmentSpatialIndex backend (cache UUID)
+  useEffect(() => {
+    setSegmentCacheId(null)
+    if (!ocadData?.geojson) return
+    const lineFeatures = filterOcadLineFeatures(ocadData.geojson)
+    if (!lineFeatures.length) return
+    const bbox = ocadData.geojson.features?.length
+      ? (() => {
+          let minLat = 90, maxLat = -90
+          for (const f of ocadData.geojson.features) {
+            for (const coord of (f.geometry?.coordinates?.flat?.(3) ?? [])) {
+              if (Array.isArray(coord)) { minLat = Math.min(minLat, coord[1]); maxLat = Math.max(maxLat, coord[1]) }
+            }
+          }
+          return (minLat < maxLat) ? (minLat + maxLat) / 2 : 48.0
+        })()
+      : 48.0
+    preprocessOcad({ ocad_geojson_features: lineFeatures, center_lat: bbox })
+      .then(res => { if (res.data?.segment_cache_id) setSegmentCacheId(res.data.segment_cache_id) })
+      .catch(() => {}) // non bloquant — fallback sur ocad_geojson_features
   }, [ocadData])
 
   const handleError = (errMsg) => {
@@ -886,7 +909,9 @@ function App() {
           .map(c => ({ lat: c.lat, lng: c.lng })),
         // OCAD/OSM feature candidates for terrain-aware placement
         candidate_points: candidatePoints.slice(0, 600),
-        ocad_geojson_features: ocadLineFeatures,
+        ...(segmentCacheId
+          ? { segment_cache_id: segmentCacheId }
+          : { ocad_geojson_features: ocadLineFeatures }),
         // OCAD map pour HeatmapCache CNN (même logique que sprint)
         ...(ocadMapId && ocadBounds ? {
           map_id: ocadMapId,
@@ -905,7 +930,9 @@ function App() {
           ...(startControl && { start_position: [startControl.lng, startControl.lat] }),
           forbidden_zones_polygons: oobZones,
           candidate_points: candidatePoints.slice(0, 600),
-          ocad_geojson_features: ocadLineFeatures,
+          ...(segmentCacheId
+            ? { segment_cache_id: segmentCacheId }
+            : { ocad_geojson_features: ocadLineFeatures }),
           existing_controls: competitionMode
             ? getAllExistingControls().map(c => ({ lat: c.lat, lng: c.lng, circuitName: c.circuitName }))
             : [],
@@ -1099,13 +1126,18 @@ function App() {
             !oobZones.some(ring => pointInPolygon(cp.x, cp.y, ring))
           )
         }
+        const _completionLineFeatures = (!segmentCacheId && ocadData?.geojson)
+          ? filterOcadLineFeatures(ocadData.geojson)
+          : []
         const res = await generateCircuit({
           bounding_box: bbox,
           ...circuitParams,
           target_controls: Math.ceil(missing * 1.5),
           required_controls: placed.map(c => ({ lat: c.lat, lng: c.lng })),
           candidate_points: candidatePoints.slice(0, 600),
-          ocad_geojson_features: ocadLineFeatures,
+          ...(segmentCacheId
+            ? { segment_cache_id: segmentCacheId }
+            : { ocad_geojson_features: _completionLineFeatures }),
           ...(ocadMapId && ocadBounds ? {
             map_id: ocadMapId,
             ocad_sw: ocadBounds.southWest,

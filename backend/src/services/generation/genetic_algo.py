@@ -2034,6 +2034,9 @@ class GeneticAlgorithm:
         _leg_crossing: list = []
         _relief_contour_total: int = 0
         _relief_micro_rejects: int = 0
+        _leg_vecs: list = []     # tous vecteurs 6-dim sans gate — pour PCA Intent
+        _leg_indices: list = []  # index i dans controls — cross-reference
+        _leg_lengths: list = []  # leg_m mètres — anti-biais géométrique
 
         for i in range(len(controls) - 1):
             _leg_m_i = self._haversine_m(controls[i], controls[i + 1])
@@ -2058,6 +2061,9 @@ class GeneticAlgorithm:
                 _leg_crossing.append(cog.crossing_density)
                 _relief_contour_total += _seg_contour_n
                 _relief_micro_rejects += _seg_micro_n
+                _leg_vecs.append(_vec)        # sans gate — pour PCA Intent (A.6)
+                _leg_indices.append(i)
+                _leg_lengths.append(round(_leg_m_i, 1))
                 _dom = cog.dominant_intent
                 _dominant_hist[_dom] = _dominant_hist.get(_dom, 0) + 1
                 if max(_vec) > 0.25:
@@ -2232,6 +2238,38 @@ class GeneticAlgorithm:
                     if _write_header:
                         _w.writeheader()
                     _w.writerow(_csv_row)
+
+                # intent_legs.csv — export per-leg (Phase A.6 PCA)
+                _leg_csv_path = _debug_dir / "intent_legs.csv"
+                _leg_write_header = not _leg_csv_path.exists()
+                _leg_fields = [
+                    "circuit_id", "td", "course_type", "leg_index", "leg_m",
+                    "parallel_affordance", "crossing_density", "exit_clarity", "contour_crossing_guidance",
+                    "HANDRAIL_FOLLOW", "LINE_CROSSING", "ATTACK_POINT",
+                    "DIRECT_RISK_RUN", "RELIEF_CROSSING_GUIDANCE", "SAFETY_RECOVERY",
+                ]
+                with open(_leg_csv_path, "a", newline="", encoding="utf-8") as _lf:
+                    _lw = _csv.DictWriter(_lf, fieldnames=_leg_fields)
+                    if _leg_write_header:
+                        _lw.writeheader()
+                    for _li in range(len(_leg_parallel)):
+                        _lw.writerow({
+                            "circuit_id":               _circuit_id,
+                            "td":                       _td_level,
+                            "course_type":              "forest" if _is_forest_ct else "sprint",
+                            "leg_index":                _leg_indices[_li],
+                            "leg_m":                    _leg_lengths[_li],
+                            "parallel_affordance":      round(_leg_parallel[_li], 4),
+                            "crossing_density":         round(_leg_crossing[_li], 4),
+                            "exit_clarity":             round(_leg_clarity[_li], 4),
+                            "contour_crossing_guidance":round(_leg_relief[_li], 4),
+                            "HANDRAIL_FOLLOW":          round(_leg_vecs[_li][0], 4),
+                            "LINE_CROSSING":            round(_leg_vecs[_li][1], 4),
+                            "ATTACK_POINT":             round(_leg_vecs[_li][2], 4),
+                            "DIRECT_RISK_RUN":          round(_leg_vecs[_li][3], 4),
+                            "RELIEF_CROSSING_GUIDANCE": round(_leg_vecs[_li][4], 4),
+                            "SAFETY_RECOVERY":          round(_leg_vecs[_li][5], 4),
+                        })
 
         if pp_scores:
             parallel_bonus = W_PARALLEL * sum(1 for s in pp_scores if s >= _pp_thr) / len(pp_scores)

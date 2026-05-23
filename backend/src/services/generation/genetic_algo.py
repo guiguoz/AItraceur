@@ -2114,10 +2114,11 @@ class GeneticAlgorithm:
                 _mean_relief = sum(_leg_relief) / len(_leg_relief)
             else:
                 _mean_dens = _mean_direct = _mean_relief = 0.0
+            _n_eligible = len(_leg_densities)  # jambes ayant passé _use_cog (dénominateur réel du gate)
             print(
                 f"[intent] diversity={_circuit_diversity:.3f}"
                 f" transition={_circuit_transition_cost:.3f}"
-                f" legs_active={_nv}/{len(controls)-1}"
+                f" legs_active={_nv}/{_n_eligible}"  # _nv = post-gate, _n_eligible = pré-gate
                 f" dens={_mean_dens:.3f}"
                 f" direct={_mean_direct:.3f}"
                 f" relief={_mean_relief:.3f}"

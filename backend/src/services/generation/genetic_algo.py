@@ -1334,10 +1334,14 @@ class GeneticAlgorithm:
         leg_bearing = math.atan2(lng1 - lng0, lat1 - lat0)
         leg_m_approx = leg_m  # déjà calculé ci-dessus
         relief_crossings = 0.0
+        _contour_total = 0
+        _micro_rejects = 0
         for seg in corridor:
             if seg.isom_code not in _CONTOUR_CODES:
                 continue
+            _contour_total += 1
             if seg.length_m < 6.0:
+                _micro_rejects += 1
                 continue  # micro-segment : bearing instable (zig-zag OCAD)
             cos_angle = abs(math.cos(seg.bearing_rad - leg_bearing))
             if cos_angle >= 0.64:
@@ -1366,13 +1370,17 @@ class GeneticAlgorithm:
         _noise = crossing_density * (1.0 - _support)
         safety_recovery = max(0.0, (1.0 - exit_clarity) * (1.0 - _support) * (0.5 + 0.5 * _noise))
 
-        return LegIntentInference(
-            parallel_affordance=parallel_affordance,
-            crossing_density=crossing_density,
-            exit_clarity=exit_clarity,
-            contour_crossing_guidance=contour_crossing_guidance,
-            direct_run_index=direct_run_index,
-            safety_recovery=safety_recovery,
+        return (
+            LegIntentInference(
+                parallel_affordance=parallel_affordance,
+                crossing_density=crossing_density,
+                exit_clarity=exit_clarity,
+                contour_crossing_guidance=contour_crossing_guidance,
+                direct_run_index=direct_run_index,
+                safety_recovery=safety_recovery,
+            ),
+            _contour_total,
+            _micro_rejects,
         )
 
     def _classify_leg_type(
@@ -2020,12 +2028,18 @@ class GeneticAlgorithm:
         _leg_direct_run: list = []
         _leg_relief: list = []
         _dominant_hist: dict = {}
+        _leg_parallel: list = []
+        _leg_safety: list = []
+        _leg_clarity: list = []
+        _leg_crossing: list = []
+        _relief_contour_total: int = 0
+        _relief_micro_rejects: int = 0
 
         for i in range(len(controls) - 1):
             _leg_m_i = self._haversine_m(controls[i], controls[i + 1])
 
             if _use_cog and _td_level >= 2:
-                cog = self._build_leg_cognitive_profile(
+                cog, _seg_contour_n, _seg_micro_n = self._build_leg_cognitive_profile(
                     controls[i][0], controls[i][1],
                     controls[i + 1][0], controls[i + 1][1],
                     config.heatmap_cache,
@@ -2038,6 +2052,12 @@ class GeneticAlgorithm:
                 _leg_densities.append(cog.activation_density)
                 _leg_direct_run.append(cog.direct_run_index)
                 _leg_relief.append(cog.contour_crossing_guidance)
+                _leg_parallel.append(cog.parallel_affordance)
+                _leg_safety.append(cog.safety_recovery)
+                _leg_clarity.append(cog.exit_clarity)
+                _leg_crossing.append(cog.crossing_density)
+                _relief_contour_total += _seg_contour_n
+                _relief_micro_rejects += _seg_micro_n
                 _dom = cog.dominant_intent
                 _dominant_hist[_dom] = _dominant_hist.get(_dom, 0) + 1
                 if max(_vec) > 0.25:
@@ -2094,12 +2114,13 @@ class GeneticAlgorithm:
                     _per_leg_pp.append(None)
                     _per_leg_lc.append(None)
 
-        # Phase A — diversité cosine (log-only, NE PAS injecter dans fitness)
+        # Phase A — diversité cosine + telemetry JSON (log-only, NE PAS injecter dans fitness)
         _circuit_diversity = 0.0
         _circuit_transition_cost = 0.0
-        if len(_intent_vectors) >= 4:
-            _nv = len(_intent_vectors)
+        _nv = len(_intent_vectors)
+        _n_eligible = len(_leg_densities)
 
+        if _nv >= 4:
             def _cdist(i, j):
                 dot = sum(_intent_vectors[i][k] * _intent_vectors[j][k] for k in range(6))
                 return 1.0 - dot / (_intent_norms[i] * _intent_norms[j])
@@ -2108,23 +2129,109 @@ class GeneticAlgorithm:
             _circuit_diversity = sum(_pairwise) / len(_pairwise)
             _trans = [_cdist(i, i + 1) for i in range(_nv - 1)]
             _circuit_transition_cost = sum(_trans) / len(_trans) if _trans else 0.0
-            if _leg_densities:
-                _mean_dens = sum(_leg_densities) / len(_leg_densities)
-                _mean_direct = sum(_leg_direct_run) / len(_leg_direct_run)
-                _mean_relief = sum(_leg_relief) / len(_leg_relief)
-            else:
-                _mean_dens = _mean_direct = _mean_relief = 0.0
-            _n_eligible = len(_leg_densities)  # jambes ayant passé _use_cog (dénominateur réel du gate)
-            print(
-                f"[intent] diversity={_circuit_diversity:.3f}"
-                f" transition={_circuit_transition_cost:.3f}"
-                f" legs_active={_nv}/{_n_eligible}"  # _nv = post-gate, _n_eligible = pré-gate
-                f" dens={_mean_dens:.3f}"
-                f" direct={_mean_direct:.3f}"
-                f" relief={_mean_relief:.3f}"
-                f" hist={_dominant_hist}",
-                flush=True,
-            )
+
+        if _leg_densities:
+            # Helpers locaux — 3 usages, YAGNI
+            def _pct(xs, q):
+                ys = sorted(xs)
+                return ys[int(q * (len(ys) - 1))]
+
+            def _corr(xs, ys):
+                # zip en premier — cohérence de n garantie même si len(xs)≠len(ys)
+                pairs = list(zip(xs, ys))
+                n = len(pairs)
+                if n < 3:
+                    return 0.0
+                mx = sum(x for x, _ in pairs) / n
+                my = sum(y for _, y in pairs) / n
+                num = sum((x - mx) * (y - my) for x, y in pairs)
+                dx = sum((x - mx) ** 2 for x, _ in pairs) ** 0.5
+                dy = sum((y - my) ** 2 for _, y in pairs) ** 0.5
+                return num / (dx * dy) if dx * dy > 1e-9 else 0.0
+
+            _mean_dens   = sum(_leg_densities) / len(_leg_densities)
+            _mean_direct = sum(_leg_direct_run) / len(_leg_direct_run)
+            _mean_relief = sum(_leg_relief) / len(_leg_relief)
+            _mean_safety = sum(_leg_safety) / len(_leg_safety)
+
+            _pct90_density = _pct(_leg_densities, 0.9)
+            _pct90_direct  = _pct(_leg_direct_run, 0.9)
+            _pct90_relief  = _pct(_leg_relief, 0.9)
+
+            _corr_safety_pamb     = _corr(_leg_safety, [1.0 - c for c in _leg_clarity])
+            _corr_direct_parallel = _corr(_leg_direct_run, _leg_parallel)
+            _corr_relief_crossing = _corr(_leg_relief, _leg_crossing)
+
+            _relief_micro_ratio = (_relief_micro_rejects / _relief_contour_total
+                                   if _relief_contour_total else 0.0)
+
+            # Baseline sémantique : shuffle composantes (préserve magnitude, détruit structure)
+            # Estime "semantic-randomized diversity ceiling" — PAS une navigation réaliste aléatoire.
+            _random_baseline_diversity = 0.0
+            if _nv >= 4:
+                _baseline_k = 3 if _nv > 24 else 5
+                _baseline_trials = []
+                for _ in range(_baseline_k):
+                    _sv = [list(v) for v in _intent_vectors]
+                    for _row in _sv:
+                        random.shuffle(_row)
+                    _sn = [math.sqrt(sum(x * x for x in _row)) or _LII._EPS for _row in _sv]
+                    _bp = [
+                        1.0 - sum(_sv[i][k] * _sv[j][k] for k in range(6)) / (_sn[i] * _sn[j])
+                        for i in range(_nv) for j in range(i + 1, _nv)
+                    ]
+                    _baseline_trials.append(sum(_bp) / len(_bp) if _bp else 0.0)
+                _random_baseline_diversity = sum(_baseline_trials) / len(_baseline_trials)
+
+            import json as _json, hashlib as _hashlib
+            _circuit_id = _hashlib.md5(
+                str([(round(c[0], 5), round(c[1], 5)) for c in controls]).encode()
+            ).hexdigest()[:10]
+
+            _intent_payload = {
+                "schema": 1,
+                "circuit_id": _circuit_id,
+                "td": _td_level,
+                "course_type": "forest" if _is_forest_ct else "sprint",
+                "legs": len(controls) - 1,
+                "intent_diversity":  round(_circuit_diversity, 4),
+                "intent_transition": round(_circuit_transition_cost, 4),
+                "eligible_legs":     _n_eligible,
+                "active_legs":       _nv,
+                "active_ratio":      round(_nv / _n_eligible, 4) if _n_eligible else 0.0,
+                "intent_gate_threshold": 0.25,
+                "density_mean":  round(_mean_dens, 4),
+                "density_p90":   round(_pct90_density, 4),
+                "direct_mean":   round(_mean_direct, 4),
+                "direct_p90":    round(_pct90_direct, 4),
+                "relief_mean":   round(_mean_relief, 4),
+                "relief_p90":    round(_pct90_relief, 4),
+                "safety_mean":   round(_mean_safety, 4),
+                "corr_safety_pamb":     round(_corr_safety_pamb, 3),
+                "corr_direct_parallel": round(_corr_direct_parallel, 3),
+                "corr_relief_crossing": round(_corr_relief_crossing, 3),
+                "relief_contour_total":  _relief_contour_total,
+                "relief_micro_rejects":  _relief_micro_rejects,
+                "relief_micro_ratio":    round(_relief_micro_ratio, 3),
+                "random_baseline_diversity": round(_random_baseline_diversity, 4),
+                "diversity_vs_baseline":     round(_circuit_diversity - _random_baseline_diversity, 4),
+                "dominant_hist":         _dominant_hist,
+                "intent_vector_count":   _nv,
+            }
+            print("[intent_json]" + _json.dumps(_intent_payload, separators=(",", ":")), flush=True)
+
+            import os as _os, csv as _csv, pathlib as _pl
+            if _os.environ.get("INTENT_DEBUG_CSV") == "1" and (int(_circuit_id[:6], 16) % 20) == 0:
+                _debug_dir = _pl.Path(__file__).parent.parent.parent.parent / "debug"
+                _debug_dir.mkdir(parents=True, exist_ok=True)
+                _csv_path = _debug_dir / "intent_metrics.csv"
+                _write_header = not _csv_path.exists()
+                _csv_row = {**_intent_payload, "dominant_hist": str(_dominant_hist)}
+                with open(_csv_path, "a", newline="", encoding="utf-8") as _cf:
+                    _w = _csv.DictWriter(_cf, fieldnames=list(_csv_row.keys()))
+                    if _write_header:
+                        _w.writeheader()
+                    _w.writerow(_csv_row)
 
         if pp_scores:
             parallel_bonus = W_PARALLEL * sum(1 for s in pp_scores if s >= _pp_thr) / len(pp_scores)

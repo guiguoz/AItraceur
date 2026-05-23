@@ -1303,13 +1303,16 @@ class GeneticAlgorithm:
         lng1: float, lat1: float,
         heatmap_cache,
     ):
-        """Construit un LegCognitiveProfile via l'index spatial pré-filtré."""
-        from .perceptual_model import LegCognitiveProfile
+        """Construit un LegIntentInference via l'index spatial pré-filtré.
+        Niveau 1 : N/O/P + contour_crossing_guidance + direct_run_index + safety_recovery.
+        """
+        from .perceptual_model import LegIntentInference
         if self._seg_index is None:
-            return LegCognitiveProfile()
+            return LegIntentInference()
 
         m_per_lat = 111000.0
-        m_per_lng = 111000.0 * math.cos(math.radians((lat0 + lat1) / 2))
+        cos_lat = math.cos(math.radians((lat0 + lat1) / 2))
+        m_per_lng = 111000.0 * cos_lat
         leg_m = math.sqrt(((lng1 - lng0) * m_per_lng) ** 2 + ((lat1 - lat0) * m_per_lat) ** 2)
 
         # Corridor partagé N/O : max(half_width_N, 50m pour O)
@@ -1317,10 +1320,59 @@ class GeneticAlgorithm:
         corridor = self._seg_index.query_corridor(lng0, lat0, lng1, lat1, half_w)
         exit_near = self._seg_index.query_radius(lng0, lat0, 60.0)
 
-        return LegCognitiveProfile(
-            parallel_affordance=self._score_pp_ocad(lng0, lat0, lng1, lat1, corridor, heatmap_cache),
-            crossing_density=self._score_lc_ocad(lng0, lat0, lng1, lat1, corridor),
-            exit_clarity=self._score_exit_clarity(lng0, lat0, lng1, lat1, exit_near),
+        parallel_affordance = self._score_pp_ocad(lng0, lat0, lng1, lat1, corridor, heatmap_cache)
+        crossing_density = self._score_lc_ocad(lng0, lat0, lng1, lat1, corridor)
+        exit_clarity = self._score_exit_clarity(lng0, lat0, lng1, lat1, exit_near)
+
+        # ── RELIEF_CROSSING_GUIDANCE (contour_crossing_guidance) ─────────────────
+        # Traversées transverses de contours (101-103) — slope crossing uniquement.
+        # Convention bearing : atan2(Δlng, Δlat) — même convention que seg.bearing_rad.
+        _CONTOUR_CODES = {101, 102, 103}
+        # Convention bearing : atan2(Δlng, Δlat) → Nord=0, Est=π/2 (compas, non math).
+        # Même formule que seg.bearing_rad dans perceptual_model._build_perceptual_feature → cohérence garantie.
+        # Vérification : cos(Nord_seg - Est_leg) = cos(0 - π/2) = 0 (perpendiculaires ✓)
+        leg_bearing = math.atan2(lng1 - lng0, lat1 - lat0)
+        leg_m_approx = leg_m  # déjà calculé ci-dessus
+        relief_crossings = 0.0
+        for seg in corridor:
+            if seg.isom_code not in _CONTOUR_CODES:
+                continue
+            if seg.length_m < 6.0:
+                continue  # micro-segment : bearing instable (zig-zag OCAD)
+            cos_angle = abs(math.cos(seg.bearing_rad - leg_bearing))
+            if cos_angle >= 0.64:
+                continue  # parallèle = pas un croisement de terrain
+            relief_crossings += seg.crossing_salience * (1.0 - cos_angle / 0.64)
+        contour_crossing_guidance = min(relief_crossings / max(leg_m_approx / 50.0, 1.0), 1.0)
+
+        # ── DIRECT_RUN_INDEX ─────────────────────────────────────────────────────
+        # "open low-guidance traversal" — proxy Phase A pour azimut.
+        # openness_factor = runnabilité CNN (heatmap), PAS visibilité cognitive.
+        guidance_feats = [f for f in corridor if f.handrail_strength > 0.5]
+        guidance_density = len(guidance_feats) / max(leg_m_approx / 100.0, 1.0)
+        if heatmap_cache is not None:
+            _scores = [heatmap_cache.get_score(lng0 + t * (lng1 - lng0), lat0 + t * (lat1 - lat0))
+                       for t in (0.25, 0.5, 0.75)]
+            openness_factor = sum(_scores) / len(_scores)
+        else:
+            openness_factor = 0.5
+        direct_run_index = max(0.0,
+            (1.0 - min(guidance_density, 1.0)) * openness_factor * (1.0 - parallel_affordance)
+        )
+
+        # ── SAFETY_RECOVERY ──────────────────────────────────────────────────────
+        # Ambiguïté sans structure — semi-redondant avec P (log-only longtemps).
+        _support = max(parallel_affordance, contour_crossing_guidance)
+        _noise = crossing_density * (1.0 - _support)
+        safety_recovery = max(0.0, (1.0 - exit_clarity) * (1.0 - _support) * (0.5 + 0.5 * _noise))
+
+        return LegIntentInference(
+            parallel_affordance=parallel_affordance,
+            crossing_density=crossing_density,
+            exit_clarity=exit_clarity,
+            contour_crossing_guidance=contour_crossing_guidance,
+            direct_run_index=direct_run_index,
+            safety_recovery=safety_recovery,
         )
 
     def _classify_leg_type(
@@ -1941,7 +1993,7 @@ class GeneticAlgorithm:
             if n_bad_hr / len(hr_scores_f) > _max_bad:
                 nav_worst_leg -= W_HANDRAIL * 2 * (n_bad_hr / len(hr_scores_f))
 
-        # ── N / O / P — via LegCognitiveProfile ──────────────────────────────────
+        # ── N / O / P — via LegIntentInference ───────────────────────────────────
         # OCAD : index spatial pré-filtré (O(log n + k) par jambe).
         # Fallback OSM pour N/O si pas d'index OCAD et route_analyzer disponible.
         _is_forest_ct = _ct in {"md", "ld", "forest", "foret"}
@@ -1960,6 +2012,15 @@ class GeneticAlgorithm:
         lc_scores: list = []
         clarity_scores_raw: list = []
 
+        # Phase A — collecte intent vectors + telemetry (log-only, pas de fitness)
+        from .perceptual_model import LegIntentInference as _LII
+        _intent_vectors: list = []
+        _intent_norms: list = []
+        _leg_densities: list = []
+        _leg_direct_run: list = []
+        _leg_relief: list = []
+        _dominant_hist: dict = {}
+
         for i in range(len(controls) - 1):
             _leg_m_i = self._haversine_m(controls[i], controls[i + 1])
 
@@ -1971,6 +2032,18 @@ class GeneticAlgorithm:
                 )
                 clarity_scores_raw.append(cog.exit_clarity)
                 _per_leg_clarity.append(cog.exit_clarity)
+
+                # Phase A : vecteur intent 6-dim — gate max(v) > 0.25 (évite phantom diversity)
+                _vec = tuple(cog.navigation_evidence[k] for k in _LII.INTENT_KEYS)
+                _leg_densities.append(cog.activation_density)
+                _leg_direct_run.append(cog.direct_run_index)
+                _leg_relief.append(cog.contour_crossing_guidance)
+                _dom = cog.dominant_intent
+                _dominant_hist[_dom] = _dominant_hist.get(_dom, 0) + 1
+                if max(_vec) > 0.25:
+                    _norm = math.sqrt(sum(x * x for x in _vec)) or _LII._EPS
+                    _intent_vectors.append(_vec)
+                    _intent_norms.append(_norm)
 
                 if _is_forest_ct and _td_level >= 3:
                     if _leg_m_i >= _pp_min:
@@ -2020,6 +2093,37 @@ class GeneticAlgorithm:
                 else:
                     _per_leg_pp.append(None)
                     _per_leg_lc.append(None)
+
+        # Phase A — diversité cosine (log-only, NE PAS injecter dans fitness)
+        _circuit_diversity = 0.0
+        _circuit_transition_cost = 0.0
+        if len(_intent_vectors) >= 4:
+            _nv = len(_intent_vectors)
+
+            def _cdist(i, j):
+                dot = sum(_intent_vectors[i][k] * _intent_vectors[j][k] for k in range(6))
+                return 1.0 - dot / (_intent_norms[i] * _intent_norms[j])
+
+            _pairwise = [_cdist(i, j) for i in range(_nv) for j in range(i + 1, _nv)]
+            _circuit_diversity = sum(_pairwise) / len(_pairwise)
+            _trans = [_cdist(i, i + 1) for i in range(_nv - 1)]
+            _circuit_transition_cost = sum(_trans) / len(_trans) if _trans else 0.0
+            if _leg_densities:
+                _mean_dens = sum(_leg_densities) / len(_leg_densities)
+                _mean_direct = sum(_leg_direct_run) / len(_leg_direct_run)
+                _mean_relief = sum(_leg_relief) / len(_leg_relief)
+            else:
+                _mean_dens = _mean_direct = _mean_relief = 0.0
+            print(
+                f"[intent] diversity={_circuit_diversity:.3f}"
+                f" transition={_circuit_transition_cost:.3f}"
+                f" legs_active={_nv}/{len(controls)-1}"
+                f" dens={_mean_dens:.3f}"
+                f" direct={_mean_direct:.3f}"
+                f" relief={_mean_relief:.3f}"
+                f" hist={_dominant_hist}",
+                flush=True,
+            )
 
         if pp_scores:
             parallel_bonus = W_PARALLEL * sum(1 for s in pp_scores if s >= _pp_thr) / len(pp_scores)

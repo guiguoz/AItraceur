@@ -7,12 +7,13 @@ Pipeline :
         → SegmentSpatialIndex (cKDTree sur midpoints)
             → query_radius()    # Terme P — rayon autour d'un poste
             → query_corridor()  # Termes N/O — corridor le long d'une jambe
-        → LegCognitiveProfile  (par jambe)
+        → LegIntentInference   (par jambe — Niveau 1 + Niveau 2 affordances)
 """
 
 import math
-from dataclasses import dataclass, field
-from typing import List, Optional
+from dataclasses import dataclass
+from functools import cached_property
+from typing import ClassVar, List, Optional
 
 import numpy as np
 from scipy.spatial import cKDTree
@@ -49,6 +50,8 @@ def _build_perceptual_feature(seg: dict, isom_sem: dict) -> PerceptualFeature:
     profile = isom_sem.get(str(code), _DEFAULT_PROFILE)
 
     mid = ((p0[0] + p1[0]) / 2.0, (p0[1] + p1[1]) / 2.0)
+    # Convention bearing : atan2(Δlng, Δlat) → Nord=0, Est=π/2 (compas, non math).
+    # leg_bearing dans genetic_algo._build_leg_cognitive_profile utilise la même formule.
     bearing = math.atan2(p1[0] - p0[0], p1[1] - p0[1])
 
     # Approximation métrique locale (précision suffisante pour 0–5 km)
@@ -68,17 +71,100 @@ def _build_perceptual_feature(seg: dict, isom_sem: dict) -> PerceptualFeature:
 
 
 @dataclass
-class LegCognitiveProfile:
-    """Primitives cognitives d'une jambe CO — projection de la carte perceptuelle."""
+class LegIntentInference:
+    """
+    Niveau 1 + Niveau 2 — affordances terrain et evidence navigationnelle d'une jambe CO.
 
+    Niveau 1 — Observables terrain (calcul dans genetic_algo._build_leg_cognitive_profile) :
+      N/O/P inchangés + 3 nouveaux construits (contour_crossing_guidance, direct_run_index, safety_recovery).
+
+    Niveau 2 — Evidence navigationnelle absolue (cached_property navigation_evidence) :
+      Activations [0,1] sans normalisation. Les modes coexistent (HANDRAIL=0.7 + LINE_CROSSING=0.6 = jambe riche).
+      Pas de probabilité, pas de softmax. AND-logic multiplicatif.
+    """
+
+    # Niveau 1 — Observables terrain (calcul inchangé)
     parallel_affordance: float = 0.0  # Terme N : chemin longeant [0,1]
     crossing_density: float = 0.0     # Terme O : saut de ligne [0,1]
     exit_clarity: float = 0.0         # Terme P : clarté sortie [0,1]
 
+    # Niveau 1 étendu — nouveaux construits (Phase A : calculés, pas encore dans fitness)
+    contour_crossing_guidance: float = 0.0  # [0,1] traversées transverses de contours (slope crossing)
+    direct_run_index: float = 0.0           # [0,1] "open low-guidance traversal" (proxy azimut Phase A)
+    safety_recovery: float = 0.0            # [0,1] ambiguïté sans structure (semi-redondant P, log-only)
+
+    # Ordre stable pour vectorisation — ClassVar : non inclus dans __repr__/comparaisons/sérialisation
+    INTENT_KEYS: ClassVar[tuple] = (
+        "HANDRAIL_FOLLOW", "LINE_CROSSING", "ATTACK_POINT",
+        "DIRECT_RISK_RUN", "RELIEF_CROSSING_GUIDANCE", "SAFETY_RECOVERY",
+    )
+    _EPS: ClassVar[float] = 1e-10
+
     @property
     def np_correlation_risk(self) -> float:
-        """Signal de sur-score corrélé N↔P (layon parallèle fort)."""
         return self.parallel_affordance * self.exit_clarity
+
+    @cached_property
+    def navigation_evidence(self) -> dict:
+        """
+        Niveau 2 — activations navigationnelles absolues. Pas de normalisation.
+        Modes coexistants : HANDRAIL=0.7 + LINE_CROSSING=0.6 = jambe riche en lecture.
+        AND-logic : s'effondre si une condition manque. Clés dans INTENT_KEYS.
+
+        Limites Phase A (acceptables pour logging) :
+        - DIRECT_RISK_RUN = "open low-guidance traversal" (prairie runnable ↑), pas azimut expert.
+        - RELIEF_CROSSING_GUIDANCE = traversées transverses de contours uniquement (pas ridge/reentrant).
+        - SAFETY_RECOVERY ≈ P élargi (semi-redondant) — log-only longtemps.
+        """
+        P_amb = 1.0 - self.exit_clarity
+        _support = max(self.parallel_affordance, self.contour_crossing_guidance)
+        return {
+            "HANDRAIL_FOLLOW":          self.parallel_affordance * self.exit_clarity ** 0.5,
+            "LINE_CROSSING":            self.crossing_density * (0.4 + 0.6 * P_amb),
+            "ATTACK_POINT":             P_amb * (1.0 + self.crossing_density) / 2.0,
+            "DIRECT_RISK_RUN":          self.direct_run_index * (1.0 - _support) * (1.0 - P_amb) ** 0.5,
+            "RELIEF_CROSSING_GUIDANCE": self.contour_crossing_guidance * (1.0 - P_amb) ** 0.5,
+            "SAFETY_RECOVERY":          P_amb * (1.0 - _support) * (0.5 + 0.5 * self.crossing_density * (1.0 - _support)),
+        }
+
+    @cached_property
+    def activation_density(self) -> float:
+        """Densité cognitive moyenne — distingue jambes riches vs pauvres."""
+        return sum(self.navigation_evidence.values()) / len(self.navigation_evidence)
+
+    @cached_property
+    def relative_balance(self) -> float:
+        """Soft-suppressed entropy — entropie de la distribution après pondération v^1.5.
+        ⚠ PRIOR INTENTIONNEL : v^1.5 encode "signaux faibles = moins pertinents cognitivement".
+           La distribution pondérée ≠ distribution originale.
+           NE PAS ajouter d'autre filtrage sans retirer d'abord cet exposant (double suppression).
+        Avantage vs seuil dur : continuité garantie — pas de discontinuité GA au seuil."""
+        weights = [v ** 1.5 for v in self.navigation_evidence.values()]
+        total = sum(weights) or self._EPS
+        n = len(weights)
+        return -sum((w / total) * math.log(w / total + self._EPS) for w in weights) / math.log(n)
+
+    @cached_property
+    def cognitive_richness(self) -> float:
+        """Richesse cognitive = densité × équilibre. Logging Phase A uniquement."""
+        return self.activation_density * self.relative_balance
+
+    @property
+    def cognitive_dispersion(self) -> float:
+        return self.relative_balance
+
+    @property
+    def ambiguity(self) -> float:
+        return self.relative_balance
+
+    @property
+    def dominant_intent(self) -> str:
+        # Debug/inspection uniquement. NE PAS utiliser dans fitness ou diversité.
+        return max(self.navigation_evidence, key=self.navigation_evidence.get)
+
+
+# Alias backward-compat — préférer LegIntentInference dans le code nouveau
+LegCognitiveProfile = LegIntentInference
 
 
 class SegmentSpatialIndex:

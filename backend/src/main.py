@@ -2117,10 +2117,21 @@ def _circuit_impl(body: dict) -> dict:
     _seg_cache_id = body.get("segment_cache_id")
     _seg_index_circuit = _seg_index_cache.get(_seg_cache_id) if _seg_cache_id else None
     _raw_features = list(body.get("ocad_geojson_features") or [])
+    if _seg_cache_id and _seg_index_circuit is None:
+        print(f"[circuit] WARNING segment_cache_id {_seg_cache_id[:8]} evicted — rebuild depuis features", flush=True)
     if _raw_features and _seg_index_circuit is None:
         from src.services.ocad.geojson_extractor import extract_line_segments as _extract_segs
         _bbox_lat = (bounding_box.get("min_y", 48.0) + bounding_box.get("max_y", 48.0)) / 2
         ocad_line_segments = _extract_segs(_raw_features, center_lat=_bbox_lat)
+        if _seg_cache_id and ocad_line_segments:
+            from src.services.generation.perceptual_model import build_segment_index as _bsi_c
+            import json as _json_c, pathlib as _pl_c
+            _isom_path_c = _pl_c.Path(__file__).parent / "services" / "knowledge_base" / "isom_semantics.json"
+            _isom_c = _json_c.loads(_isom_path_c.read_text(encoding="utf-8")) if _isom_path_c.exists() else {}
+            _seg_index_circuit = _bsi_c(ocad_line_segments, _isom_c, center_lat=_bbox_lat)
+            if len(_seg_index_cache) >= _SEG_CACHE_MAX:
+                _seg_index_cache.pop(next(iter(_seg_index_cache)))
+            _seg_index_cache[_seg_cache_id] = _seg_index_circuit
     else:
         ocad_line_segments = []
     existing_controls = body.get("existing_controls", [])  # mode compétition
@@ -3996,10 +4007,21 @@ def _sprint_impl(task_id: str, body: dict) -> None:
     _seg_cache_id_s = body.get("segment_cache_id")
     _seg_index_sprint = _seg_index_cache.get(_seg_cache_id_s) if _seg_cache_id_s else None
     _raw_features_s = list(body.get("ocad_geojson_features") or [])
+    if _seg_cache_id_s and _seg_index_sprint is None:
+        print(f"[sprint] WARNING segment_cache_id {_seg_cache_id_s[:8]} evicted — rebuild depuis features", flush=True)
     if _raw_features_s and _seg_index_sprint is None:
         from src.services.ocad.geojson_extractor import extract_line_segments as _extract_segs_s
         _bbox_lat_s = (bounding_box.get("min_y", 48.0) + bounding_box.get("max_y", 48.0)) / 2
         ocad_line_segments_sprint = _extract_segs_s(_raw_features_s, center_lat=_bbox_lat_s)
+        if _seg_cache_id_s and ocad_line_segments_sprint:
+            from src.services.generation.perceptual_model import build_segment_index as _bsi_s
+            import json as _json_s, pathlib as _pl_s
+            _isom_path_s = _pl_s.Path(__file__).parent / "services" / "knowledge_base" / "isom_semantics.json"
+            _isom_s = _json_s.loads(_isom_path_s.read_text(encoding="utf-8")) if _isom_path_s.exists() else {}
+            _seg_index_sprint = _bsi_s(ocad_line_segments_sprint, _isom_s, center_lat=_bbox_lat_s)
+            if len(_seg_index_cache) >= _SEG_CACHE_MAX:
+                _seg_index_cache.pop(next(iter(_seg_index_cache)))
+            _seg_index_cache[_seg_cache_id_s] = _seg_index_sprint
     else:
         ocad_line_segments_sprint = []
 

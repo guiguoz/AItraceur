@@ -909,9 +909,8 @@ function App() {
           .map(c => ({ lat: c.lat, lng: c.lng })),
         // OCAD/OSM feature candidates for terrain-aware placement
         candidate_points: candidatePoints.slice(0, 600),
-        ...(segmentCacheId
-          ? { segment_cache_id: segmentCacheId }
-          : { ocad_geojson_features: ocadLineFeatures }),
+        ...(segmentCacheId ? { segment_cache_id: segmentCacheId } : {}),
+        ocad_geojson_features: ocadLineFeatures,  // toujours envoyé — fallback si cache évincé
         // OCAD map pour HeatmapCache CNN (même logique que sprint)
         ...(ocadMapId && ocadBounds ? {
           map_id: ocadMapId,
@@ -930,9 +929,8 @@ function App() {
           ...(startControl && { start_position: [startControl.lng, startControl.lat] }),
           forbidden_zones_polygons: oobZones,
           candidate_points: candidatePoints.slice(0, 600),
-          ...(segmentCacheId
-            ? { segment_cache_id: segmentCacheId }
-            : { ocad_geojson_features: ocadLineFeatures }),
+          ...(segmentCacheId ? { segment_cache_id: segmentCacheId } : {}),
+          ocad_geojson_features: ocadLineFeatures,  // toujours envoyé — fallback si cache évincé
           existing_controls: competitionMode
             ? getAllExistingControls().map(c => ({ lat: c.lat, lng: c.lng, circuitName: c.circuitName }))
             : [],
@@ -1126,7 +1124,7 @@ function App() {
             !oobZones.some(ring => pointInPolygon(cp.x, cp.y, ring))
           )
         }
-        const _completionLineFeatures = (!segmentCacheId && ocadData?.geojson)
+        const _completionLineFeatures = ocadData?.geojson
           ? filterOcadLineFeatures(ocadData.geojson)
           : []
         const res = await generateCircuit({
@@ -1135,9 +1133,8 @@ function App() {
           target_controls: Math.ceil(missing * 1.5),
           required_controls: placed.map(c => ({ lat: c.lat, lng: c.lng })),
           candidate_points: candidatePoints.slice(0, 600),
-          ...(segmentCacheId
-            ? { segment_cache_id: segmentCacheId }
-            : { ocad_geojson_features: _completionLineFeatures }),
+          ...(segmentCacheId ? { segment_cache_id: segmentCacheId } : {}),
+          ocad_geojson_features: _completionLineFeatures,  // toujours envoyé — fallback si cache évincé
           ...(ocadMapId && ocadBounds ? {
             map_id: ocadMapId,
             ocad_sw: ocadBounds.southWest,

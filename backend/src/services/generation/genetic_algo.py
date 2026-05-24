@@ -889,6 +889,13 @@ class GeneticAlgorithm:
                 flush=True,
             )
 
+        # Intent telemetry — une fois par run GA sur le meilleur circuit (log-only)
+        if self.best_solution is not None:
+            try:
+                self.evaluate_fitness(self.best_solution.controls, self.config)
+            except Exception as _e:
+                print(f"[intent_telemetry_error] {type(_e).__name__}: {_e}", flush=True)
+
         return GenerationResult(
             circuits=self.population[:10],  # Top 10
             best_circuit=self.best_solution,
@@ -1155,7 +1162,7 @@ class GeneticAlgorithm:
             base_w = seg.mobility_weight
             if heatmap_cache is not None:
                 samples = [
-                    heatmap_cache.get_score(
+                    heatmap_cache.query(
                         p0[0] + t * (p1[0] - p0[0]),
                         p0[1] + t * (p1[1] - p0[1]),
                     )
@@ -1355,7 +1362,7 @@ class GeneticAlgorithm:
         guidance_feats = [f for f in corridor if f.handrail_strength > 0.5]
         guidance_density = len(guidance_feats) / max(leg_m_approx / 100.0, 1.0)
         if heatmap_cache is not None:
-            _scores = [heatmap_cache.get_score(lng0 + t * (lng1 - lng0), lat0 + t * (lat1 - lat0))
+            _scores = [heatmap_cache.query(lng0 + t * (lng1 - lng0), lat0 + t * (lat1 - lat0))
                        for t in (0.25, 0.5, 0.75)]
             openness_factor = sum(_scores) / len(_scores)
         else:
@@ -2227,7 +2234,7 @@ class GeneticAlgorithm:
             print("[intent_json]" + _json.dumps(_intent_payload, separators=(",", ":")), flush=True)
 
             import os as _os, csv as _csv, pathlib as _pl
-            if _os.environ.get("INTENT_DEBUG_CSV") == "1" and (int(_circuit_id[:6], 16) % 20) == 0:
+            if _os.environ.get("INTENT_DEBUG_CSV") == "1":
                 _debug_dir = _pl.Path(__file__).parent.parent.parent.parent / "debug"
                 _debug_dir.mkdir(parents=True, exist_ok=True)
                 _csv_path = _debug_dir / "intent_metrics.csv"

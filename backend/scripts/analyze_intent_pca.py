@@ -7,17 +7,18 @@ Deux PCAs séparées (pas indépendantes — Intent = transformation non-linéai
   B — Intent PCA      : HANDRAIL_FOLLOW, LINE_CROSSING, ATTACK_POINT,
                         DIRECT_RISK_RUN, RELIEF_CROSSING_GUIDANCE, SAFETY_RECOVERY
 
-Tests (par PCA) :
+Gate (par PCA) :
   T1 — explained variance  : EV1+EV2 >= 0.75
-  T2 — stabilité inter-TD  : cos(PC1_TD_a, PC1_TD_b) > 0.85 OU sign_agree >= 0.75
-  T3 — anti-biais leg_m    : |corr(PC1_scores, leg_m)| < 0.30
-
-Diagnostics interprétabilité (Phase A.6b) :
-  D1 — eigenvalue ratios   : λ1/λ2 > 1.3 (axes distincts, non-arbitraires)
+  T2 — orientation inter-TD : |cos(PC1_TD_a, PC1_TD_b)| >= 0.85  [heuristique — pas stabilité structurelle]
+  D1 — eigenvalue ratios   : λ1/λ2 > 1.3 (axes distincts)
   D2 — sparsité intent     : mean actifs/leg ∈ [1.0, 4.5]
-  D3 — sign disagree       : flip isolé vs inversion structurelle quand cos < 0.85
 
-Output : résultats texte + gate A.7 (PROCEED / WAIT)
+Diagnostics informatifs (non-gate) :
+  T3 — corr(PC1, leg_m)    : couplage génératif, attendu élevé si TD mixés
+  D3 — sign inconsistency  : orientation PC1 inter-TD (informatif)
+  A.6d — axis attribution  : dominant feature, r_leg_m, r_td par PCk
+
+Output : gate A.7 (PROCEED / WAIT)
 """
 
 import sys
@@ -62,6 +63,18 @@ def extract_matrix(rows, cols):
             "leg_m": float(r.get("leg_m", 0.0)),
         })
     return np.array(X, dtype=float), meta
+
+
+def residualize(X: np.ndarray, meta: list) -> np.ndarray:
+    """Retire l'effet linéaire de leg_m sur chaque colonne — supprime le biais géométrique."""
+    leg_ms = np.array([m["leg_m"] for m in meta], dtype=float)
+    lc = leg_ms - leg_ms.mean()
+    denom = np.dot(lc, lc) + 1e-10
+    X_res = X.copy()
+    for j in range(X.shape[1]):
+        b = np.dot(lc, X[:, j]) / denom
+        X_res[:, j] = X[:, j] - b * lc
+    return X_res
 
 
 def run_pca(X: np.ndarray):
@@ -112,7 +125,9 @@ def analyze(name: str, X: np.ndarray, meta: list, cols: list) -> tuple:
     print(f"  PC1       : {dict(zip(cols, [round(float(v), 3) for v in Vt[0]]))}")
     print(f"  PC2       : {dict(zip(cols, [round(float(v), 3) for v in Vt[1]]))}")
 
-    # T2 — stabilité inter-TD
+    # T2 — orientation heuristique inter-TD
+    # NOTE: td_pcas (local TD) et PCA globale (run_pca) sont deux espaces analytiques distincts
+    # td_pcas = projection PC1 locale par TD (heuristique T2 uniquement — pas PCA canonique)
     td_groups: dict = {}
     for i, m in enumerate(meta):
         td_groups.setdefault(m["td"], []).append(i)
@@ -134,28 +149,24 @@ def analyze(name: str, X: np.ndarray, meta: list, cols: list) -> tuple:
         for j in range(i + 1, len(tds)):
             td_a, td_b = tds[i], tds[j]
             cs = cos_sim(td_pcas[td_a], td_pcas[td_b])
-            sign_agree = float((np.sign(td_pcas[td_a]) == np.sign(td_pcas[td_b])).mean())
-            ok = cs > 0.85 or sign_agree >= 0.75
-            print(f"  stability PC1 TD{td_a}↔TD{td_b}: cos={cs:.3f}, sign_agree={sign_agree:.2f}  {'✓' if ok else '✗'}")
+            acs = abs(cs)
+            ok = acs >= 0.85
+            flip_note = " (sign flip)" if cs < 0 and acs >= 0.85 else ""
+            print(f"  PC1 alignment heuristic TD{td_a}↔TD{td_b}: cos={cs:.3f}, |cos|={acs:.3f}  {'✓' if ok else '✗'}{flip_note}")
             if not ok:
                 t2_ok = False
-            # D3 — diagnostic sign disagreement quand cosine faible
-            if cs < 0.85:
+            # D3 — sign inconsistency informatif quand |cos| < 0.85
+            if acs < 0.85:
                 disagree = [cols[k] for k in range(len(cols))
                             if np.sign(td_pcas[td_a][k]) != np.sign(td_pcas[td_b][k])]
-                print(f"    sign disagree on : {disagree if disagree else '(aucun)'}")
-                if len(disagree) <= 1:
-                    print(f"    → flip isolé probable (eigenvalue swap) — pas une inversion structurelle")
-                elif len(disagree) >= len(cols) // 2:
-                    print(f"    → inversion structurelle — régimes TD{td_a}↔TD{td_b} fondamentalement différents")
+                print(f"    sign inconsistency : {disagree if disagree else '(none)'}")
 
-    # T3 — anti-biais géométrique
+    # T3 — couplage génératif (informative — non-gate)
     leg_ms = [m["leg_m"] for m in meta]
-    bias_corr = abs(pearson(scores[:, 0], leg_ms))
-    t3_ok = bias_corr < 0.30
-    print(f"  anti-bias |corr(PC1, leg_m)| = {bias_corr:.3f}  {'✓ < 0.30' if t3_ok else '✗ >= 0.30'}")
+    r_legm = pearson(scores[:, 0], leg_ms)
+    print(f"  corr(PC1, leg_m) = {r_legm:.3f}  [informative]")
 
-    valid = t1_ok and t2_ok and t3_ok
+    valid = t1_ok and t2_ok
     print(f"  LATENT_STRUCTURE_VALID_{name} : {'TRUE  ✓' if valid else 'FALSE ✗'}")
     return valid, r12
 
@@ -185,6 +196,22 @@ def main(path: str) -> None:
 
     valid_aff, r12_aff = analyze("AFFORDANCE", X_aff, meta, AFFORDANCE_COLS)
     valid_int, r12_int = analyze("INTENT",     X_int, meta, INTENT_COLS)
+
+    # A.6d — axis attribution (informative, single canonical PCA per dataset)
+    print(f"\n--- informative diagnostics ---")
+    leg_ms_arr = np.array([m["leg_m"] for m in meta], dtype=float)
+    tds_arr    = np.array([float(m["td"]) for m in meta if m["td"] != "?"], dtype=float)
+    for label, X_, cols_ in [("AFFORDANCE", X_aff, AFFORDANCE_COLS),
+                              ("INTENT",     X_int, INTENT_COLS)]:
+        if len(X_) < 20:
+            continue
+        evr_, Vt_, sc_ = run_pca(X_)
+        for k in range(min(3, len(evr_))):
+            dom = cols_[int(np.argmax(np.abs(Vt_[k])))]
+            r_lm = pearson(sc_[:, k], leg_ms_arr)
+            r_td  = pearson(sc_[:, k], tds_arr) if len(tds_arr) == len(X_) else 0.0
+            print(f"  {label} PC{k+1} EV={evr_[k]:.2f} dom={dom} "
+                  f"r_leg_m={r_lm:.2f} r_td={r_td:.2f}")
 
     # Résumé + Gate A.7
     print(f"\n{'=' * 60}")

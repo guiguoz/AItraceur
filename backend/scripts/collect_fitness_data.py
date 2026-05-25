@@ -188,6 +188,26 @@ async def _one(session: aiohttp.ClientSession, bbox: dict, td: int, idx: int) ->
     return await _poll(session, task_id)
 
 
+async def _wait_csv_quiescent(
+    csv_path: pathlib.Path, stable_secs: float = 3, timeout_secs: float = 30
+) -> None:
+    """Attend que le fichier CSV cesse d'être modifié (mtime + taille stables)."""
+    deadline = time.time() + timeout_secs
+    last_mtime = 0.0
+    last_size  = -1
+    stable_since = time.time()
+    while time.time() < deadline:
+        if csv_path.exists():
+            st = csv_path.stat()
+            if st.st_mtime != last_mtime or st.st_size != last_size:
+                last_mtime  = st.st_mtime
+                last_size   = st.st_size
+                stable_since = time.time()
+        if time.time() - stable_since >= stable_secs:
+            return
+        await asyncio.sleep(1)
+
+
 def _snapshot(csv_path: pathlib.Path) -> set:
     if not csv_path.exists():
         return set()
@@ -218,9 +238,8 @@ async def _run_group(
     ok = sum(results)
     print(f"  → {ok}/{n} OK")
 
-    # Laisser le temps aux workers backend de terminer les écritures CSV
-    await asyncio.sleep(3)
-    after = _snapshot(GLOBAL_CSV)
+    # Attendre quiescence CSV : taille stable pendant 3s consécutives
+    await _wait_csv_quiescent(GLOBAL_CSV, stable_secs=3, timeout_secs=30)
     new_ids = after - before
     print(f"  → {len(new_ids)} circuit_ids nouveaux")
     return new_ids
@@ -273,8 +292,46 @@ async def main() -> None:
         sys.exit(1)
 
     print(f"Backend OK sur {BASE_URL}")
-    if not os.environ.get("INTENT_DEBUG_CSV"):
-        print("WARN: INTENT_DEBUG_CSV non défini localement — vérifier que le backend a cette var.")
+
+    # Vérifier que INTENT_DEBUG_CSV est actif côté backend (test probe)
+    print("\n[0] Probe INTENT_DEBUG_CSV côté backend...")
+    size_before = GLOBAL_CSV.stat().st_size if GLOBAL_CSV.exists() else 0
+    probe_bbox = {"min_x": -0.455, "max_x": -0.435, "min_y": 49.045, "max_y": 49.065}
+    async with aiohttp.ClientSession() as _s:
+        async with _s.post(
+            f"{BASE_URL}/api/v1/generation/generate-circuit",
+            json={**_body(probe_bbox, 3), "target_controls": 3, "target_length_m": 500},
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as _r:
+            _probe_tid = (await _r.json()).get("task_id", "")
+    # Poll probe jusqu'à completion (max 60s)
+    _probe_done = False
+    _deadline = time.time() + 60
+    async with aiohttp.ClientSession() as _s:
+        while time.time() < _deadline:
+            async with _s.get(
+                f"{BASE_URL}/api/v1/generation/circuit-status/{_probe_tid}",
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as _r:
+                _st = (await _r.json()).get("status")
+                if _st == "completed":
+                    _probe_done = True
+                    break
+                if _st == "error":
+                    break
+            await asyncio.sleep(3)
+
+    await _wait_csv_quiescent(GLOBAL_CSV, stable_secs=2, timeout_secs=15)
+    size_after = GLOBAL_CSV.stat().st_size if GLOBAL_CSV.exists() else 0
+    if _probe_done and size_after <= size_before:
+        print("ERREUR: le CSV n'a pas grossi après génération test.")
+        print("  → Backend démarré sans INTENT_DEBUG_CSV=1")
+        print("  → Redémarrer : cd backend && $env:INTENT_DEBUG_CSV='1' && uvicorn src.main:app --host 0.0.0.0 --port 8000")
+        sys.exit(1)
+    elif _probe_done:
+        print(f"  INTENT_DEBUG_CSV actif : CSV +{size_after - size_before} bytes ✓")
+    else:
+        print("  WARN: probe non terminé — impossible de vérifier INTENT_DEBUG_CSV")
 
     # 1. Parse OCD bboxes
     print("\n[1] Parse cartes OCD → WGS84 bbox")

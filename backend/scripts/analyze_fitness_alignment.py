@@ -2,15 +2,21 @@
 Phase A.8b -- Fitness alignment : PC1 encode-t-il la performance GA ?
 Usage: python backend/scripts/analyze_fitness_alignment.py [path/to/intent_legs.csv]
 
-Deux analyses (toutes informatives -- pas de gate) :
-  D1 -- corr(mean_PC1_per_circuit, mean_fitness_per_circuit) : Pearson brut
-  D2 -- partial_corr(PC1, fitness | leg_m) : controle le couplage generatif
+Hierarchie (toutes informatives -- pas de gate) :
+  GLOBAL       -- mixture baseline (non causal)
+  Intra-map    -- controle effet TD | carte fixe
+  Intra-TD     -- structure fonctionnelle par niveau de difficulte
 
-Hypothese : si PC1 encode la geographie (non la performance), r_partial ~ 0.
+Analyses par sous-groupe :
+  D1 -- corr(mean_PC1_per_circuit, mean_fitness_per_circuit) : Pearson brut
+  D2 -- partial_corr(PC1, fitness | leg_m) : controle couplage generatif
+
+Toutes les analyses conditionnelles a (map, TD) sauf GLOBAL qui est une mixture.
 """
 
 import sys
 import csv
+from typing import Optional
 import numpy as np
 
 AFFORDANCE_COLS = [
@@ -30,7 +36,7 @@ INTENT_COLS = [
 DEFAULT_CSV = "backend/debug/intent_legs.csv"
 
 
-def load_csv(path: str):
+def load_csv(path: str) -> list:
     rows = []
     with open(path, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
@@ -38,9 +44,23 @@ def load_csv(path: str):
     return rows
 
 
-def extract_matrix(rows, cols):
+def extract_matrix(
+    rows: list,
+    cols: list[str],
+    map_filter: Optional[str] = None,
+    td_filter: Optional[int] = None,
+):
     X, meta = [], []
     for r in rows:
+        if map_filter is not None and r.get("map_name", "") != map_filter:
+            continue
+        if td_filter is not None:
+            try:
+                td_val = int(r.get("td", 0))
+            except ValueError:
+                continue
+            if td_val != td_filter:
+                continue
         try:
             vec = [float(r[c]) for c in cols]
         except (ValueError, KeyError):
@@ -49,6 +69,7 @@ def extract_matrix(rows, cols):
         X.append(vec)
         meta.append({
             "circuit_id":    r.get("circuit_id", "?"),
+            "map_name":      r.get("map_name", ""),
             "td":            r.get("td", "?"),
             "leg_m":         float(r.get("leg_m", 0.0)),
             "fitness_total": float(fit_raw) if fit_raw not in ("", None) else None,
@@ -84,8 +105,8 @@ def partial_corr(x: np.ndarray, y: np.ndarray, z: np.ndarray) -> float:
 
 
 def analyze_fitness_alignment(name: str, X: np.ndarray, meta: list) -> None:
-    if len(X) < 20:
-        print(f"  {name} : n < 20, skip")
+    if len(X) < 10:
+        print(f"  {name} : n < 10, skip")
         return
 
     _, _, scores = run_pca(X)
@@ -134,6 +155,18 @@ def analyze_fitness_alignment(name: str, X: np.ndarray, meta: list) -> None:
     print(f"  (legs avec fitness_total : {n_with_fit}/{len(meta)})")
 
 
+def _run_slice(
+    label: str,
+    rows: list,
+    map_filter: Optional[str] = None,
+    td_filter: Optional[int] = None,
+) -> None:
+    X_aff, meta_aff = extract_matrix(rows, AFFORDANCE_COLS, map_filter, td_filter)
+    X_int, meta_int = extract_matrix(rows, INTENT_COLS,     map_filter, td_filter)
+    analyze_fitness_alignment(f"AFFORDANCE | {label}", X_aff, meta_aff)
+    analyze_fitness_alignment(f"INTENT     | {label}", X_int, meta_int)
+
+
 def main(path: str) -> None:
     rows = load_csv(path)
     print(f"Charge {len(rows)} lignes depuis {path}")
@@ -145,11 +178,28 @@ def main(path: str) -> None:
         print("  -> Regenerer un circuit avec INTENT_DEBUG_CSV=1 apres la mise a jour genetic_algo.py")
         return
 
-    X_aff, meta = extract_matrix(rows, AFFORDANCE_COLS)
-    X_int, _    = extract_matrix(rows, INTENT_COLS)
+    has_map = any(r.get("map_name") for r in rows)
 
-    analyze_fitness_alignment("AFFORDANCE", X_aff, meta)
-    analyze_fitness_alignment("INTENT",     X_int, meta)
+    # 1. GLOBAL — mixture baseline, non causal
+    print("\n" + "=" * 60)
+    print("GLOBAL (mixture baseline — non causal)")
+    _run_slice("global", rows)
+
+    if has_map:
+        # 2. Intra-map — controle effet TD | carte fixe
+        maps = sorted({r.get("map_name", "") for r in rows if r.get("map_name")})
+        print("\n" + "=" * 60)
+        print("INTRA-MAP (controle effet TD | carte fixe)")
+        for m in maps:
+            _run_slice(f"map={m}", rows, map_filter=m)
+
+    # 3. Intra-TD — structure fonctionnelle par niveau
+    tds = sorted({int(r.get("td", 0)) for r in rows if r.get("td", "").isdigit()})
+    if len(tds) > 1:
+        print("\n" + "=" * 60)
+        print("INTRA-TD (secondaire)")
+        for td in tds:
+            _run_slice(f"TD{td}", rows, td_filter=td)
 
     print(f"\n{'=' * 60}")
     print("A.8b termine.")

@@ -2246,37 +2246,6 @@ class GeneticAlgorithm:
                         _w.writeheader()
                     _w.writerow(_csv_row)
 
-                # intent_legs.csv — export per-leg (Phase A.6 PCA)
-                _leg_csv_path = _debug_dir / "intent_legs.csv"
-                _leg_write_header = not _leg_csv_path.exists()
-                _leg_fields = [
-                    "circuit_id", "td", "course_type", "leg_index", "leg_m",
-                    "parallel_affordance", "crossing_density", "exit_clarity", "contour_crossing_guidance",
-                    "HANDRAIL_FOLLOW", "LINE_CROSSING", "ATTACK_POINT",
-                    "DIRECT_RISK_RUN", "RELIEF_CROSSING_GUIDANCE", "SAFETY_RECOVERY",
-                ]
-                with open(_leg_csv_path, "a", newline="", encoding="utf-8") as _lf:
-                    _lw = _csv.DictWriter(_lf, fieldnames=_leg_fields)
-                    if _leg_write_header:
-                        _lw.writeheader()
-                    for _li in range(len(_leg_parallel)):
-                        _lw.writerow({
-                            "circuit_id":               _circuit_id,
-                            "td":                       _td_level,
-                            "course_type":              "forest" if _is_forest_ct else "sprint",
-                            "leg_index":                _leg_indices[_li],
-                            "leg_m":                    _leg_lengths[_li],
-                            "parallel_affordance":      round(_leg_parallel[_li], 4),
-                            "crossing_density":         round(_leg_crossing[_li], 4),
-                            "exit_clarity":             round(_leg_clarity[_li], 4),
-                            "contour_crossing_guidance":round(_leg_relief[_li], 4),
-                            "HANDRAIL_FOLLOW":          round(_leg_vecs[_li][0], 4),
-                            "LINE_CROSSING":            round(_leg_vecs[_li][1], 4),
-                            "ATTACK_POINT":             round(_leg_vecs[_li][2], 4),
-                            "DIRECT_RISK_RUN":          round(_leg_vecs[_li][3], 4),
-                            "RELIEF_CROSSING_GUIDANCE": round(_leg_vecs[_li][4], 4),
-                            "SAFETY_RECOVERY":          round(_leg_vecs[_li][5], 4),
-                        })
 
         if pp_scores:
             parallel_bonus = W_PARALLEL * sum(1 for s in pp_scores if s >= _pp_thr) / len(pp_scores)
@@ -2327,7 +2296,7 @@ class GeneticAlgorithm:
         deficit = max(0, config.target_controls - 2 - n_postes)
         density_penalty = deficit ** 2 * _density_mult if deficit > 0 else 0.0
 
-        return (
+        _total_fitness = (
             W_AI * ai_score
             - W_DIST * dist_penalty
             - W_ANGLE * angle_penalty
@@ -2347,6 +2316,45 @@ class GeneticAlgorithm:
             + exit_clarity_bonus
             + leg_diversity_bonus
         )
+
+        import os as _os2, csv as _csv2, pathlib as _pl2
+        if _os2.environ.get("INTENT_DEBUG_CSV") == "1" and _nv >= 4:
+            _debug_dir2 = _pl2.Path(__file__).parent.parent.parent.parent / "debug"
+            _debug_dir2.mkdir(parents=True, exist_ok=True)
+            _leg_csv_path = _debug_dir2 / "intent_legs.csv"
+            _leg_write_header = not _leg_csv_path.exists()
+            _leg_fields = [
+                "circuit_id", "td", "course_type", "leg_index", "leg_m",
+                "fitness_total",
+                "parallel_affordance", "crossing_density", "exit_clarity", "contour_crossing_guidance",
+                "HANDRAIL_FOLLOW", "LINE_CROSSING", "ATTACK_POINT",
+                "DIRECT_RISK_RUN", "RELIEF_CROSSING_GUIDANCE", "SAFETY_RECOVERY",
+            ]
+            with open(_leg_csv_path, "a", newline="", encoding="utf-8") as _lf:
+                _lw = _csv2.DictWriter(_lf, fieldnames=_leg_fields)
+                if _leg_write_header:
+                    _lw.writeheader()
+                for _li in range(len(_leg_parallel)):
+                    _lw.writerow({
+                        "circuit_id":               _circuit_id,
+                        "td":                       _td_level,
+                        "course_type":              "forest" if _is_forest_ct else "sprint",
+                        "leg_index":                _leg_indices[_li],
+                        "leg_m":                    _leg_lengths[_li],
+                        "fitness_total":            round(_total_fitness, 4),
+                        "parallel_affordance":      round(_leg_parallel[_li], 4),
+                        "crossing_density":         round(_leg_crossing[_li], 4),
+                        "exit_clarity":             round(_leg_clarity[_li], 4),
+                        "contour_crossing_guidance":round(_leg_relief[_li], 4),
+                        "HANDRAIL_FOLLOW":          round(_leg_vecs[_li][0], 4),
+                        "LINE_CROSSING":            round(_leg_vecs[_li][1], 4),
+                        "ATTACK_POINT":             round(_leg_vecs[_li][2], 4),
+                        "DIRECT_RISK_RUN":          round(_leg_vecs[_li][3], 4),
+                        "RELIEF_CROSSING_GUIDANCE": round(_leg_vecs[_li][4], 4),
+                        "SAFETY_RECOVERY":          round(_leg_vecs[_li][5], 4),
+                    })
+
+        return _total_fitness
 
     def _compute_shape_score(
         self,

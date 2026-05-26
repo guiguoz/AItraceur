@@ -1,8 +1,9 @@
-# Latent Manifold — Findings (A.8b / A.8c / Q3)
+# Latent Manifold — Findings (A.8b / A.8c / Q3 / v2)
 
-> Phase analytique : A.8b → A.8c → Q3  
-> Dataset : `backend/debug/intent_legs_a8b_v2.csv`  
-> Scripts : `collect_fitness_data.py`, `analyze_td_interaction.py`, `analyze_map_effects.py`, `plot_manifold.py`
+> Phase analytique : A.8b → A.8c → Q3 → **latent-analysis-v2**  
+> Dataset v1 (L mort) : `backend/debug/intent_legs_a8b_v2.csv` — tag `latent-analysis-v1`  
+> Dataset v2 (L vivant) : `backend/debug/intent_legs_post_fix_full.csv` — tag `latent-analysis-v2`  
+> Scripts : `collect_fitness_data.py`, `analyze_td_interaction.py`, `analyze_latent_structure.py`, `plot_manifold.py`
 
 ---
 
@@ -145,10 +146,60 @@ La carte influence la position dans le manifold (M1 robuste) mais pas directemen
 
 ---
 
+---
+
+## 8. latent-analysis-v2 — Post-fix terme L (2026-05-26)
+
+### Contexte de l'intervention
+
+Le terme L (`leg_conformity`) était fonctionnellement mort en LD : cible hardcodée 2000m vs ~473m réels
+→ conformité constante ~0.25 pour tous les circuits TD5. Fix : cible dérivée des paramètres du circuit
+(`target_length_m / (target_controls-1) × style_factor`, ld×1.15 → ~545m).
+
+La seule variable expérimentale est la réactivation du terme L. Tous les autres paramètres
+(`DISTANCES`, `CONTROLS`, `CT_TYPE`, `n_each`, schéma `(map, td, local_idx)`) sont identiques.
+
+### Tableau comparatif v1 → v2 (TD5, N=12 circuits)
+
+| Mesure | v1 (L mort) | v2 (L vivant) | delta |
+|--------|-------------|---------------|-------|
+| fitness mean | 21.56 | 28.16 | **+31%** |
+| fitness SD | 27.38 | 22.34 | **−18%** |
+| fitness CV | 1.270 | 0.793 | **−37%** |
+| Slope TD5 (OLS) | +51.6 | +22.6 (CI incl. 0) | **−56%** |
+| Sep. ratio manifold (affordance) | 0.10 | 0.21 | **+110%** |
+| Sep. ratio manifold (intent) | — | 0.23 | — |
+| Variance PC1 (manifold, 46 circuits) | 63.2% | 62.7% | stable |
+| penalty_b mean TD5 | 0.0954 | 0.0978 | stable |
+| leg_m mean TD5 | 509m | 514m | stable |
+
+### Interprétation
+
+**Signal principal — mean ↑ + CV ↓ :** Le paysage de fitness est moins anisotrope avec L vivant.
+Le GA discrimine mieux entre circuits (CV −37%) tout en produisant des circuits de meilleure qualité
+moyenne (+31%). La dérive vers des fitness très élevées ou très basses est réduite.
+
+**Slope TD5 divisée par 2 :** La contrainte structurelle fitness→manifold pour TD5 était partiellement
+un artefact du terme L mort. Avec L vivant, la slope est +22.6 et le CI inclut maintenant 0 — le signal
+n'est plus statistiquement distinct du bruit à N=12.
+
+**Manifold plus discriminant par TD :** Le separation ratio double (0.10 → 0.21–0.23). Les niveaux TD
+se séparent mieux dans l'espace latent quand L est actif.
+
+**penalty_b et leg_m stables :** Aucun effet de bord sur le ciblage de distance total (terme B) ni
+sur la distribution des longueurs de jambes réelles.
+
+### Visualisation
+
+![Manifold v3 post-fix](../backend/debug/manifold_v3_post_fix.png)
+
+---
+
 ## 7. Next steps
 
 **Court terme** — TD5 calibration experiments  
-Faire varier `penalty_b`, longueur cible de jambe, diversité — mesurer l'impact sur la position dans le manifold. Passer du diagnostic à l'intervention.
+Faire varier `W_DIST`, `W_CONFORM`, diversité — mesurer l'impact sur les slopes et le CV fitness.
+Partir de la baseline v2 (L vivant) — ne pas mélanger les deux régimes.
 
 **Moyen terme** — Latent steering  
 Évaluer si le manifold peut être utilisé comme variable de contrôle générationnelle : orienter le GA vers des régions spécifiques du manifold pour contrôler explicitement le profil de circuit généré.

@@ -252,18 +252,29 @@ def panel_d(ax: plt.Axes, data: dict) -> None:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-def main(csv_path: str) -> None:
+def _derive_output(csv_path: str) -> str:
+    """backend/debug/intent_legs_foo.csv → backend/debug/manifold_foo.png"""
+    import pathlib as _pl
+    p = _pl.Path(csv_path)
+    stem = p.stem  # e.g. "intent_legs_post_fix_full"
+    out_stem = stem.replace("intent_legs_", "manifold_", 1)
+    return str(p.parent / (out_stem + ".png"))
+
+
+def main(csv_path: str, output_png: str) -> None:
     print(f"Chargement {csv_path} ...")
     data, evr = load_circuits(csv_path)
     n = len(data["pc"])
     n_s = int((data["map"] == "stanne").sum())
     n_c = int((data["map"] == "crohot").sum())
+    import pathlib as _pl
+    label = _pl.Path(csv_path).stem
     print(f"  {n} circuits  (stanne={n_s}, crohot={n_c})")
     print(f"  Variance expliquee : PC1={evr[0]:.3f}  PC2={evr[1]:.3f}")
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 10.5))
     fig.suptitle(
-        f"Manifold PC1-PC2 — dataset v2  ({n} circuits, 4 x (carte, TD))\n"
+        f"Manifold PC1-PC2 — {label}  ({n} circuits)\n"
         f"PC1={evr[0]:.1%} var  |  PC2={evr[1]:.1%} var",
         fontsize=11, y=0.995,
     )
@@ -274,10 +285,15 @@ def main(csv_path: str) -> None:
     panel_d(axes[1, 1], data)
 
     fig.tight_layout(rect=[0, 0, 1, 0.97])
-    fig.savefig(OUTPUT_PNG, dpi=120, bbox_inches="tight")
-    print(f"\nSauvegarde : {OUTPUT_PNG}")
+    fig.savefig(output_png, dpi=120, bbox_inches="tight")
+    print(f"\nSauvegarde : {output_png}")
 
 
 if __name__ == "__main__":
-    path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_CSV
-    main(path)
+    import argparse as _ap
+    _p = _ap.ArgumentParser()
+    _p.add_argument("input_csv", nargs="?", default=DEFAULT_CSV)
+    _p.add_argument("--output", default=None, help="chemin PNG de sortie")
+    _args = _p.parse_args()
+    _out = _args.output or _derive_output(_args.input_csv)
+    main(_args.input_csv, _out)

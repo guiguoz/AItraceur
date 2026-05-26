@@ -1857,13 +1857,16 @@ class GeneticAlgorithm:
             rhythm = 0.0
 
         # ── L. Conformité longueur jambes au profil format ────────────────────
-        # Pénalise les circuits dont la longueur moyenne de jambe s'éloigne de la
-        # cible IOF par format : Sprint ~250m, MD ~600m, LD ~2000m.
-        # Complète terme D (CV) qui récompense la variété sans tenir compte du format.
-        _TARGET_LEG_M = {"sprint": 250.0, "md": 600.0, "ld": 2000.0, "foret": 600.0}
+        # Cible dérivée des paramètres réels du circuit (target_length_m / n_legs)
+        # plutôt que hardcodée par format — évite le mismatch ontologique
+        # (ex-fix : "ld"=2000m était incompatible avec target_length_m=9000/20controls→473m).
+        # Style factor : LD favorise légèrement les longues jambes, sprint les courtes.
+        _STYLE_FACTOR = {"ld": 1.15, "md": 1.0, "sprint": 0.8, "foret": 1.0, "forest": 1.0}
         _ct = (config.circuit_type or "forest").lower()
-        _target_leg = _TARGET_LEG_M.get(_ct, 600.0)
         _n_legs = len(leg_m)
+        _n_legs_target = max(config.target_controls - 1, 1)
+        _base_leg = config.target_length_m / _n_legs_target
+        _target_leg = _base_leg * _STYLE_FACTOR.get(_ct, 1.0)
         _mean_leg = float(leg_m.mean()) if _n_legs > 0 else _target_leg
         _leg_conformity = 1.0 - min(abs(_mean_leg - _target_leg) / _target_leg, 1.0)
 
@@ -2233,8 +2236,8 @@ class GeneticAlgorithm:
             }
             print("[intent_json]" + _json.dumps(_intent_payload, separators=(",", ":")), flush=True)
 
-            import os as _os, csv as _csv, pathlib as _pl
-            if _os.environ.get("INTENT_DEBUG_CSV") == "1":
+            import csv as _csv, pathlib as _pl
+            if True:
                 _debug_dir = _pl.Path(__file__).parent.parent.parent.parent / "debug"
                 _debug_dir.mkdir(parents=True, exist_ok=True)
                 _csv_path = _debug_dir / "intent_metrics.csv"
@@ -2317,8 +2320,8 @@ class GeneticAlgorithm:
             + leg_diversity_bonus
         )
 
-        import os as _os2, csv as _csv2, pathlib as _pl2
-        if _os2.environ.get("INTENT_DEBUG_CSV") == "1" and _nv >= 4:
+        import csv as _csv2, pathlib as _pl2
+        if _nv >= 4:
             _debug_dir2 = _pl2.Path(__file__).parent.parent.parent.parent / "debug"
             _debug_dir2.mkdir(parents=True, exist_ok=True)
             _leg_csv_path = _debug_dir2 / "intent_legs.csv"

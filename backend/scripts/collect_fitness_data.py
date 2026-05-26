@@ -14,6 +14,7 @@ Prérequis backend :
 Sortie : backend/debug/intent_legs_a8b_v2.csv (jamais append au global)
 """
 
+import argparse
 import asyncio
 import csv
 import json
@@ -298,16 +299,16 @@ async def _run_group(
 
 # ─── Output CSV ───────────────────────────────────────────────────────────────
 
-def write_v2(circuit_map: dict) -> int:
+def write_v2(circuit_map: dict, output_csv: pathlib.Path = OUTPUT_CSV) -> int:
     """Lit le global CSV, filtre + enrichit, écrit v2. Retourne nb lignes."""
     if not GLOBAL_CSV.exists():
         print(f"WARN: {GLOBAL_CSV} introuvable — INTENT_DEBUG_CSV=1 actif ?")
         return 0
 
-    OUTPUT_CSV.parent.mkdir(parents=True, exist_ok=True)
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
     written = 0
     with open(GLOBAL_CSV, newline="", encoding="utf-8") as fin, \
-         open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as fout:
+         open(output_csv, "w", newline="", encoding="utf-8") as fout:
 
         reader = csv.DictReader(fin)
         writer = csv.DictWriter(fout, fieldnames=V2_FIELDS)
@@ -329,7 +330,22 @@ def write_v2(circuit_map: dict) -> int:
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 async def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--only",   default=None, help="nom du groupe à collecter (ex: crohot_td5)")
+    parser.add_argument("--output", default=None, help="chemin CSV de sortie")
+    args = parser.parse_args()
+
+    datasets = [d for d in DATASETS if args.only is None or d["name"] == args.only]
+    output_csv = pathlib.Path(args.output) if args.output else OUTPUT_CSV
+
+    if not datasets:
+        print(f"ERREUR: aucun groupe correspondant à --only '{args.only}'")
+        print(f"Groupes disponibles: {[d['name'] for d in DATASETS]}")
+        sys.exit(1)
+
     print("=== A.8b collect_fitness_data.py ===\n")
+    if args.only:
+        print(f"Mode --only : {args.only}  →  {output_csv}")
 
     # Healthcheck
     try:
@@ -345,11 +361,14 @@ async def main() -> None:
     print(f"Backend OK sur {BASE_URL}")
     print("  (démarré avec INTENT_DEBUG_CSV=1 ? vérifier le terminal backend)")
 
-    # 1. Parse OCD → bbox + features
+    # 1. Parse OCD → bbox + features (seulement les cartes nécessaires)
+    needed_maps = {d["map"] for d in datasets}
     print("\n[1] Parse cartes OCD → WGS84 bbox + features")
     bboxes: dict[str, dict] = {}
     features_map: dict[str, list] = {}
     for map_name, ocd_path in OCD_PATHS.items():
+        if map_name not in needed_maps:
+            continue
         print(f"  {map_name}: {pathlib.Path(ocd_path).name}")
         try:
             bbox, features = parse_ocd_data(ocd_path)
@@ -366,7 +385,7 @@ async def main() -> None:
     print("\n[2] Preprocess OCAD → SegmentSpatialIndex")
     cache_ids: dict[str, str | None] = {}
     async with aiohttp.ClientSession() as session:
-        for map_name in OCD_PATHS:
+        for map_name in needed_maps:
             print(f"  {map_name}:")
             cache_id = await _preprocess_map(session, features_map[map_name], bboxes[map_name])
             cache_ids[map_name] = cache_id
@@ -376,7 +395,7 @@ async def main() -> None:
     circuit_map: dict[str, str] = {}  # circuit_id → map_name
 
     async with aiohttp.ClientSession() as session:
-        for group in DATASETS:
+        for group in datasets:
             map_name = group["map"]
             bbox = bboxes[map_name]
             seg_id = cache_ids.get(map_name)
@@ -387,8 +406,8 @@ async def main() -> None:
     print(f"\nTotal circuit_ids trackés : {len(circuit_map)}")
 
     # 4. Write v2 CSV
-    print(f"\n[4] Écriture {OUTPUT_CSV}")
-    n_written = write_v2(circuit_map)
+    print(f"\n[4] Écriture {output_csv}")
+    n_written = write_v2(circuit_map, output_csv)
     print(f"    {n_written} lignes écrites")
 
     if n_written == 0:
@@ -399,7 +418,7 @@ async def main() -> None:
     print("\n[5] Distribution dans v2 CSV :")
     from collections import Counter
     counts: Counter = Counter()
-    with open(OUTPUT_CSV, newline="", encoding="utf-8") as f:
+    with open(output_csv, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
             key = f"{row.get('map_name','?')}_td{row.get('td','?')}"
             counts[key] += 1
@@ -414,7 +433,7 @@ async def main() -> None:
         str(OUTPUT_CSV),
     ])
 
-    print(f"\nDone. Output : {OUTPUT_CSV}")
+    print(f"\nDone. Output : {output_csv}")
 
 
 if __name__ == "__main__":

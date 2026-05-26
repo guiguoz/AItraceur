@@ -21,7 +21,6 @@ import os
 import pathlib
 import subprocess
 import sys
-import tempfile
 import time
 
 try:
@@ -29,16 +28,12 @@ try:
 except ImportError:
     print("pip install aiohttp"); sys.exit(1)
 
-try:
-    from pyproj import Transformer
-except ImportError:
-    print("pip install pyproj"); sys.exit(1)
 
 # ─── Config ──────────────────────────────────────────────────────────────────
 
 OCD_PATHS = {
     "stanne": r"E:\RunningRaid\2024-2025\entrainement 020325\La Route de Ste Anne II_v4.ocd",
-    "crohot": r"E:\RunningRaid\Cartographie\fichiers OCAD et jpg  ISOM2017 Grand-Crohot Sud 15000.ocd",
+    "crohot": r"E:\RunningRaid\Cartographie\fichiers OCAD et jpg\O12_2019-05-25_Grand-Crohot-Nord_ech-15000.ocd10.ocd",
 }
 
 DATASETS = [
@@ -66,76 +61,118 @@ _GLOBAL_FIELDS = [
     "parallel_affordance", "crossing_density", "exit_clarity", "contour_crossing_guidance",
     "HANDRAIL_FOLLOW", "LINE_CROSSING", "ATTACK_POINT",
     "DIRECT_RISK_RUN", "RELIEF_CROSSING_GUIDANCE", "SAFETY_RECOVERY",
+    "score_a", "penalty_b", "score_d", "score_h",
 ]
 V2_FIELDS = ["map_name"] + _GLOBAL_FIELDS
 
 # ─── OCD parsing ─────────────────────────────────────────────────────────────
 
+# Uses ocadToGeoJson (same pipeline as frontend) + 1%/99% percentile bbox.
+# Outputs { bbox: [minLon, minLat, maxLon, maxLat], features: [...LineString only] }
 _NODE_EXTRACT = r"""
-const fs  = require('fs');
-const ocd = require('ocad2geojson');
-const buf = fs.readFileSync(process.argv[2]);
-ocd.ocadToGeoJson(buf).then(gj => {
-    const pts = [];
-    function walk(g) {
-        if (!g) return;
-        if (g.type === 'Point') pts.push(g.coordinates);
-        else if (g.type === 'LineString') g.coordinates.forEach(c => pts.push(c));
-        else if (g.type === 'Polygon') g.coordinates.forEach(r => r.forEach(c => pts.push(c)));
-        else if (g.type === 'MultiPolygon') g.coordinates.forEach(p => p.forEach(r => r.forEach(c => pts.push(c))));
+const proj4 = require('proj4');
+const { readOcad, ocadToGeoJson } = require('ocad2geojson');
+proj4.defs('EPSG:2154', '+proj=lcc +lat_0=46.5 +lon_0=3 +lat_1=44 +lat_2=49 +x_0=700000 +y_0=6600000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs');
+(async () => {
+    const ocadFile = await readOcad(process.argv[2]);
+    const crs = ocadFile.getCrs();
+    const code = crs && crs.code;
+    let converter = null;
+    if (code && code !== 4326) {
+        const ep = 'EPSG:' + code;
+        if (proj4.defs(ep)) {
+            const fwd = proj4(ep, 'WGS84');
+            converter = (xy) => fwd.forward(xy);
+        }
     }
-    (gj.features || []).forEach(f => walk(f.geometry));
-    console.log(JSON.stringify(pts));
-}).catch(e => { process.stderr.write(e.message + '\n'); process.exit(1); });
+    const xs = [], ys = [];
+    function reproj(coords) {
+        if (typeof coords[0] === 'number') {
+            const pt = converter ? converter([coords[0], coords[1]]) : [coords[0], coords[1]];
+            xs.push(pt[0]); ys.push(pt[1]);
+            return pt;
+        }
+        return coords.map(reproj);
+    }
+    const geojson = ocadToGeoJson(ocadFile);
+    const allFeatures = geojson.features.map(f => {
+        if (!f.geometry || !f.geometry.coordinates) return f;
+        return { ...f, geometry: { ...f.geometry, coordinates: reproj(f.geometry.coordinates) } };
+    });
+    if (xs.length === 0) { process.stderr.write('No coords extracted\n'); process.exit(1); }
+    xs.sort((a, b) => a - b); ys.sort((a, b) => a - b);
+    const p = (arr, q) => arr[Math.max(0, Math.min(arr.length - 1, Math.floor(arr.length * q)))];
+    const bbox = [p(xs, 0.01), p(ys, 0.01), p(xs, 0.99), p(ys, 0.99)];
+    const lineFeats = allFeatures.filter(f =>
+        f.geometry && (f.geometry.type === 'LineString' || f.geometry.type === 'MultiLineString')
+    );
+    console.log(JSON.stringify({ bbox, features: lineFeats }));
+})().catch(e => { process.stderr.write(e.message + '\n'); process.exit(1); });
 """
 
 
-def parse_ocd_bbox(ocd_path: str) -> dict:
-    """OCD → Lambert-93 via Node/ocad2geojson → WGS84 bbox via pyproj."""
+def parse_ocd_data(ocd_path: str) -> tuple[dict, list]:
+    """OCD → WGS84 bbox + LineString features via Node/ocad2geojson."""
     tile_dir = pathlib.Path(__file__).parent.parent / "tile-service"
-    import tempfile as _tf
-    with _tf.NamedTemporaryFile(mode="w", suffix=".js", delete=False, encoding="utf-8") as _f:
-        _f.write(_NODE_EXTRACT)
-        tmp = pathlib.Path(_f.name)
+    tmp = tile_dir / "_ocd_parse_tmp.js"
+    tmp.write_text(_NODE_EXTRACT, encoding="utf-8")
     try:
         r = subprocess.run(
             ["node", str(tmp), ocd_path],
-            capture_output=True, text=True, cwd=str(tile_dir), timeout=30
+            capture_output=True, text=True, cwd=str(tile_dir), timeout=60
         )
     finally:
         tmp.unlink(missing_ok=True)
 
     if r.returncode != 0:
-        raise RuntimeError(f"node parse failed: {r.stderr[:300]}")
+        raise RuntimeError(f"node parse failed: {r.stderr[:400]}")
 
-    raw_coords = json.loads(r.stdout.strip())
-    if not raw_coords:
-        raise ValueError(f"Aucune coordonnée dans {ocd_path}")
+    result = json.loads(r.stdout.strip())
+    raw_bbox = result["bbox"]
+    if not raw_bbox or len(raw_bbox) != 4:
+        raise ValueError(f"Bounds invalides depuis {ocd_path}: {raw_bbox}")
 
-    tr = Transformer.from_crs("EPSG:2154", "EPSG:4326", always_xy=True)
-    lons, lats = [], []
-    for x, y in raw_coords:
-        lon, lat = tr.transform(x, y)
-        if -180 < lon < 180 and -90 < lat < 90:
-            lons.append(lon)
-            lats.append(lat)
-
-    if not lons:
-        raise ValueError(f"Aucune coordonnée WGS84 valide depuis {ocd_path}")
-
+    min_lon, min_lat, max_lon, max_lat = raw_bbox
     margin = 0.001
-    return {
-        "min_x": min(lons) - margin,
-        "max_x": max(lons) + margin,
-        "min_y": min(lats) - margin,
-        "max_y": max(lats) + margin,
+    bbox = {
+        "min_x": min_lon - margin,
+        "max_x": max_lon + margin,
+        "min_y": min_lat - margin,
+        "max_y": max_lat + margin,
     }
+    return bbox, result.get("features", [])
+
+
+# ─── Preprocess OCAD (build SegmentSpatialIndex on backend) ──────────────────
+
+async def _preprocess_map(
+    session: aiohttp.ClientSession, features: list, bbox: dict
+) -> str | None:
+    """POST /preprocess-ocad → segment_cache_id. Returns None on failure."""
+    center_lat = (bbox["min_y"] + bbox["max_y"]) / 2
+    try:
+        async with session.post(
+            f"{BASE_URL}/api/v1/generation/preprocess-ocad",
+            json={"ocad_geojson_features": features, "center_lat": center_lat},
+            timeout=aiohttp.ClientTimeout(total=60),
+        ) as resp:
+            if resp.status != 200:
+                print(f"  [preprocess HTTP {resp.status}]")
+                return None
+            data = await resp.json()
+            cache_id = data.get("segment_cache_id", "")
+            seg_count = data.get("segment_count", 0)
+            print(f"  preprocess OK — {seg_count} segments, cache_id={cache_id[:8]}")
+            return cache_id
+    except Exception as e:
+        print(f"  [preprocess err] {e}")
+        return None
 
 
 # ─── Circuit generation ───────────────────────────────────────────────────────
 
-def _body(bbox: dict, td: int) -> dict:
-    return {
+def _body(bbox: dict, td: int, segment_cache_id: str | None = None) -> dict:
+    body: dict = {
         "bounding_box":    bbox,
         "technical_level": f"TD{td}",
         "circuit_type":    CT_TYPE[td],
@@ -145,6 +182,9 @@ def _body(bbox: dict, td: int) -> dict:
         "num_variants":    1,
         "force_mode":      "forest",
     }
+    if segment_cache_id:
+        body["segment_cache_id"] = segment_cache_id
+    return body
 
 
 async def _poll(session: aiohttp.ClientSession, task_id: str) -> bool:
@@ -168,11 +208,17 @@ async def _poll(session: aiohttp.ClientSession, task_id: str) -> bool:
     return False
 
 
-async def _one(session: aiohttp.ClientSession, bbox: dict, td: int, idx: int) -> bool:
+async def _one(
+    session: aiohttp.ClientSession,
+    bbox: dict,
+    td: int,
+    idx: int,
+    segment_cache_id: str | None = None,
+) -> bool:
     try:
         async with session.post(
             f"{BASE_URL}/api/v1/generation/generate-circuit",
-            json=_body(bbox, td),
+            json=_body(bbox, td, segment_cache_id),
             timeout=aiohttp.ClientTimeout(total=15),
         ) as resp:
             if resp.status != 202:
@@ -221,18 +267,22 @@ def _snapshot(csv_path: pathlib.Path) -> set:
 
 
 async def _run_group(
-    group: dict, bbox: dict, session: aiohttp.ClientSession
+    group: dict,
+    bbox: dict,
+    session: aiohttp.ClientSession,
+    segment_cache_id: str | None = None,
 ) -> set:
     name, td, n = group["name"], group["td"], group["n_each"]
     print(f"\n{'=' * 50}")
-    print(f"Groupe {name} : {n} circuits TD{td}")
+    print(f"Groupe {name} : {n} circuits TD{td}"
+          + (f" (cache {segment_cache_id[:8]})" if segment_cache_id else " [no OCAD cache]"))
 
     before = _snapshot(GLOBAL_CSV)
     sem = asyncio.Semaphore(MAX_PARALLEL)
 
     async def bounded(idx: int) -> bool:
         async with sem:
-            return await _one(session, bbox, td, idx)
+            return await _one(session, bbox, td, idx, segment_cache_id)
 
     results = await asyncio.gather(*[bounded(i) for i in range(n)])
     ok = sum(results)
@@ -240,6 +290,7 @@ async def _run_group(
 
     # Attendre quiescence CSV : taille stable pendant 3s consécutives
     await _wait_csv_quiescent(GLOBAL_CSV, stable_secs=3, timeout_secs=30)
+    after = _snapshot(GLOBAL_CSV)
     new_ids = after - before
     print(f"  → {len(new_ids)} circuit_ids nouveaux")
     return new_ids
@@ -292,76 +343,51 @@ async def main() -> None:
         sys.exit(1)
 
     print(f"Backend OK sur {BASE_URL}")
+    print("  (démarré avec INTENT_DEBUG_CSV=1 ? vérifier le terminal backend)")
 
-    # Vérifier que INTENT_DEBUG_CSV est actif côté backend (test probe)
-    print("\n[0] Probe INTENT_DEBUG_CSV côté backend...")
-    size_before = GLOBAL_CSV.stat().st_size if GLOBAL_CSV.exists() else 0
-    probe_bbox = {"min_x": -0.455, "max_x": -0.435, "min_y": 49.045, "max_y": 49.065}
-    async with aiohttp.ClientSession() as _s:
-        async with _s.post(
-            f"{BASE_URL}/api/v1/generation/generate-circuit",
-            json={**_body(probe_bbox, 3), "target_controls": 3, "target_length_m": 500},
-            timeout=aiohttp.ClientTimeout(total=10),
-        ) as _r:
-            _probe_tid = (await _r.json()).get("task_id", "")
-    # Poll probe jusqu'à completion (max 60s)
-    _probe_done = False
-    _deadline = time.time() + 60
-    async with aiohttp.ClientSession() as _s:
-        while time.time() < _deadline:
-            async with _s.get(
-                f"{BASE_URL}/api/v1/generation/circuit-status/{_probe_tid}",
-                timeout=aiohttp.ClientTimeout(total=5),
-            ) as _r:
-                _st = (await _r.json()).get("status")
-                if _st == "completed":
-                    _probe_done = True
-                    break
-                if _st == "error":
-                    break
-            await asyncio.sleep(3)
-
-    await _wait_csv_quiescent(GLOBAL_CSV, stable_secs=2, timeout_secs=15)
-    size_after = GLOBAL_CSV.stat().st_size if GLOBAL_CSV.exists() else 0
-    if _probe_done and size_after <= size_before:
-        print("ERREUR: le CSV n'a pas grossi après génération test.")
-        print("  → Backend démarré sans INTENT_DEBUG_CSV=1")
-        print("  → Redémarrer : cd backend && $env:INTENT_DEBUG_CSV='1' && uvicorn src.main:app --host 0.0.0.0 --port 8000")
-        sys.exit(1)
-    elif _probe_done:
-        print(f"  INTENT_DEBUG_CSV actif : CSV +{size_after - size_before} bytes ✓")
-    else:
-        print("  WARN: probe non terminé — impossible de vérifier INTENT_DEBUG_CSV")
-
-    # 1. Parse OCD bboxes
-    print("\n[1] Parse cartes OCD → WGS84 bbox")
+    # 1. Parse OCD → bbox + features
+    print("\n[1] Parse cartes OCD → WGS84 bbox + features")
     bboxes: dict[str, dict] = {}
+    features_map: dict[str, list] = {}
     for map_name, ocd_path in OCD_PATHS.items():
         print(f"  {map_name}: {pathlib.Path(ocd_path).name}")
         try:
-            bbox = parse_ocd_bbox(ocd_path)
+            bbox, features = parse_ocd_data(ocd_path)
             bboxes[map_name] = bbox
+            features_map[map_name] = features
             print(f"      lon [{bbox['min_x']:.4f}, {bbox['max_x']:.4f}]  "
-                  f"lat [{bbox['min_y']:.4f}, {bbox['max_y']:.4f}]")
+                  f"lat [{bbox['min_y']:.4f}, {bbox['max_y']:.4f}]  "
+                  f"({len(features)} line features)")
         except Exception as e:
             print(f"  ERREUR: {e}")
             sys.exit(1)
 
-    # 2. Generate groups sequentially
-    print("\n[2] Génération circuits")
+    # 2. Preprocess maps → segment_cache_id (one per map)
+    print("\n[2] Preprocess OCAD → SegmentSpatialIndex")
+    cache_ids: dict[str, str | None] = {}
+    async with aiohttp.ClientSession() as session:
+        for map_name in OCD_PATHS:
+            print(f"  {map_name}:")
+            cache_id = await _preprocess_map(session, features_map[map_name], bboxes[map_name])
+            cache_ids[map_name] = cache_id
+
+    # 3. Generate groups sequentially
+    print("\n[3] Génération circuits")
     circuit_map: dict[str, str] = {}  # circuit_id → map_name
 
     async with aiohttp.ClientSession() as session:
         for group in DATASETS:
-            bbox = bboxes[group["map"]]
-            new_ids = await _run_group(group, bbox, session)
+            map_name = group["map"]
+            bbox = bboxes[map_name]
+            seg_id = cache_ids.get(map_name)
+            new_ids = await _run_group(group, bbox, session, seg_id)
             for cid in new_ids:
-                circuit_map[cid] = group["map"]
+                circuit_map[cid] = map_name
 
     print(f"\nTotal circuit_ids trackés : {len(circuit_map)}")
 
-    # 3. Write v2 CSV
-    print(f"\n[3] Écriture {OUTPUT_CSV}")
+    # 4. Write v2 CSV
+    print(f"\n[4] Écriture {OUTPUT_CSV}")
     n_written = write_v2(circuit_map)
     print(f"    {n_written} lignes écrites")
 
@@ -369,8 +395,8 @@ async def main() -> None:
         print("\nWARN: 0 lignes. Vérifier INTENT_DEBUG_CSV=1 sur le backend.")
         return
 
-    # 4. Distribution par groupe dans le v2
-    print("\n[4] Distribution dans v2 CSV :")
+    # 5. Distribution par groupe dans le v2
+    print("\n[5] Distribution dans v2 CSV :")
     from collections import Counter
     counts: Counter = Counter()
     with open(OUTPUT_CSV, newline="", encoding="utf-8") as f:
@@ -380,8 +406,8 @@ async def main() -> None:
     for k, v in sorted(counts.items()):
         print(f"    {k} : {v} legs")
 
-    # 5. Run alignment analysis
-    print(f"\n[5] Analyse fitness alignment → {OUTPUT_CSV}")
+    # 6. Run alignment analysis
+    print(f"\n[6] Analyse fitness alignment → {OUTPUT_CSV}")
     subprocess.run([
         sys.executable,
         str(pathlib.Path(__file__).parent / "analyze_fitness_alignment.py"),

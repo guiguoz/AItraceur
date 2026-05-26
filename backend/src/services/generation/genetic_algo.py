@@ -2329,6 +2329,7 @@ class GeneticAlgorithm:
                 "parallel_affordance", "crossing_density", "exit_clarity", "contour_crossing_guidance",
                 "HANDRAIL_FOLLOW", "LINE_CROSSING", "ATTACK_POINT",
                 "DIRECT_RISK_RUN", "RELIEF_CROSSING_GUIDANCE", "SAFETY_RECOVERY",
+                "score_a", "penalty_b", "score_d", "score_h",
             ]
             with open(_leg_csv_path, "a", newline="", encoding="utf-8") as _lf:
                 _lw = _csv2.DictWriter(_lf, fieldnames=_leg_fields)
@@ -2352,6 +2353,11 @@ class GeneticAlgorithm:
                         "DIRECT_RISK_RUN":          round(_leg_vecs[_li][3], 4),
                         "RELIEF_CROSSING_GUIDANCE": round(_leg_vecs[_li][4], 4),
                         "SAFETY_RECOVERY":          round(_leg_vecs[_li][5], 4),
+                        # Phase B — composantes fitness (per-circuit, repetees par leg)
+                        "score_a":                  round(float(ai_score), 4),
+                        "penalty_b":                round(float(dist_penalty), 4),
+                        "score_d":                  round(float(rhythm), 4),
+                        "score_h":                  round(float(shape_score), 4),
                     })
 
         return _total_fitness

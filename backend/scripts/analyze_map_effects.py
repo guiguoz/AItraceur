@@ -1,21 +1,29 @@
-#!/usr/bin/env python3
 """
-Phase A.8b Q3 — Domain shift test (map effect).
-
-Compare stanne_td3 vs crohot_td3 : meme TD, cartes differentes.
-Question : est-ce que la geometrie des intents depend du terrain ?
-
-NE PAS agreger mentalement avec Q1/Q2 (analyze_fitness_alignment.py).
-Ce script repond a une question differente : structure environnementale.
+Q3 -- Domain shift test : stanne_td3 vs crohot_td3.
 
 Usage: python backend/scripts/analyze_map_effects.py [path/to/intent_legs_a8b_v2.csv]
+
+Comparaison stricte : TD=3 uniquement (N=22 circuits, 10 stanne + 12 crohot).
+Exploratoire -- pas d'ajustement multiple comparisons avec A.8b/A.8c.
+
+Sections:
+  M1 -- Comparaison distributions PC dans l'espace latent (permutation test)
+  M2 -- Comparaison distributions fitness (Cohen's d + CI bootstrap)
+  M3 -- Interaction map x PC1 sur fitness (modeles emboires R2_A / R2_B / deltaR2)
+
+Bootstrap: resample circuits avec remise par groupe (unite = circuit entier).
 """
 
-import csv
 import sys
-from typing import Optional
-
+import csv
+from collections import defaultdict
 import numpy as np
+
+# Force UTF-8 output sur Windows (cp1252 par défaut)
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
+DEFAULT_CSV = "backend/debug/intent_legs_a8b_v2.csv"
 
 AFFORDANCE_COLS = [
     "parallel_affordance",
@@ -32,151 +40,300 @@ INTENT_COLS = [
     "SAFETY_RECOVERY",
 ]
 
-DEFAULT_CSV = "backend/debug/intent_legs_a8b_v2.csv"
+N_PERM   = 2000
+N_BOOT   = 1000
+RNG_SEED = 42
+SEP = "=" * 62
 
 
-def load_csv(path: str) -> list:
+# ── Utilities ────────────────────────────────────────────────────────────────
+
+def load_csv(path: str) -> list[dict]:
     with open(path, newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
 
 
-def extract(rows: list, cols: list[str], map_name: str, td: int) -> Optional[np.ndarray]:
-    vecs = []
+def run_pca(X: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    Xc = X - X.mean(axis=0)
+    _, S, Vt = np.linalg.svd(Xc, full_matrices=False)
+    ev = S ** 2 / max(len(X) - 1, 1)
+    evr = ev / ev.sum()
+    return evr, Vt, Xc @ Vt.T
+
+
+def ols(X: np.ndarray, y: np.ndarray) -> np.ndarray:
+    coeffs, _, _, _ = np.linalg.lstsq(X, y, rcond=None)
+    return coeffs
+
+
+def r2_score(y: np.ndarray, y_pred: np.ndarray) -> float:
+    ss_tot = float(np.var(y))
+    return 1.0 - float(np.var(y - y_pred)) / ss_tot if ss_tot > 1e-12 else 0.0
+
+
+def centroid_distance(g1: np.ndarray, g2: np.ndarray) -> float:
+    return float(np.linalg.norm(g1.mean(axis=0) - g2.mean(axis=0)))
+
+
+def sigma_pooled_2d(g1: np.ndarray, g2: np.ndarray) -> float:
+    """sqrt(moyenne des variances intra-groupe sur PC1 et PC2)."""
+    var1 = g1.var(axis=0)
+    var2 = g2.var(axis=0)
+    return float(np.sqrt(np.mean(np.concatenate([var1, var2]))))
+
+
+def cohens_d(a: np.ndarray, b: np.ndarray) -> float:
+    n1, n2 = len(a), len(b)
+    if n1 + n2 < 3:
+        return 0.0
+    pooled_sd = np.sqrt(
+        ((n1 - 1) * np.var(a, ddof=1) + (n2 - 1) * np.var(b, ddof=1)) / (n1 + n2 - 2)
+    )
+    return float((a.mean() - b.mean()) / pooled_sd) if pooled_sd > 1e-10 else 0.0
+
+
+# ── Load + filter TD3 + PCA ──────────────────────────────────────────────────
+
+def load_td3(csv_path: str):
+    """
+    Filtre TD=3, PCA sur ces legs uniquement.
+    Retourne (circ, pc12_arr, fit_arr, cids, map_arr, evr).
+    """
+    rows = load_csv(csv_path)
+    all_cols = AFFORDANCE_COLS + INTENT_COLS
+
+    feat_rows, meta_rows = [], []
     for r in rows:
-        if r.get("map_name") != map_name:
+        if int(r.get("td", 0)) != 3:
             continue
         try:
-            if int(r.get("td", 0)) != td:
-                continue
-        except ValueError:
-            continue
-        try:
-            vecs.append([float(r[c]) for c in cols])
+            vec = [float(r[c]) for c in all_cols]
         except (ValueError, KeyError):
             continue
-    return np.array(vecs, dtype=float) if vecs else None
+        fit_raw = r.get("fitness_total", "")
+        if fit_raw in ("", None):
+            continue
+        try:
+            fitness = float(fit_raw)
+        except ValueError:
+            continue
+        feat_rows.append(vec)
+        meta_rows.append({
+            "circuit_id": r.get("circuit_id", ""),
+            "map":        r.get("map_name", ""),
+            "fitness":    fitness,
+        })
+
+    X = np.array(feat_rows, dtype=float)
+    evr, _, scores = run_pca(X)
+    pc12_per_leg = scores[:, :2]
+
+    circ: dict = {}
+    for pc12, m in zip(pc12_per_leg, meta_rows):
+        cid = m["circuit_id"]
+        if cid not in circ:
+            circ[cid] = {"map": m["map"], "fitness": m["fitness"], "pc12s": []}
+        circ[cid]["pc12s"].append(pc12)
+
+    cids     = list(circ.keys())
+    pc12_arr = np.array([np.mean(circ[c]["pc12s"], axis=0) for c in cids])
+    fit_arr  = np.array([circ[c]["fitness"]               for c in cids])
+    map_arr  = np.array([circ[c]["map"]                   for c in cids])
+
+    return circ, pc12_arr, fit_arr, cids, map_arr, evr
 
 
-def pca_scores(X: np.ndarray) -> np.ndarray:
-    Xc = X - X.mean(axis=0)
-    _, _, Vt = np.linalg.svd(Xc, full_matrices=False)
-    return Xc @ Vt.T
+# ── M1 — Comparaison distributions PC ────────────────────────────────────────
 
-
-def centroid_dist(a: np.ndarray, b: np.ndarray) -> float:
-    """L2 distance between PC1/PC2 centroids."""
-    ca = a[:, :2].mean(axis=0)
-    cb = b[:, :2].mean(axis=0)
-    return float(np.linalg.norm(ca - cb))
-
-
-def overlap_ratio(a: np.ndarray, b: np.ndarray) -> float:
-    """Fraction of points from A whose PC1 falls within B's [min, max] on PC1."""
-    lo, hi = b[:, 0].min(), b[:, 0].max()
-    return float(np.mean((a[:, 0] >= lo) & (a[:, 0] <= hi)))
-
-
-def print_distribution(label: str, X: np.ndarray) -> None:
-    pc1 = X[:, 0]
-    print(f"  {label:20s} n={len(X):4d}  "
-          f"PC1 mean={pc1.mean():.3f}  std={pc1.std():.3f}  "
-          f"[{pc1.min():.3f}, {pc1.max():.3f}]")
-
-
-def domain_shift_test(
-    feat_label: str,
-    cols: list[str],
-    rows: list,
-    map_a: str,
-    map_b: str,
-    td: int,
+def m1_pc_distribution(
+    pc12_arr: np.ndarray,
+    map_arr: np.ndarray,
+    rng: np.random.Generator,
 ) -> None:
-    sep = "=" * 62
-    print(f"\n{sep}")
-    print(f"DOMAIN SHIFT — {feat_label} | TD{td} : {map_a} vs {map_b}")
+    print(f"\n{SEP}")
+    print("M1 — COMPARAISON ESPACE LATENT  stanne vs crohot (TD3)")
+    print(SEP)
 
-    Xa = extract(rows, cols, map_a, td)
-    Xb = extract(rows, cols, map_b, td)
+    mask_s = (map_arr == "stanne")
+    mask_c = (map_arr == "crohot")
+    g_s = pc12_arr[mask_s]
+    g_c = pc12_arr[mask_c]
+    n_s, n_c = len(g_s), len(g_c)
 
-    if Xa is None or len(Xa) < 5:
-        print(f"  {map_a} : insuffisant (n={len(Xa) if Xa is not None else 0}), skip")
-        return
-    if Xb is None or len(Xb) < 5:
-        print(f"  {map_b} : insuffisant (n={len(Xb) if Xb is not None else 0}), skip")
-        return
+    obs_dist = centroid_distance(g_s, g_c)
+    sigma_p  = sigma_pooled_2d(g_s, g_c)
+    d_norm   = obs_dist / sigma_p if sigma_p > 1e-10 else float("nan")
 
-    # PCA on the combined space to compare on the same axes
-    X_all = np.vstack([Xa, Xb])
-    Xc = X_all - X_all.mean(axis=0)
-    _, _, Vt = np.linalg.svd(Xc, full_matrices=False)
+    # Bootstrap CI sur la distance observée
+    boot_dist = np.zeros(N_BOOT)
+    for b in range(N_BOOT):
+        bs = g_s[rng.integers(0, n_s, size=n_s)]
+        bc = g_c[rng.integers(0, n_c, size=n_c)]
+        boot_dist[b] = centroid_distance(bs, bc)
+    ci_lo, ci_hi = np.percentile(boot_dist, [2.5, 97.5])
 
-    Sa = (Xa - X_all.mean(axis=0)) @ Vt.T
-    Sb = (Xb - X_all.mean(axis=0)) @ Vt.T
+    # Permutation test (unite = circuit)
+    all_pc12 = pc12_arr.copy()
+    perm_dists = np.zeros(N_PERM)
+    for p in range(N_PERM):
+        shuffled = rng.permutation(map_arr)
+        ps = all_pc12[shuffled == "stanne"]
+        pc = all_pc12[shuffled == "crohot"]
+        if len(ps) > 0 and len(pc) > 0:
+            perm_dists[p] = centroid_distance(ps, pc)
+    p_val = float((perm_dists >= obs_dist).mean())
 
-    print_distribution(map_a, Sa)
-    print_distribution(map_b, Sb)
+    print(f"\n  N stanne={n_s}  N crohot={n_c}")
+    print(f"\n  Centroïdes (PC1, PC2) :")
+    print(f"    stanne : ({g_s[:,0].mean():+.3f}, {g_s[:,1].mean():+.3f})")
+    print(f"    crohot : ({g_c[:,0].mean():+.3f}, {g_c[:,1].mean():+.3f})")
+    print(f"\n  Distance centroïdes  : {obs_dist:.4f}   CI95=[{ci_lo:.4f}, {ci_hi:.4f}]")
+    print(f"  sigma_pooled             : {sigma_p:.4f}")
+    print(f"  d_norm (d/sigma_pooled)  : {d_norm:.3f}")
+    print(f"  p-value permutation  : {p_val:.4f}  (N_PERM={N_PERM})")
 
-    cd = centroid_dist(Sa, Sb)
-    ov = overlap_ratio(Sa, Sb)
-    print(f"\n  Centroid dist (PC1/PC2) = {cd:.3f}")
-    print(f"  Overlap {map_a}→{map_b} PC1 = {ov:.2f}  (1.0=full overlap)")
-
-    if cd < 0.5 and ov > 0.8:
-        print("  -> faible shift : geometrie stable entre cartes")
-    elif cd < 1.5 and ov > 0.5:
-        print("  -> shift modere : adaptation partielle au terrain")
+    if p_val < 0.05:
+        print("\n  -> Séparation dans l'espace latent significative (p<0.05)")
     else:
-        print("  -> fort shift : geometrie sensible au terrain (OOD)")
+        print("\n  -> Pas de séparation claire dans l'espace latent (p≥0.05)")
+    print("  [Exploratoire — N=10/12, interprétation prudente]")
 
 
-def main(path: str) -> None:
-    rows = load_csv(path)
-    print(f"Charge {len(rows)} lignes depuis {path}")
+# ── M2 — Comparaison fitness ──────────────────────────────────────────────────
 
-    maps = sorted({r.get("map_name", "") for r in rows if r.get("map_name")})
-    tds  = sorted({int(r["td"]) for r in rows if r.get("td", "").isdigit()})
-    print(f"Cartes : {maps}")
-    print(f"TDs    : {tds}")
+def m2_fitness_comparison(
+    fit_arr: np.ndarray,
+    map_arr: np.ndarray,
+    rng: np.random.Generator,
+) -> None:
+    print(f"\n{SEP}")
+    print("M2 — COMPARAISON FITNESS  stanne vs crohot (TD3)")
+    print(SEP)
 
-    if len(maps) < 2:
-        print("WARN: moins de 2 cartes — domain shift test impossible")
-        return
+    f_s = fit_arr[map_arr == "stanne"]
+    f_c = fit_arr[map_arr == "crohot"]
 
-    # Test principal : stanne_td3 vs crohot_td3 — effet carte, TD fixe
-    if "stanne" in maps and "crohot" in maps and 3 in tds:
-        domain_shift_test("AFFORDANCE", AFFORDANCE_COLS, rows, "stanne", "crohot", td=3)
-        domain_shift_test("INTENT",     INTENT_COLS,     rows, "stanne", "crohot", td=3)
+    diff_obs = float(f_s.mean() - f_c.mean())
+    d = cohens_d(f_s, f_c)
 
-    # Tests secondaires : crohot TD3 vs TD4 vs TD5 — effet TD, carte fixe
-    if "crohot" in maps:
-        crohot_tds = sorted({int(r["td"]) for r in rows
-                             if r.get("map_name") == "crohot" and r.get("td", "").isdigit()})
-        if len(crohot_tds) >= 2:
-            print(f"\n{'=' * 62}")
-            print(f"EFFET TD (carte fixe = crohot) — reference pour interpretation Q3")
-            for feat_label, cols in [("AFFORDANCE", AFFORDANCE_COLS), ("INTENT", INTENT_COLS)]:
-                for i, td_a in enumerate(crohot_tds):
-                    for td_b in crohot_tds[i + 1:]:
-                        Xa = extract(rows, cols, "crohot", td_a)
-                        Xb = extract(rows, cols, "crohot", td_b)
-                        if Xa is None or Xb is None or len(Xa) < 5 or len(Xb) < 5:
-                            continue
-                        X_all = np.vstack([Xa, Xb])
-                        mean_all = X_all.mean(axis=0)
-                        Xc = X_all - mean_all
-                        _, _, Vt = np.linalg.svd(Xc, full_matrices=False)
-                        Sa = (Xa - mean_all) @ Vt.T
-                        Sb = (Xb - mean_all) @ Vt.T
-                        sep_label = f"\n  crohot TD{td_a} vs TD{td_b} ({feat_label})"
-                        print(sep_label)
-                        print_distribution(f"TD{td_a}", Sa)
-                        print_distribution(f"TD{td_b}", Sb)
-                        cd = centroid_dist(Sa, Sb)
-                        ov = overlap_ratio(Sa, Sb)
-                        print(f"  Centroid dist={cd:.3f}  Overlap={ov:.2f}")
+    boot_diff = np.zeros(N_BOOT)
+    for b in range(N_BOOT):
+        bs = rng.choice(f_s, size=len(f_s), replace=True)
+        bc = rng.choice(f_c, size=len(f_c), replace=True)
+        boot_diff[b] = bs.mean() - bc.mean()
+    ci_lo, ci_hi = np.percentile(boot_diff, [2.5, 97.5])
 
-    print(f"\n{'=' * 62}")
-    print("Q3 domain shift test termine.")
+    print(f"\n  stanne  mean={f_s.mean():.2f}  sd={f_s.std(ddof=1):.2f}  N={len(f_s)}")
+    print(f"  crohot  mean={f_c.mean():.2f}  sd={f_c.std(ddof=1):.2f}  N={len(f_c)}")
+    print(f"\n  diff (stanne - crohot) = {diff_obs:+.2f}   CI95=[{ci_lo:+.2f}, {ci_hi:+.2f}]")
+    print(f"  Cohen's d              = {d:+.3f}")
+
+    if ci_lo > 0 or ci_hi < 0:
+        print("\n  -> Décalage fitness significatif entre les deux cartes")
+    else:
+        print("\n  -> CI inclut 0 — pas de décalage fitness établi")
+    print("  [Fitness distribution shift — pas de jugement de qualité carte]")
+
+
+# ── M3 — Interaction map × PC1 ───────────────────────────────────────────────
+
+def m3_interaction(
+    pc12_arr: np.ndarray,
+    fit_arr: np.ndarray,
+    map_arr: np.ndarray,
+    cids: list[str],
+    circ: dict,
+    rng: np.random.Generator,
+) -> None:
+    print(f"\n{SEP}")
+    print("M3 — INTERACTION map × PC1  (TD3, N=22 circuits)")
+    print(SEP)
+
+    pc1_c    = pc12_arr[:, 0] - pc12_arr[:, 0].mean()
+    d_crohot = (map_arr == "crohot").astype(float)
+
+    Xa = np.column_stack([np.ones(len(pc1_c)), pc1_c, d_crohot])
+    Xb = np.column_stack([np.ones(len(pc1_c)), pc1_c, d_crohot, pc1_c * d_crohot])
+    cond = np.linalg.cond(Xb)
+
+    ca = ols(Xa, fit_arr)
+    cb = ols(Xb, fit_arr)
+    r2_a     = r2_score(fit_arr, Xa @ ca)
+    r2_b     = r2_score(fit_arr, Xb @ cb)
+    delta_r2 = r2_b - r2_a
+    beta3    = float(cb[3])
+
+    # Bootstrap par groupe (unite = circuit)
+    strata_idx: dict[str, list[int]] = defaultdict(list)
+    for i, cid in enumerate(cids):
+        strata_idx[circ[cid]["map"]].append(i)
+
+    boot_b3  = np.zeros(N_BOOT)
+    boot_dr2 = np.zeros(N_BOOT)
+    for b in range(N_BOOT):
+        idx = []
+        for idxs in strata_idx.values():
+            idx.extend(rng.choice(idxs, size=len(idxs), replace=True).tolist())
+        idx = np.array(idx)
+        try:
+            pc1b = pc1_c[idx]
+            dcb  = d_crohot[idx]
+            fitb = fit_arr[idx]
+            Xab  = np.column_stack([np.ones(len(idx)), pc1b, dcb])
+            Xbb  = np.column_stack([np.ones(len(idx)), pc1b, dcb, pc1b * dcb])
+            r2ab = r2_score(fitb, Xab @ ols(Xab, fitb))
+            cbb  = ols(Xbb, fitb)
+            r2bb = r2_score(fitb, Xbb @ cbb)
+            boot_b3[b]  = cbb[3]
+            boot_dr2[b] = r2bb - r2ab
+        except Exception:
+            boot_b3[b] = boot_dr2[b] = np.nan
+
+    b3_lo,  b3_hi  = np.nanpercentile(boot_b3,  [2.5, 97.5])
+    dr2_lo, dr2_hi = np.nanpercentile(boot_dr2, [2.5, 97.5])
+
+    cond_warn = "  ⚠ WARN: mal conditionne" if cond > 100 else ""
+    print(f"\n  condition_number = {cond:.1f}{cond_warn}")
+    print(f"\n  Modèle A (main effects)  : R2={r2_a:.3f}")
+    print(f"  Modèle B (+interaction)  : R2={r2_b:.3f}")
+    print(f"  ΔR²                      = {delta_r2:+.4f}   CI95=[{dr2_lo:+.4f}, {dr2_hi:+.4f}]")
+    print(f"\n  β3 (interaction PC1c×crohot) = {beta3:+.4f}   CI95=[{b3_lo:+.4f}, {b3_hi:+.4f}]")
+
+    sig_b3  = b3_lo > 0 or b3_hi < 0
+    sig_dr2 = dr2_lo > 0.02
+
+    if sig_b3 and sig_dr2:
+        print("\n  -> Vrai domain shift structurel : pente PC1→fitness différente selon la carte")
+    elif sig_b3 or sig_dr2:
+        print("\n  -> Signal faible — évidence partielle d'interaction map×PC1")
+    else:
+        print("\n  -> ΔR² faible + CI[β3] couvre 0 : même manifold fonctionnel")
+        print("     domain shift = déplacement de centroïde (M1), pas de changement de structure")
+    print("  [Exploratoire — N=22, CI larges attendus]")
+
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+
+def main(csv_path: str) -> None:
+    print("=== Q3 analyze_map_effects.py — Domain Shift Test ===\n")
+    print(f"Charge {csv_path}")
+
+    circ, pc12_arr, fit_arr, cids, map_arr, evr = load_td3(csv_path)
+
+    n_s = int((map_arr == "stanne").sum())
+    n_c = int((map_arr == "crohot").sum())
+    print(f"  TD3 : {len(cids)} circuits  (stanne={n_s}, crohot={n_c})")
+    print(f"  Variance expliquée : PC1={evr[0]:.3f}  PC2={evr[1]:.3f}  "
+          f"({'PC2 fiable' if evr[1] > 0.05 else 'PC2 potentiellement bruite'})")
+
+    rng = np.random.default_rng(RNG_SEED)
+
+    m1_pc_distribution(pc12_arr, map_arr, rng)
+    m2_fitness_comparison(fit_arr, map_arr, rng)
+    m3_interaction(pc12_arr, fit_arr, map_arr, cids, circ, rng)
+
+    print(f"\n{SEP}")
+    print("Q3 domain shift terminé.")
 
 
 if __name__ == "__main__":

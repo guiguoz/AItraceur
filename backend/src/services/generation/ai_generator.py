@@ -51,6 +51,7 @@ class GenerationRequest:
     w_dist_override: Optional[float] = None  # override W_DIST pour expériences de calibration
     ga_seed: Optional[int] = None            # seed déterministe pour reproductibilité inter-runs
     w_diversity_mult: float = 1.0            # multiplicateur W_LEG_DIVERSITY pour expériences
+    latent_regime: Optional[str] = None     # régime latent cible (post-sélection LRI)
 
 
 @dataclass
@@ -224,6 +225,7 @@ class AIGenerator:
             w_dist_override=request.w_dist_override,
             ga_seed=request.ga_seed,
             w_diversity_mult=request.w_diversity_mult,
+            latent_regime=request.latent_regime,
         )
 
         # Initialiser le GA

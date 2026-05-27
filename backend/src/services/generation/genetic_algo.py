@@ -19,6 +19,11 @@ try:
 except Exception:
     _PATCH_SCORER_CLASS = None
 
+try:
+    from .lri_model import get_lri_model as _get_lri_model
+except Exception:
+    _get_lri_model = None  # type: ignore[assignment]
+
 if TYPE_CHECKING:
     from ..learning.ocad_patch_scorer import HeatmapCache
 
@@ -121,6 +126,12 @@ class GenerationConfig:
     # Multiplicateur sur W_LEG_DIVERSITY (défaut 1.0 = 4.0 × tags / 7.0).
     # Utilisation : collect_fitness_data.py --w_diversity_mult pour les expériences.
     w_diversity_mult: float = 1.0
+
+    # Régime latent cible (post-sélection LRI). Si spécifié, le circuit retourné
+    # est le meilleur candidat du régime parmi un pool diversifié top-20 + diversité PC.
+    # Valeurs : noms définis dans lri_baseline.json (ex: "regime_0", "regime_1").
+    # None = comportement GA standard inchangé.
+    latent_regime: Optional[str] = None
 
 
 @dataclass
@@ -912,6 +923,16 @@ class GeneticAlgorithm:
             except Exception as _e:
                 print(f"[intent_telemetry_error] {type(_e).__name__}: {_e}", flush=True)
 
+        # LRI post-sélection : choisit le meilleur circuit du régime cible parmi
+        # un pool diversifié. GA inchangé — sélection a posteriori uniquement.
+        if self.config.latent_regime:
+            best_lri = self._lri_select(
+                circuits=self._lri_diverse_pool(),
+                target_regime=self.config.latent_regime,
+            )
+            if best_lri is not None:
+                self.best_solution = best_lri
+
         return GenerationResult(
             circuits=self.population[:10],  # Top 10
             best_circuit=self.best_solution,
@@ -919,6 +940,101 @@ class GeneticAlgorithm:
             time_elapsed_seconds=elapsed,
             config=self.config,
         )
+
+    # ── LRI post-sélection ────────────────────────────────────────────────────
+
+    def _aggregate_circuit_features(self, circuit: Circuit) -> Optional[np.ndarray]:
+        """Calcule les 10 features moyennées sur les jambes du circuit.
+
+        Reuse _build_leg_cognitive_profile() -- meme computation que evaluate_fitness().
+        Retourne None si le circuit a < 2 postes ou si _seg_index absent.
+        """
+        if len(circuit.controls) < 2 or self._seg_index is None:
+            return None
+
+        feature_vecs = []
+        for i in range(len(circuit.controls) - 1):
+            result = self._build_leg_cognitive_profile(
+                circuit.controls[i][0], circuit.controls[i][1],
+                circuit.controls[i + 1][0], circuit.controls[i + 1][1],
+                self.config.heatmap_cache,
+            )
+            cog = result[0] if isinstance(result, tuple) else result
+            nav = cog.navigation_evidence
+            feature_vecs.append([
+                cog.parallel_affordance, cog.crossing_density, cog.exit_clarity,
+                cog.contour_crossing_guidance,
+                nav["HANDRAIL_FOLLOW"], nav["LINE_CROSSING"], nav["ATTACK_POINT"],
+                nav["DIRECT_RISK_RUN"], nav["RELIEF_CROSSING_GUIDANCE"], nav["SAFETY_RECOVERY"],
+            ])
+
+        if not feature_vecs:
+            return None
+        return np.mean(feature_vecs, axis=0)  # (10,)
+
+    def _lri_diverse_pool(self, top_k: int = 20, n_diverse: int = 10) -> List[Circuit]:
+        """Pool LRI : top-k fitness + n circuits diversifies geometriquement en espace PC.
+
+        Evite le biais d'un top-10 sur-converge (GA peut avoir converge localement).
+        """
+        lri = _get_lri_model() if _get_lri_model is not None else None
+        if lri is None:
+            return self.population[:top_k]
+
+        top = list(self.population[:top_k])
+
+        # Projeter les 50 meilleurs dans l'espace PC
+        pcs: List[Tuple[Circuit, np.ndarray]] = []
+        for c in self.population[:50]:
+            feats = self._aggregate_circuit_features(c)
+            if feats is not None:
+                pcs.append((c, lri.project(feats)))
+
+        if len(pcs) < n_diverse:
+            return top
+
+        selected = list(top)
+        top_set = set(id(c) for c in top)
+        selected_pcs = [pc for c, pc in pcs if id(c) in top_set]
+        candidates = [(c, pc) for c, pc in pcs if id(c) not in top_set]
+
+        for _ in range(min(n_diverse, len(candidates))):
+            if not candidates or not selected_pcs:
+                break
+            best_idx = max(
+                range(len(candidates)),
+                key=lambda i: min(
+                    float(np.linalg.norm(candidates[i][1] - sp)) for sp in selected_pcs
+                ),
+            )
+            c, pc = candidates.pop(best_idx)
+            selected.append(c)
+            selected_pcs.append(pc)
+
+        return selected
+
+    def _lri_select(
+        self, circuits: List[Circuit], target_regime: str
+    ) -> Optional[Circuit]:
+        """Post-sélection LRI : meilleur circuit du régime cible parmi le pool."""
+        lri = _get_lri_model() if _get_lri_model is not None else None
+        if lri is None or target_regime not in lri.available_regimes:
+            return None
+
+        candidates: List[Tuple[Circuit, float]] = []
+        for circuit in circuits:
+            features = self._aggregate_circuit_features(circuit)
+            if features is None:
+                continue
+            pc = lri.project(features)
+            if lri.assign_regime(pc) == target_regime:
+                candidates.append((circuit, circuit.fitness))
+
+        if not candidates:
+            return None
+        return max(candidates, key=lambda x: x[1])[0]
+
+    # ── Fin LRI ───────────────────────────────────────────────────────────────
 
     def _initialize_population(
         self,

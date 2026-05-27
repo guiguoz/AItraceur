@@ -2164,6 +2164,10 @@ def _circuit_impl(body: dict) -> dict:
             w_diversity_mult = float(_raw_wdiv)
         except (ValueError, TypeError):
             pass
+
+    _raw_latent = body.get("latent_regime")
+    latent_regime: Optional[str] = str(_raw_latent).strip() if _raw_latent else None
+
     _n_isom = sum(1 for cp in candidate_points if cp.get("isom"))
     print(f"[circuit] candidate_points: {len(candidate_points)} total, {_n_isom} avec isom", flush=True)
 
@@ -2219,6 +2223,7 @@ def _circuit_impl(body: dict) -> dict:
         w_dist_override=w_dist_override,
         ga_seed=ga_seed,
         w_diversity_mult=w_diversity_mult,
+        latent_regime=latent_regime,
     )
 
     # ── HeatmapCache CNN (même logique que _sprint_impl) ──────────────────────
@@ -4275,6 +4280,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
         map_scale=map_scale,
         ocad_line_segments=ocad_line_segments_sprint,
         segment_index=_seg_index_sprint,
+        latent_regime=str(body.get("latent_regime")).strip() if body.get("latent_regime") else None,
     )
 
     print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ GA generate ({len(candidate_points)} candidats)...", flush=True)

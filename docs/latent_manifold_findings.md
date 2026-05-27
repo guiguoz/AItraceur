@@ -195,11 +195,52 @@ sur la distribution des longueurs de jambes réelles.
 
 ---
 
+## 9. Expérience W_DIST — null result informatif (2026-05-27)
+
+### Protocole
+
+Trois runs TD5 uniquement (crohot, N=12 circuits chacun), seeds déterministes par job
+(`hash(map, td, local_idx) % 2^31`). Seul `W_DIST` varie.
+
+| Run | W_DIST | Dataset |
+|-----|--------|---------|
+| low | 20 | `intent_legs_wdist20_td5.csv` |
+| baseline | 40 | `intent_legs_post_fix_full.csv` (TD5) |
+| high | 60 | `intent_legs_wdist60_td5.csv` |
+
+### Résultats
+
+| Métrique | W20 | **W40** | W60 |
+|----------|-----|---------|-----|
+| fitness mean | 13.86 | **28.16** | 26.64 |
+| fitness SD | 31.78 | **22.34** | 36.68 |
+| fitness CV | 2.293 | **0.793** | 1.377 |
+| penalty_b mean | 0.1085 | 0.0978 | **0.0857** |
+| score_h mean | 0.6154 | 0.5919 | **0.6519** |
+| score_d mean | 0.4545 | 0.4829 | 0.4843 |
+
+### Conclusion
+
+**W_DIST=40 est au sweet spot.** Le CV suit une courbe en U :
+
+- **W20 (sous-contraint)** : CV=2.29 — pression distance insuffisante, le GA explore sans
+  contrainte → instabilité maximale. `penalty_b` monte paradoxalement (+11%) : sans pression
+  forte, le GA ne converge pas vers la cible distance.
+- **W40 (équilibré)** : CV=0.793 — paysage le plus stable, fitness moyenne maximale.
+- **W60 (sur-contraint)** : CV=1.38 — vallée trop étroite → distribution bimodale (circuits
+  proches de la cible vs circuits loin). `penalty_b` plus faible mais fitness instable.
+
+**Null result mais informatif** : W_DIST n'est pas le levier à toucher. La calibration actuelle
+est robuste. Le prochain levier est la diversité (terme E) ou `W_LEG_PROFILE` (terme L) en
+régime naturel — terme L récemment réactivé, régime naturel à mesurer avant toute recalibration.
+
+---
+
 ## 7. Next steps
 
 **Court terme** — TD5 calibration experiments  
-Faire varier `W_DIST`, `W_CONFORM`, diversité — mesurer l'impact sur les slopes et le CV fitness.
-Partir de la baseline v2 (L vivant) — ne pas mélanger les deux régimes.
+~~Faire varier `W_DIST`~~ — **✅ fait (2026-05-27), null result mais informatif** (voir section 9).  
+Prochains leviers : `W_LEG_PROFILE` (terme L) en régime naturel, diversité (terme E).
 
 **Moyen terme** — Latent steering  
 Évaluer si le manifold peut être utilisé comme variable de contrôle générationnelle : orienter le GA vers des régions spécifiques du manifold pour contrôler explicitement le profil de circuit généré.

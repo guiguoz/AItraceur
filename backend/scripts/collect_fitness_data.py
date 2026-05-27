@@ -35,6 +35,9 @@ except ImportError:
 OCD_PATHS = {
     "stanne": r"E:\RunningRaid\2024-2025\entrainement 020325\La Route de Ste Anne II_v4.ocd",
     "crohot": r"E:\RunningRaid\Cartographie\fichiers OCAD et jpg\O12_2019-05-25_Grand-Crohot-Nord_ech-15000.ocd10.ocd",
+    # EXTERNAL VALIDATION — remplacer par les vrais chemins avant de lancer --only-map
+    # "carte3": r"C:\...\carte3.ocd",
+    # "carte4": r"C:\...\carte4.ocd",
 }
 
 DATASETS = [
@@ -42,6 +45,13 @@ DATASETS = [
     {"name": "crohot_td3", "map": "crohot", "td": 3, "n_each": 12},
     {"name": "crohot_td4", "map": "crohot", "td": 4, "n_each": 12},
     {"name": "crohot_td5", "map": "crohot", "td": 5, "n_each": 12},
+    # EXTERNAL VALIDATION — décommenter et adapter avec les vrais noms de cartes
+    # {"name": "carte3_td3", "map": "carte3", "td": 3, "n_each": 12},
+    # {"name": "carte3_td4", "map": "carte3", "td": 4, "n_each": 12},
+    # {"name": "carte3_td5", "map": "carte3", "td": 5, "n_each": 12},
+    # {"name": "carte4_td3", "map": "carte4", "td": 3, "n_each": 12},
+    # {"name": "carte4_td4", "map": "carte4", "td": 4, "n_each": 12},
+    # {"name": "carte4_td5", "map": "carte4", "td": 5, "n_each": 12},
 ]
 
 DISTANCES    = {3: 4000, 4: 6000,  5: 9000}
@@ -357,25 +367,35 @@ def write_v2(circuit_map: dict, output_csv: pathlib.Path = OUTPUT_CSV) -> int:
 
 async def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--only",   default=None, help="nom du groupe à collecter (ex: crohot_td5)")
-    parser.add_argument("--output", default=None, help="chemin CSV de sortie")
+    parser.add_argument("--only",      default=None, help="nom du groupe à collecter (ex: crohot_td5)")
+    parser.add_argument("--only-map",  default=None, dest="only_map",
+                        help="collecter tous les groupes TD3+TD4+TD5 pour cette carte (ex: carte3)")
+    parser.add_argument("--output",    default=None, help="chemin CSV de sortie")
     parser.add_argument("--w_dist", type=float, default=None,
                         help="override W_DIST (défaut: 40.0). Ex: --w_dist 20")
     parser.add_argument("--w_diversity_mult", type=float, default=1.0,
                         help="multiplicateur W_LEG_DIVERSITY (défaut=1.0). Ex: --w_diversity_mult 0.5")
     args = parser.parse_args()
 
-    datasets = [d for d in DATASETS if args.only is None or d["name"] == args.only]
+    datasets = [d for d in DATASETS if
+                (args.only is None or d["name"] == args.only) and
+                (args.only_map is None or d["map"] == args.only_map)]
     output_csv = pathlib.Path(args.output) if args.output else OUTPUT_CSV
 
     if not datasets:
-        print(f"ERREUR: aucun groupe correspondant à --only '{args.only}'")
-        print(f"Groupes disponibles: {[d['name'] for d in DATASETS]}")
+        if args.only_map:
+            print(f"ERREUR: aucun groupe pour --only-map '{args.only_map}'")
+            print(f"Cartes disponibles: {list({d['map'] for d in DATASETS})}")
+        else:
+            print(f"ERREUR: aucun groupe correspondant à --only '{args.only}'")
+            print(f"Groupes disponibles: {[d['name'] for d in DATASETS]}")
         sys.exit(1)
 
     print("=== A.8b collect_fitness_data.py ===\n")
     if args.only:
         print(f"Mode --only : {args.only}  →  {output_csv}")
+    if args.only_map:
+        print(f"Mode --only-map : {args.only_map}  ({len(datasets)} groupes)  →  {output_csv}")
     if args.w_dist is not None:
         print(f"W_DIST override : {args.w_dist}  (défaut=40.0)")
     if args.w_diversity_mult != 1.0:

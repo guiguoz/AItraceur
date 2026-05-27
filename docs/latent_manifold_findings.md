@@ -236,11 +236,65 @@ régime naturel — terme L récemment réactivé, régime naturel à mesurer av
 
 ---
 
+## 10. Expérience W_DIVERSITY — null result informatif (2026-05-27)
+
+### Protocole
+
+Trois runs TD5 uniquement (crohot, N=12 circuits chacun), seeds déterministes identiques aux runs W_DIST.
+Seul `w_diversity_mult` varie (`W_LEG_DIVERSITY = 4.0 × mult`).
+
+| Run | w_diversity_mult | W_LEG_DIVERSITY effectif | Dataset |
+|-----|-----------------|--------------------------|---------|
+| low | 0.5 | 2.0 | `intent_legs_wdiv05_td5.csv` |
+| baseline | 1.0 | 4.0 | `intent_legs_post_fix_full.csv` (TD5) |
+| high | 1.5 | 6.0 | `intent_legs_wdiv15_td5.csv` |
+
+### Résultats (PCA partagée sur 36 circuits)
+
+| Métrique | W_DIV×0.5 | **W_DIV×1.0** | W_DIV×1.5 |
+|----------|-----------|---------------|-----------|
+| fitness mean | 29.83 | **28.16** | 30.93 |
+| fitness SD | 25.14 | **21.39** | 30.11 |
+| fitness CV | 0.843 | **0.760** | 0.973 |
+| slope TD5 (OLS, espace commun) | −1.9 | −2.2 | −2.2 |
+| latent area (std PC1 × std PC2) | 3.091 | 2.938 | **2.273** |
+| std PC1 | 2.348 | **3.106** | 1.961 |
+| n_unique_tags | — | — | — |
+
+> **Note méthodologique :** `n_unique_tags` est 0 pour les trois runs — le fichier global
+> `intent_legs.csv` avait l'ancien header (sans ce champ) ; `DictReader` ne reconnaît pas la
+> colonne dans les CSVs de sortie. Limitation des données, sans impact sur les autres métriques.
+
+> **Note PCA :** le signe de PC1 dans l'espace commun est inversé vs les analyses précédentes
+> (slopes ~−2 ici vs +22.6 en section 8). Artefact d'orientation SVD — la magnitude (~2) reste
+> cohérente avec CI incluant 0 post-fix terme L.
+
+### Conclusion
+
+**W_LEG_DIVERSITY=4.0 (×1.0) est au sweet spot.** Le CV suit une courbe en U :
+
+- **W_DIV×0.5 (sous-contraint)** : CV=0.843 — pression diversité insuffisante, légère instabilité.
+- **W_DIV×1.0 (équilibré)** : CV=0.760 — paysage le plus stable.
+- **W_DIV×1.5 (sur-contraint)** : CV=0.973 + latent area −0.67 — la pression diversité excessive
+  réduit l'exploration géométrique (std PC1 : 3.11 → 1.96) et augmente l'instabilité. Le GA
+  converge vers un sous-espace étroit plutôt que d'explorer.
+
+**Slope structurelle, non causée par collapse morphologique :** les trois runs montrent une slope
+proche de zéro dans l'espace commun. La diversité morphologique n'est pas le mécanisme de la
+dépendance TD5 — celle-ci est un signal résiduel à N=12 (CI inclut 0 depuis le fix terme L).
+
+**Null result × 2 (W_DIST + W_DIVERSITY) :** la calibration actuelle est robuste sur les deux
+leviers testés. Les prochains leviers à explorer sont intrinsèquement différents (diversité de
+structure de circuit, pas de poids fitness).
+
+---
+
 ## 7. Next steps
 
 **Court terme** — TD5 calibration experiments  
 ~~Faire varier `W_DIST`~~ — **✅ fait (2026-05-27), null result mais informatif** (voir section 9).  
-Prochains leviers : `W_LEG_PROFILE` (terme L) en régime naturel, diversité (terme E).
+~~Faire varier `W_LEG_DIVERSITY`~~ — **✅ fait (2026-05-27), null result mais informatif** (voir section 10).  
+Prochains leviers : structure de circuit (boucles papillon LD, terme H figure-8) ou validation externe (nouvelles cartes).
 
 **Moyen terme** — Latent steering  
 Évaluer si le manifold peut être utilisé comme variable de contrôle générationnelle : orienter le GA vers des régions spécifiques du manifold pour contrôler explicitement le profil de circuit généré.

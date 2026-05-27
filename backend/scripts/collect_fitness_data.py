@@ -63,6 +63,7 @@ _GLOBAL_FIELDS = [
     "HANDRAIL_FOLLOW", "LINE_CROSSING", "ATTACK_POINT",
     "DIRECT_RISK_RUN", "RELIEF_CROSSING_GUIDANCE", "SAFETY_RECOVERY",
     "score_a", "penalty_b", "score_d", "score_h",
+    "n_unique_tags",
 ]
 V2_FIELDS = ["map_name"] + _GLOBAL_FIELDS
 
@@ -184,6 +185,7 @@ def _body(
     local_idx: int,
     segment_cache_id: str | None = None,
     w_dist: float | None = None,
+    w_diversity_mult: float = 1.0,
 ) -> dict:
     body: dict = {
         "bounding_box":    bbox,
@@ -195,6 +197,7 @@ def _body(
         "num_variants":    1,
         "force_mode":      "forest",
         "ga_seed":         _job_seed(map_name, td, local_idx),
+        "w_diversity_mult": w_diversity_mult,
     }
     if segment_cache_id:
         body["segment_cache_id"] = segment_cache_id
@@ -232,11 +235,12 @@ async def _one(
     map_name: str,
     segment_cache_id: str | None = None,
     w_dist: float | None = None,
+    w_diversity_mult: float = 1.0,
 ) -> bool:
     try:
         async with session.post(
             f"{BASE_URL}/api/v1/generation/generate-circuit",
-            json=_body(bbox, td, map_name, idx, segment_cache_id, w_dist),
+            json=_body(bbox, td, map_name, idx, segment_cache_id, w_dist, w_diversity_mult),
             timeout=aiohttp.ClientTimeout(total=15),
         ) as resp:
             if resp.status != 202:
@@ -290,20 +294,22 @@ async def _run_group(
     session: aiohttp.ClientSession,
     segment_cache_id: str | None = None,
     w_dist: float | None = None,
+    w_diversity_mult: float = 1.0,
 ) -> set:
     name, td, n, map_name = group["name"], group["td"], group["n_each"], group["map"]
     w_tag = f"  W_DIST={w_dist}" if w_dist is not None else ""
+    wdiv_tag = f"  W_DIV_MULT={w_diversity_mult}" if w_diversity_mult != 1.0 else ""
     print(f"\n{'=' * 50}")
     print(f"Groupe {name} : {n} circuits TD{td}"
           + (f" (cache {segment_cache_id[:8]})" if segment_cache_id else " [no OCAD cache]")
-          + w_tag)
+          + w_tag + wdiv_tag)
 
     before = _snapshot(GLOBAL_CSV)
     sem = asyncio.Semaphore(MAX_PARALLEL)
 
     async def bounded(idx: int) -> bool:
         async with sem:
-            return await _one(session, bbox, td, idx, map_name, segment_cache_id, w_dist)
+            return await _one(session, bbox, td, idx, map_name, segment_cache_id, w_dist, w_diversity_mult)
 
     results = await asyncio.gather(*[bounded(i) for i in range(n)])
     ok = sum(results)
@@ -355,6 +361,8 @@ async def main() -> None:
     parser.add_argument("--output", default=None, help="chemin CSV de sortie")
     parser.add_argument("--w_dist", type=float, default=None,
                         help="override W_DIST (défaut: 40.0). Ex: --w_dist 20")
+    parser.add_argument("--w_diversity_mult", type=float, default=1.0,
+                        help="multiplicateur W_LEG_DIVERSITY (défaut=1.0). Ex: --w_diversity_mult 0.5")
     args = parser.parse_args()
 
     datasets = [d for d in DATASETS if args.only is None or d["name"] == args.only]
@@ -370,6 +378,8 @@ async def main() -> None:
         print(f"Mode --only : {args.only}  →  {output_csv}")
     if args.w_dist is not None:
         print(f"W_DIST override : {args.w_dist}  (défaut=40.0)")
+    if args.w_diversity_mult != 1.0:
+        print(f"W_DIVERSITY mult : {args.w_diversity_mult}  (défaut=1.0 → W_LEG_DIV={4.0 * args.w_diversity_mult:.1f})")
 
     # Healthcheck
     try:
@@ -423,7 +433,7 @@ async def main() -> None:
             map_name = group["map"]
             bbox = bboxes[map_name]
             seg_id = cache_ids.get(map_name)
-            new_ids = await _run_group(group, bbox, session, seg_id, args.w_dist)
+            new_ids = await _run_group(group, bbox, session, seg_id, args.w_dist, args.w_diversity_mult)
             for cid in new_ids:
                 circuit_map[cid] = map_name
 

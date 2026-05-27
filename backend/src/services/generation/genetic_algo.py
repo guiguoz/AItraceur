@@ -118,6 +118,10 @@ class GenerationConfig:
     # Utilisation : collect_fitness_data.py pour garantir la reproductibilité inter-runs.
     ga_seed: Optional[int] = None
 
+    # Multiplicateur sur W_LEG_DIVERSITY (défaut 1.0 = 4.0 × tags / 7.0).
+    # Utilisation : collect_fitness_data.py --w_diversity_mult pour les expériences.
+    w_diversity_mult: float = 1.0
+
 
 @dataclass
 class GenerationResult:
@@ -2273,7 +2277,7 @@ class GeneticAlgorithm:
         # Récompense les circuits qui mélangent route choice, main courante et lecture
         # technique. Neutre (W=0) pour TD ≤ 2 — trop complexe pour les circuits enfants.
         # Ablation study Phase 0 confirme l'utilité avant d'augmenter le poids.
-        W_LEG_DIVERSITY = 0.0 if (_td_level <= 2 or config.ablation_disable_leg_diversity) else 4.0
+        W_LEG_DIVERSITY = 0.0 if (_td_level <= 2 or config.ablation_disable_leg_diversity) else 4.0 * config.w_diversity_mult
         leg_diversity_bonus = 0.0
         if W_LEG_DIVERSITY > 0:
             _n_legs = len(controls) - 1
@@ -2347,6 +2351,7 @@ class GeneticAlgorithm:
                 "HANDRAIL_FOLLOW", "LINE_CROSSING", "ATTACK_POINT",
                 "DIRECT_RISK_RUN", "RELIEF_CROSSING_GUIDANCE", "SAFETY_RECOVERY",
                 "score_a", "penalty_b", "score_d", "score_h",
+                "n_unique_tags",
             ]
             with open(_leg_csv_path, "a", newline="", encoding="utf-8") as _lf:
                 _lw = _csv2.DictWriter(_lf, fieldnames=_leg_fields)
@@ -2375,6 +2380,7 @@ class GeneticAlgorithm:
                         "penalty_b":                round(float(dist_penalty), 4),
                         "score_d":                  round(float(rhythm), 4),
                         "score_h":                  round(float(shape_score), 4),
+                        "n_unique_tags":            len(_all_tags) if W_LEG_DIVERSITY > 0 else 0,
                     })
 
         return _total_fitness

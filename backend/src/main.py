@@ -2157,6 +2157,13 @@ def _circuit_impl(body: dict) -> dict:
             ga_seed = int(_raw_seed)
         except (ValueError, TypeError):
             pass
+    _raw_wdiv = body.get("w_diversity_mult")
+    w_diversity_mult: float = 1.0
+    if _raw_wdiv is not None:
+        try:
+            w_diversity_mult = float(_raw_wdiv)
+        except (ValueError, TypeError):
+            pass
     _n_isom = sum(1 for cp in candidate_points if cp.get("isom"))
     print(f"[circuit] candidate_points: {len(candidate_points)} total, {_n_isom} avec isom", flush=True)
 
@@ -2211,6 +2218,7 @@ def _circuit_impl(body: dict) -> dict:
         segment_index=_seg_index_circuit,
         w_dist_override=w_dist_override,
         ga_seed=ga_seed,
+        w_diversity_mult=w_diversity_mult,
     )
 
     # ── HeatmapCache CNN (même logique que _sprint_impl) ──────────────────────

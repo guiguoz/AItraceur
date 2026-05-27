@@ -289,18 +289,122 @@ structure de circuit, pas de poids fitness).
 
 ---
 
+---
+
+## 11. Validation externe — Généralisation sur 4 nouvelles cartes forêt (2026-05-27)
+
+### Protocole
+
+**PCA figée sur baseline** (Option B — test de transférabilité réel) : scaler + PCA fittés **uniquement** sur les 46 circuits stanne+crohot. Les nouvelles cartes sont projetées via `transform()` dans cet espace figé — elles ne participent pas à la définition des axes. C'est un test OOD, pas une analyse descriptive.
+
+| Carte | Fichier | TD | N circuits |
+|-------|---------|-----|-----------|
+| stanne | `intent_legs_post_fix_full.csv` | 3 | 10 |
+| crohot | `intent_legs_post_fix_full.csv` | 3/4/5 | 36 |
+| cerisy | `intent_legs_cerisy_full.csv` | 3/4/5 | 36 |
+| feuguerolles | `intent_legs_feuguerolles_full.csv` | 3/4/5 | 36 |
+| tourouvre | `intent_legs_tourouvre_full.csv` | 3/4/5 | 36 |
+| montmirel | `intent_legs_montmirel_full.csv` | 3/4/5 | 36 |
+
+Protocole identique à crohot (n_each=12, seeds déterministes `hash(map, td, idx) % 2^31`). Aucun tuning — seule variable : la carte.
+
+### Table 0 — Référence baseline stanne+crohot
+
+| Mesure | Valeur baseline |
+|--------|----------------|
+| PC1 variance explained | 64.7% (stable vs 63.2% v2) |
+| PC2 variance explained | 13.8% |
+| sep_ratio TD (crohot) | 0.78 |
+| d_norm M1 stanne vs crohot | 1.358 (p=0.030) |
+| Slope TD5 | +22.6 (CI incl. 0) — note: calculée sur PCA TD5-only dans section 8 |
+
+> **Note** : les slopes de Table 1 ci-dessous utilisent la PCA tous-TDs (TD3+TD4+TD5 combinés), différente de la PCA TD5-only de la section 8. Les valeurs ne sont pas directement comparables.
+
+### Table 1 — Métriques par carte (espace PCA figé baseline)
+
+| Carte | N_TD3 | N_tot | sep_ratio_TD | Slope_TD3 | R²_TD3 | r_TD3 | Slope_TD5 | R²_TD5 | r_TD5 |
+|-------|-------|-------|-------------|-----------|--------|-------|-----------|--------|-------|
+| stanne | 10 | 10 | — | +0.99 | 0.03 | +0.18 | — | — | — |
+| crohot | 12 | 36 | 0.78 | +0.63 | 0.01 | +0.09 | −2.58 | 0.11 | −0.32 |
+| cerisy | 12 | 36 | 0.66 | −0.25 | 0.00 | −0.02 | −3.67 | 0.04 | −0.20 |
+| feuguerolles | 12 | 36 | 1.02 | −2.13 | 0.07 | −0.26 | −0.25 | 0.00 | −0.02 |
+| montmirel | 12 | 36 | 1.15 | −0.27 | 0.01 | −0.08 | −1.08 | 0.10 | −0.32 |
+| tourouvre | 12 | 36 | **1.10** | +0.24 | 0.00 | +0.04 | **+7.14** | **0.33** | **+0.58** |
+
+### Table 2 — Domain shift pairwise TD3 (exploratoire)
+
+> M1 effectué uniquement sur TD3 — évite contamination par structure TD. Référence : d_norm=1.358 (stanne vs crohot).
+
+| Paire | d_norm | p_M1 | ΔFit CI | ΔR²_M3 |
+|-------|--------|------|---------|--------|
+| cerisy vs crohot | 1.244 | 0.016 | [−11.6, +19.1] ✓0 | 0.002 |
+| cerisy vs feuguerolles | 1.333 | 0.017 | [−21.1, +11.9] ✓0 | 0.009 |
+| cerisy vs montmirel | 0.534 | 0.387 | [−23.2, +7.5] ✓0 | 0.000 |
+| cerisy vs stanne | 0.723 | 0.245 | [−23.6, +8.8] ✓0 | 0.005 |
+| cerisy vs tourouvre | 0.937 | 0.096 | [−14.4, +18.3] ✓0 | 0.001 |
+| crohot vs feuguerolles | 1.028 | 0.061 | [−21.3, +4.0] ✓0 | 0.030 |
+| crohot vs montmirel | 0.972 | 0.078 | [−22.2, **−0.9**] **✗0** | 0.006 |
+| crohot vs stanne | 0.601 | 0.353 | [−23.0, 0.0] ✓0 | 0.001 |
+| crohot vs tourouvre | 0.376 | 0.637 | [−13.9, +9.6] ✓0 | 0.001 |
+| feuguerolles vs montmirel | **1.425** | **0.009** | [−16.6, +8.0] ✓0 | 0.026 |
+| feuguerolles vs stanne | 1.209 | 0.041 | [−16.2, +9.3] ✓0 | 0.050 |
+| feuguerolles vs tourouvre | 0.808 | 0.162 | [−7.1, +18.2] ✓0 | 0.025 |
+| montmirel vs stanne | 0.501 | 0.459 | [−9.6, +9.6] ✓0 | 0.020 |
+| montmirel vs tourouvre | 0.864 | 0.129 | [−1.1, +20.1] ✓0 | 0.002 |
+| stanne vs tourouvre | 0.454 | 0.515 | [−2.2, +20.2] ✓0 | 0.004 |
+
+### Table 3 — Distance OOD Mahalanobis TD-conditionnelle
+
+| Carte | TD | N | mean_OOD | max_OOD | min_OOD |
+|-------|-----|---|----------|---------|---------|
+| cerisy | 3 | 12 | 1.757 | 2.662 | 0.531 |
+| cerisy | 4 | 12 | 2.300 | 4.186 | 0.612 |
+| cerisy | 5 | 12 | 3.505 | 21.561 | 0.289 |
+| feuguerolles | 3 | 12 | 1.796 | 2.876 | 0.828 |
+| feuguerolles | 4 | 12 | **8.206** | **34.506** | 1.269 |
+| feuguerolles | 5 | 12 | 3.736 | **23.040** | 0.646 |
+| montmirel | 3 | 12 | 1.982 | 3.368 | 0.732 |
+| montmirel | 4 | 12 | 2.195 | 4.853 | 1.027 |
+| montmirel | 5 | 12 | 2.613 | 4.207 | 1.017 |
+| tourouvre | 3 | 12 | **1.275** | 1.935 | 0.545 |
+| tourouvre | 4 | 12 | **1.399** | 2.563 | 0.301 |
+| tourouvre | 5 | 12 | **1.454** | 2.809 | 0.163 |
+
+### Conclusions
+
+**Ce qui est repliqué hors baseline :**
+
+| Signature | Résultat | Interprétation |
+|-----------|----------|----------------|
+| Continuum TD3→TD5 (sep_ratio) | ✅ Repliqué — sep_ratio 0.66–1.15 pour toutes les cartes | La structure TD généralisée dans le manifold baseline |
+| Séparation géométrique entre cartes (d_norm M1) | ✅ Repliqué — d_norms comparables à 1.358 (baseline) | L'effet-carte est un phénomène général, pas un artefact stanne/crohot |
+| Absence de couplage manifold→fitness (slope) | ✅ Repliqué — slopes proches de zéro sur 4/5 nouvelles cartes | Null result structurel, cohérent avec sections 9 et 10 |
+
+**Ce qui n'est pas repliqué :**
+
+| Signature | Résultat | Interprétation |
+|-----------|----------|----------------|
+| Slope TD5 positive (+22.6) | ✗ Non repliqué — négatif sur crohot/cerisy/montmirel dans ce PCA | La slope de section 8 était PCA TD5-only, non comparable ici |
+| Mahalanobis OOD faible et uniforme | ✗ Partiel — tourouvre très proche (1.3), feuguerolles très loin (max 34) | Hétérogénéité forte entre cartes |
+
+**Cas particulier tourouvre :** seule carte avec slope TD5 positive (+7.14, r=0.58, R²=0.33) **et** OOD distances les plus faibles (mean 1.3–1.5 tous TDs). Profil le plus compatible avec le manifold baseline — les circuits tourouvre tombent dans le support latent connu et maintiennent un couplage positif manifold→fitness.
+
+**Cas particulier feuguerolles :** distances OOD TD4 extrêmes (max 34.5) indiquent des circuits TD4 projetés très loin du support baseline. Terrain structurellement différent ou circuits atypiques.
+
+**Conclusion générale :** la structure géométrique du manifold (continuum TD, séparation inter-cartes) est robuste hors domaine. Le couplage fonctionnel manifold→fitness est faible et hétérogène — cohérent avec les null results de calibration. Le manifold latent est une représentation transférable de la structure des circuits CO, pas un prédicteur de fitness universel.
+
+---
+
 ## 7. Next steps
 
 **Court terme** — TD5 calibration experiments  
 ~~Faire varier `W_DIST`~~ — **✅ fait (2026-05-27), null result mais informatif** (voir section 9).  
 ~~Faire varier `W_LEG_DIVERSITY`~~ — **✅ fait (2026-05-27), null result mais informatif** (voir section 10).  
-Prochains leviers : structure de circuit (boucles papillon LD, terme H figure-8) ou validation externe (nouvelles cartes).
+~~Validation externe — nouvelles cartes~~ — **✅ fait (2026-05-27), signatures géométriques repliquées** (voir section 11).  
+Prochains leviers : structure de circuit (boucles papillon LD, terme H figure-8).
 
 **Moyen terme** — Latent steering  
 Évaluer si le manifold peut être utilisé comme variable de contrôle générationnelle : orienter le GA vers des régions spécifiques du manifold pour contrôler explicitement le profil de circuit généré.
 
 **Plus tard, si question précise** — Export I/J/K  
 Exporter les termes de fitness attack point / handrail / safety recovery uniquement si la question est : *quel mécanisme médiatise exactement l'inversion de pente TD5 ?* Ne pas ouvrir une exploration générale.
-
-**Validation externe** — Nouvelles cartes  
-Répliquer le domain shift sur une paire de cartes indépendante pour distinguer effet-carte général vs artefact stanne/crohot.

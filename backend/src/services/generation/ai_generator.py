@@ -48,6 +48,8 @@ class GenerationRequest:
     # Segments LineString OCAD [{p0, p1, isom_code}] — termes N/O/P forêt.
     segment_index: Optional[object] = field(default=None, repr=False)
     # SegmentSpatialIndex pré-construit (depuis preprocess-ocad) — évite la reconstruction en GA.
+    w_dist_override: Optional[float] = None  # override W_DIST pour expériences de calibration
+    ga_seed: Optional[int] = None            # seed déterministe pour reproductibilité inter-runs
 
 
 @dataclass
@@ -218,6 +220,8 @@ class AIGenerator:
             map_scale=request.map_scale,
             ocad_line_segments=request.ocad_line_segments,
             segment_index=request.segment_index,
+            w_dist_override=request.w_dist_override,
+            ga_seed=request.ga_seed,
         )
 
         # Initialiser le GA

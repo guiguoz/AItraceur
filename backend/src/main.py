@@ -2143,6 +2143,20 @@ def _circuit_impl(body: dict) -> dict:
             map_scale = _s if 1000 <= _s <= 50000 else None
         except (ValueError, TypeError):
             pass
+    _raw_w_dist = body.get("w_dist_override")
+    w_dist_override: Optional[float] = None
+    if _raw_w_dist is not None:
+        try:
+            w_dist_override = float(_raw_w_dist)
+        except (ValueError, TypeError):
+            pass
+    _raw_seed = body.get("ga_seed")
+    ga_seed: Optional[int] = None
+    if _raw_seed is not None:
+        try:
+            ga_seed = int(_raw_seed)
+        except (ValueError, TypeError):
+            pass
     _n_isom = sum(1 for cp in candidate_points if cp.get("isom"))
     print(f"[circuit] candidate_points: {len(candidate_points)} total, {_n_isom} avec isom", flush=True)
 
@@ -2195,6 +2209,8 @@ def _circuit_impl(body: dict) -> dict:
         map_scale=map_scale,
         ocad_line_segments=ocad_line_segments,
         segment_index=_seg_index_circuit,
+        w_dist_override=w_dist_override,
+        ga_seed=ga_seed,
     )
 
     # ── HeatmapCache CNN (même logique que _sprint_impl) ──────────────────────

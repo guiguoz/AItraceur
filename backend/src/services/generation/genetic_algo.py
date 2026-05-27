@@ -110,6 +110,14 @@ class GenerationConfig:
     # Timeout en secondes pour la boucle évolutionnaire (évite les boucles infinies)
     timeout_seconds: float = 90.0
 
+    # Override expérimental du poids W_DIST (terme B). Si None : valeur par défaut (40.0).
+    # Utilisation : collect_fitness_data.py --w_dist pour les expériences de calibration.
+    w_dist_override: Optional[float] = None
+
+    # Seed déterministe pour le RNG (random + numpy). Si None : stochastique.
+    # Utilisation : collect_fitness_data.py pour garantir la reproductibilité inter-runs.
+    ga_seed: Optional[int] = None
+
 
 @dataclass
 class GenerationResult:
@@ -816,6 +824,10 @@ class GeneticAlgorithm:
         Returns:
             GenerationResult avec les circuits générés
         """
+        if self.config.ga_seed is not None:
+            random.seed(self.config.ga_seed)
+            np.random.seed(self.config.ga_seed % (2 ** 31))
+
         import time as _time_ga
         start_time = datetime.now()
         _t0_ga = _time_ga.time()
@@ -2291,6 +2303,8 @@ class GeneticAlgorithm:
             W_ANGLE = 1.0    # multiplicateur × 20 par dog-leg → éliminatoire
             W_RHYTHM = 15.0
             _density_mult = 50.0
+        if config.w_dist_override is not None:
+            W_DIST = config.w_dist_override
         W_SHAPE = 15.0  # forme géométrique — anti-Z/spirale/accordéon (H5 actif)
         W_LEG_PROFILE = 8.0  # conformité longueur jambes au profil format IOF
 

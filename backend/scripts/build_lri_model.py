@@ -7,16 +7,14 @@ Usage:
   python backend/scripts/build_lri_model.py [baseline_csv]
   # Default: backend/debug/intent_legs_post_fix_full.csv
 
-Sorties:
-  backend/data/lri_baseline.json
-
 Contraintes architecturales :
 - PCA + scaler fites sur baseline uniquement
 - pca_components deja flippe (pc1_sign_flip applique une seule fois ici)
-- cluster_centroids_pc = centroids 10D projetes dans PC space (pour runtime)
-- cluster_centroids_raw = centroids en features brutes (pour diagnostic)
-- regime_names : labels provisoires regime_0/regime_1 -- a renommer apres Phase A
+- cluster_centroids_pc = centroids tries par PC1 desc, projetes dans PC space (runtime)
+- cluster_centroids_raw = centroids en features brutes (diagnostic/interpretation)
+- Noms semantiques figes : high PC1 = "open", low PC1 = "handrail" (pour k=2)
 - k selectionne par silhouette sur 10D scaled baseline
+- semantic_anchor valide au chargement dans lri_model.py
 """
 
 from __future__ import annotations
@@ -28,6 +26,7 @@ import pathlib
 from collections import defaultdict
 
 import numpy as np
+import sklearn
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 
@@ -44,6 +43,10 @@ K_RANGE = [2, 3, 4, 5]
 
 DEFAULT_CSV = "backend/debug/intent_legs_post_fix_full.csv"
 OUTPUT_PATH = pathlib.Path("backend/data/lri_baseline.json")
+
+# Noms semantiques pour k=2 : high PC1 = "open" (azimut, peu de guidance),
+#                              low PC1  = "handrail" (longeant, guidance forte)
+_SEMANTIC_NAMES_K2 = ["open", "handrail"]
 
 
 # -- Chargement / agregation --------------------------------------------------
@@ -107,7 +110,8 @@ def main() -> None:
     _, S, Vt = np.linalg.svd(X_bl_scaled, full_matrices=False)
     Vt2 = Vt[:2].copy()
     total_var = float((S ** 2).sum())
-    pc1_var_pct = S[0] ** 2 / total_var * 100
+    pc1_var = float(S[0] ** 2 / total_var)
+    pc2_var = float(S[1] ** 2 / total_var)
 
     # Orientation canonique PC1 -- appliquee ici, stockee dans pca_components
     baseline_tds = np.array([c["td"] for c in baseline_circuits])
@@ -118,9 +122,7 @@ def main() -> None:
     if pc1_sign_flip:
         Vt2[0] *= -1  # flip stocke dans Vt2 -- lri_model.py n'a pas a flipper
 
-    pc_scores_baseline = X_bl_scaled @ Vt2.T  # (n_bl, 2)
-
-    print(f"PCA : PC1={pc1_var_pct:.1f}%  pc1_sign_flip={pc1_sign_flip}")
+    print(f"PCA : PC1={pc1_var*100:.1f}%  PC2={pc2_var*100:.1f}%  pc1_sign_flip={pc1_sign_flip}")
 
     # -- Selection k par silhouette -------------------------------------------
     silhouettes: dict[int, float] = {}
@@ -136,29 +138,51 @@ def main() -> None:
     # -- KMeans final ---------------------------------------------------------
     km_final = KMeans(n_clusters=k_opt, random_state=0, n_init=10)
     km_final.fit(X_bl_scaled)
-    centroids_10d_scaled = km_final.cluster_centers_  # (k, 10)
+    centroids_10d = km_final.cluster_centers_  # (k, 10) scaled
 
-    # Centroids PC = centroids 10D projetes (pour nearest centroid runtime)
-    centroids_pc = (centroids_10d_scaled @ Vt2.T).tolist()  # (k, 2)
+    # Tri deterministe par PC1 desc — independant de l'ordre KMeans
+    centroids_pc_arr = centroids_10d @ Vt2.T  # (k, 2)
+    pc1_order = np.argsort(centroids_pc_arr[:, 0])[::-1]
+    centroids_10d = centroids_10d[pc1_order]
+    centroids_pc_arr = centroids_pc_arr[pc1_order]
 
-    # Centroids bruts (pour diagnostic et interprétation)
-    centroids_raw = (centroids_10d_scaled * std_ + mean_).tolist()  # (k, 10)
+    centroids_pc = centroids_pc_arr.tolist()
+    centroids_raw = (centroids_10d * std_ + mean_).tolist()
 
-    # Labels provisoires -- a renommer apres analyse features Phase A
-    regime_names = {str(i): f"regime_{i}" for i in range(k_opt)}
+    # Noms semantiques figes : high PC1 = "open", low PC1 = "handrail"
+    regime_names = {
+        str(i): (_SEMANTIC_NAMES_K2[i] if k_opt == 2 and i < 2 else f"regime_{i}")
+        for i in range(k_opt)
+    }
+
+    # Ancre geometrique — valide au chargement dans lri_model.load()
+    semantic_anchor = {
+        regime_names[str(i)] + "_pc1_mean": round(float(centroids_pc_arr[i, 0]), 3)
+        for i in range(k_opt)
+    }
 
     # -- Construire JSON -------------------------------------------------------
+    model_sig = f"lri_v1_k{k_opt}_pc{int(round(pc1_var, 3) * 1000)}"
+
     model = {
         "feature_cols": FEATURE_COLS,
         "pca_mean": mean_.tolist(),
         "pca_std": std_.tolist(),
-        "pca_components": Vt2.tolist(),   # (2, 10) -- deja flippe
-        "pc1_sign_flip": pc1_sign_flip,   # trace pour audit -- lri_model.py n'y touche pas
-        "cluster_centroids_pc": centroids_pc,   # runtime nearest centroid
-        "cluster_centroids_raw": centroids_raw,  # diagnostic/interpretation
-        "regime_names": regime_names,            # provisoires -- editer a la main apres Phase A
+        "pca_components": Vt2.tolist(),          # (2, 10) -- deja flippe
+        "pc1_sign_flip": pc1_sign_flip,           # trace audit -- jamais relu en runtime
+        "cluster_centroids_pc": centroids_pc,     # runtime nearest centroid (espace PC)
+        "cluster_centroids_raw": centroids_raw,   # diagnostic/interpretation
+        "regime_names": regime_names,
         "n_baseline_circuits": len(baseline_circuits),
         "k": k_opt,
+        "cluster_semantics_version": 1,
+        "pc1_positive_semantics": "open_attack",  # high PC1 = azimut / peu de guidance lineaire
+        "baseline_maps": sorted(BASELINE_MAPS),
+        "pca_variance_ratio": [round(pc1_var, 4), round(pc2_var, 4)],
+        "kmeans_random_state": 0,
+        "sklearn_version": sklearn.__version__,
+        "semantic_anchor": semantic_anchor,       # garde-fou geometrique valide au load()
+        "model_signature": model_sig,
     }
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -166,13 +190,12 @@ def main() -> None:
         json.dump(model, f, indent=2)
 
     print(f"\nModele sauvegarde : {OUTPUT_PATH}")
-    print(f"  k={k_opt}  n_baseline={len(baseline_circuits)}  pc1_sign_flip={pc1_sign_flip}")
-    print(f"  Centroids PC :")
+    print(f"  model_signature = {model_sig}")
+    print(f"  k={k_opt}  n_baseline={len(baseline_circuits)}  sklearn={sklearn.__version__}")
+    print(f"  Regimes (tries par PC1 desc) :")
     for i, cp in enumerate(centroids_pc):
-        print(f"    regime_{i} : PC1={cp[0]:.4f}  PC2={cp[1]:.4f}")
-    print()
-    print("  IMPORTANT : renommer les regime_names dans lri_baseline.json apres")
-    print("  avoir inspecte les features moyennes (cf. sortie analyze_lri_invariance.py).")
+        print(f"    {regime_names[str(i)]} : PC1={cp[0]:.4f}  PC2={cp[1]:.4f}")
+    print(f"  semantic_anchor : {semantic_anchor}")
 
 
 if __name__ == "__main__":

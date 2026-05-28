@@ -99,9 +99,26 @@
     ]
   ],
   "regime_names": {
-    "0": "regime_0",
-    "1": "regime_1"
+    "0": "open",
+    "1": "handrail"
   },
   "n_baseline_circuits": 46,
-  "k": 2
+  "k": 2,
+  "cluster_semantics_version": 1,
+  "pc1_positive_semantics": "open_attack",
+  "baseline_maps": [
+    "crohot",
+    "stanne"
+  ],
+  "pca_variance_ratio": [
+    0.6469,
+    0.1385
+  ],
+  "kmeans_random_state": 0,
+  "sklearn_version": "1.8.0",
+  "semantic_anchor": {
+    "open_pc1_mean": 2.666,
+    "handrail_pc1_mean": -1.714
+  },
+  "model_signature": "lri_v1_k2_pc647"
 }

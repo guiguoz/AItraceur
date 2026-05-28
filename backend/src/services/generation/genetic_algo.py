@@ -133,6 +133,10 @@ class GenerationConfig:
     # None = comportement GA standard inchangé.
     latent_regime: Optional[str] = None
 
+    # Mode benchmark — marqueur pour désactiver les caches coûteux en dehors du GA.
+    # Utilisé uniquement par benchmark_lri.py — n'affecte pas le comportement du GA.
+    benchmark_mode: bool = False
+
 
 @dataclass
 class GenerationResult:

@@ -182,6 +182,8 @@ def _compute_geometry(pcs: np.ndarray, eps: float) -> dict:
             "n_valid_lri": n, "pr": nan, "pc1_fraction": nan,
             "hull_area": nan, "hull_area_norm": nan,
             "pairwise_mean": nan, "pairwise_var": nan, "redundancy_rate": nan,
+            "mean_pc1": float(pcs[0, 0]) if n == 1 else nan,
+            "std_pc1": nan,
         }
 
     cov = np.cov(pcs.T)
@@ -210,6 +212,10 @@ def _compute_geometry(pcs: np.ndarray, eps: float) -> dict:
         float(np.mean([d < eps for d in dists])) if eps > 0 else nan
     )
 
+    # dynamique quasi-1D (PC1 domine fortement les populations benchmark)
+    mean_pc1 = float(np.mean(pcs[:, 0]))
+    std_pc1  = float(np.std(pcs[:, 0]))
+
     return {
         "n_valid_lri": n,
         "pr": pr,
@@ -219,6 +225,8 @@ def _compute_geometry(pcs: np.ndarray, eps: float) -> dict:
         "pairwise_mean": pairwise_mean,
         "pairwise_var": pairwise_var,
         "redundancy_rate": redundancy_rate,
+        "mean_pc1": mean_pc1,
+        "std_pc1": std_pc1,
     }
 
 
@@ -367,11 +375,18 @@ def run_one(
             "post_lri_regime": "",
             "lri_changed_selection": "",
             "lri_push_distance": float("nan"),
+            "pc1_offset_from_boundary": float("nan"),
         })
 
     # niveau selected
     sel_pcs = pcs_by_level["selected"]
     sel_geom = _compute_geometry(sel_pcs, eps)
+
+    # Frontière ≈ midpoint PC1 entre open (+2.666) et handrail (-1.714)
+    _boundary_pc1 = (lri.cluster_centroids_pc[0][0] + lri.cluster_centroids_pc[1][0]) / 2.0
+    pc1_offset = float(post_pc[0] - _boundary_pc1) if post_pc is not None else float("nan")
+    # > 0 → côté open, < 0 → côté handrail ; |val| = distance à la frontière
+
     records.append({
         "condition": condition_label,
         "seed": seed,
@@ -386,6 +401,7 @@ def run_one(
         "post_lri_regime": post_regime,
         "lri_changed_selection": lri_changed,
         "lri_push_distance": round(push_dist, 4),
+        "pc1_offset_from_boundary": round(pc1_offset, 4),
     })
 
     return records, pcs_by_level, _fitness_hash(population_snapshot)
@@ -398,9 +414,19 @@ def main() -> None:
     parser.add_argument("--ocd_path", default=OCD_PATH)
     parser.add_argument("--expected_hash", default="", help="Expected seg_index hash (16 chars)")
     parser.add_argument("--n_seeds", type=int, default=N_SEEDS)
+    parser.add_argument("--production", action="store_true",
+        help="pop=100 gens=200 3 seeds. Test attractor fondamental vs petits params.")
     args = parser.parse_args()
 
     n_seeds = args.n_seeds
+
+    if args.production:
+        global POP_SIZE, GENS
+        POP_SIZE = 100
+        GENS     = 200
+        if n_seeds == N_SEEDS:
+            n_seeds = 3
+        print("[benchmark] MODE PRODUCTION: pop=100 gens=200")
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # ── LRI ──────────────────────────────────────────────────────────────────
@@ -491,9 +517,11 @@ def main() -> None:
         "condition", "seed", "level", "n_circuits", "n_valid_lri",
         "pr", "pc1_fraction", "hull_area", "hull_area_norm",
         "pairwise_mean", "pairwise_var", "redundancy_rate",
+        "mean_pc1", "std_pc1",
         "pool_entropy", "entropy_gain_pool",
         "selection_alignment", "regime_pressure",
         "pre_lri_regime", "post_lri_regime", "lri_changed_selection", "lri_push_distance",
+        "pc1_offset_from_boundary",
     ]
     csv_path = OUTPUT_DIR / "benchmark_lri_results.csv"
     with open(csv_path, "w", newline="", encoding="utf-8") as f:

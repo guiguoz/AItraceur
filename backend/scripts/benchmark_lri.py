@@ -275,6 +275,8 @@ def run_one(
     eps: float,
     latent_regime_weight: float = 0.0,
     use_instrumented: bool = False,
+    lri_model_hash: str = "",
+    lri_model_source: str = "",
 ) -> tuple[list[dict], dict[str, np.ndarray], int, float, list]:
     """
     Execute one GA run.
@@ -284,6 +286,18 @@ def run_one(
         pcs_by_level   : dict level -> (n_valid, 2) ndarray (for scatter + eps calibration)
         fitness_hash   : hash of sorted fitness values (population identity check)
     """
+    # Résoudre __random__ avant toute utilisation de `condition`
+    original_condition = condition
+    if condition == "__random__":
+        _rng_c = random.Random((seed << 1) ^ 0xDEAD)
+        condition = _rng_c.choice(sorted(lri.available_regimes))
+
+    assigned_target_regime = (
+        original_condition if original_condition not in (None, "__random__")
+        else ("random" if original_condition == "__random__" else "")
+    )
+    executed_target_regime = condition if condition is not None else ""
+
     random.seed(seed)
     np.random.seed(seed)
 
@@ -393,10 +407,9 @@ def run_one(
         dist_target = dists[target_idx]
         dist_other  = min(d for i, d in enumerate(dists) if i != target_idx)
         margin      = round(dist_other - dist_target, 4)
-        # Heuristic OOD proxy.
-        # >1.0 means farther from assigned centroid than centroid separation itself.
-        # Relative-to-centroid-separation heuristic only.
-        # Does not model local cluster spread — not a true density estimate.
+        # Relative-to-centroid-separation proxy. Interpretation requires baseline:
+        # compare distribution (median, P90, max) sprint vs forest, not a fixed >1.0 threshold.
+        # In-domain may naturally exceed 1.0 if clusters are tight — no universal cutoff.
         support_radius = round(dist_target / max(lri.centroid_distance_pc, 1e-9), 4)
     else:
         margin, support_radius = float("nan"), float("nan")
@@ -415,11 +428,15 @@ def run_one(
 
         records.append({
             "condition": condition_label,
+            "lri_model_hash": lri_model_hash,
+            "lri_model_source": lri_model_source,
             "seed": seed,
+            "assigned_target_regime": assigned_target_regime,
+            "executed_target_regime": executed_target_regime,
             "level": level_name,
             "n_circuits": len(circs),
             **geom,
-            "pool_entropy": regime_entropy_here,
+            "elite_pool_entropy": regime_entropy_here,
             "entropy_gain_pool": round(entropy_gain_pool, 6) if level_name == "pool" else float("nan"),
             "selection_alignment": float("nan"),
             "regime_pressure": float("nan"),
@@ -446,11 +463,15 @@ def run_one(
 
     records.append({
         "condition": condition_label,
+        "lri_model_hash": lri_model_hash,
+        "lri_model_source": lri_model_source,
         "seed": seed,
+        "assigned_target_regime": assigned_target_regime,
+        "executed_target_regime": executed_target_regime,
         "level": "selected",
         "n_circuits": 1,
         **sel_geom,
-        "pool_entropy": _regime_entropy(regimes_by_level["selected"]),
+        "elite_pool_entropy": _regime_entropy(regimes_by_level["selected"]),
         "entropy_gain_pool": round(entropy_gain_pool, 6),
         "selection_alignment": selection_alignment,
         "regime_pressure": regime_pressure,
@@ -492,10 +513,11 @@ def main() -> None:
             n_seeds = 3
         print("[benchmark] MODE PRODUCTION: pop=100 gens=200")
         run_conditions = [
-            (None,   "A",          0.0),
-            ("open", "B-open-w5",  5.0),
-            ("open", "B-open-w10", 10.0),
-            ("open", "B-open-w20", 20.0),
+            (None,         "A",            0.0),
+            ("open",       "B-open-w5",    5.0),
+            ("open",       "B-open-w10",  10.0),
+            ("open",       "B-open-w20",  20.0),
+            ("__random__", "C-random-w5",  5.0),
         ]
         use_instrumented = True
     else:
@@ -520,6 +542,11 @@ def main() -> None:
         "LRI model introuvable. Lancer d'abord: python backend/scripts/build_lri_model.py"
     )
     print(f"[benchmark] LRI loaded — regimes={lri.available_regimes}  v={lri.cluster_semantics_version}")
+
+    _lri_model_path  = _BACKEND / "data" / "lri_model.json"
+    lri_model_hash   = hashlib.sha256(_lri_model_path.read_bytes()).hexdigest()[:8]
+    lri_model_source = getattr(lri, "source_tag", "crohot_td4")
+    print(f"[benchmark] lri_model_hash={lri_model_hash}  source={lri_model_source}")
 
     # ── OCD + seg_index ──────────────────────────────────────────────────────
     print(f"[benchmark] Parsing OCD: {args.ocd_path}")
@@ -557,6 +584,8 @@ def main() -> None:
                 seed, condition, label, bbox, seg_index, lri, eps=0.0,
                 latent_regime_weight=weight,
                 use_instrumented=use_instrumented,
+                lri_model_hash=lri_model_hash,
+                lri_model_source=lri_model_source,
             )
             all_records.extend(recs)
             all_pcs[(label, seed)] = pcs_by_level
@@ -616,11 +645,13 @@ def main() -> None:
 
     # ── Ecrire CSV ────────────────────────────────────────────────────────────
     fieldnames = [
-        "condition", "seed", "level", "n_circuits", "n_valid_lri",
+        "condition", "lri_model_hash", "lri_model_source",
+        "seed", "assigned_target_regime", "executed_target_regime",
+        "level", "n_circuits", "n_valid_lri",
         "pr", "pc1_fraction", "hull_area", "hull_area_norm",
         "pairwise_mean", "pairwise_var", "redundancy_rate",
         "mean_pc1", "std_pc1",
-        "pool_entropy", "entropy_gain_pool",
+        "elite_pool_entropy", "entropy_gain_pool",
         "selection_alignment", "regime_pressure",
         "pre_lri_regime", "post_lri_regime", "lri_changed_selection", "lri_push_distance",
         "pc1_offset_from_boundary",

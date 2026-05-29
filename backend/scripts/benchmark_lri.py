@@ -387,6 +387,20 @@ def run_one(
         else float("nan")
     )
 
+    if post_pc is not None and condition is not None:
+        target_idx = {v: int(k) for k, v in lri.regime_names.items()}.get(condition, 0)
+        dists = [float(np.linalg.norm(post_pc - c)) for c in lri.cluster_centroids_pc]
+        dist_target = dists[target_idx]
+        dist_other  = min(d for i, d in enumerate(dists) if i != target_idx)
+        margin      = round(dist_other - dist_target, 4)
+        # Heuristic OOD proxy.
+        # >1.0 means farther from assigned centroid than centroid separation itself.
+        # Relative-to-centroid-separation heuristic only.
+        # Does not model local cluster spread — not a true density estimate.
+        support_radius = round(dist_target / max(lri.centroid_distance_pc, 1e-9), 4)
+    else:
+        margin, support_radius = float("nan"), float("nan")
+
     # ── Construire records CSV ────────────────────────────────────────────────
     records: list[dict] = []
 
@@ -414,6 +428,8 @@ def run_one(
             "lri_changed_selection": "",
             "lri_push_distance": float("nan"),
             "pc1_offset_from_boundary": float("nan"),
+            "margin": float("nan"),
+            "support_radius": float("nan"),
             "entropy_gen0": float("nan"),
             "entropy_genFinal": float("nan"),
             "fitness_tradeoff_vs_A": float("nan"),
@@ -443,6 +459,8 @@ def run_one(
         "lri_changed_selection": lri_changed,
         "lri_push_distance": round(push_dist, 4),
         "pc1_offset_from_boundary": round(pc1_offset, 4),
+        "margin": margin,
+        "support_radius": support_radius,
         "entropy_gen0": round(entropy_gen0, 6),
         "entropy_genFinal": round(entropy_genfinal, 6),
         "fitness_tradeoff_vs_A": float("nan"),  # rempli par main()
@@ -460,6 +478,8 @@ def main() -> None:
     parser.add_argument("--n_seeds", type=int, default=N_SEEDS)
     parser.add_argument("--production", action="store_true",
         help="pop=100 gens=200 3 seeds. Test attractor fondamental vs petits params.")
+    parser.add_argument("--sprint", action="store_true",
+        help="Sprint OOD mode: TD=2, dist=2500m, 13 controles, circuit_type=sprint")
     args = parser.parse_args()
 
     n_seeds = args.n_seeds
@@ -485,6 +505,13 @@ def main() -> None:
             ("handrail", "B-handrail", 0.0),
         ]
         use_instrumented = False
+    if args.sprint:
+        global TD, DISTANCES, CONTROLS, CT_TYPE
+        TD = 2
+        DISTANCES = {2: 2500}
+        CONTROLS  = {2: 13}
+        CT_TYPE   = {2: "sprint"}
+        print("[benchmark] MODE SPRINT OOD: TD=2, dist=2500m, 13 controles")
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # ── LRI ──────────────────────────────────────────────────────────────────
@@ -597,6 +624,7 @@ def main() -> None:
         "selection_alignment", "regime_pressure",
         "pre_lri_regime", "post_lri_regime", "lri_changed_selection", "lri_push_distance",
         "pc1_offset_from_boundary",
+        "margin", "support_radius",
         "entropy_gen0", "entropy_genFinal", "fitness_tradeoff_vs_A",
     ]
     csv_path = OUTPUT_DIR / "benchmark_lri_results.csv"

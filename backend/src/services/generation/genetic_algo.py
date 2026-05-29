@@ -132,6 +132,9 @@ class GenerationConfig:
     # Valeurs : noms définis dans lri_baseline.json (ex: "regime_0", "regime_1").
     # None = comportement GA standard inchangé.
     latent_regime: Optional[str] = None
+    # > 0 active regime-aware evolution : terme N biaise la fitness vers le régime cible.
+    # Calibration : 5=soft bias, 10=strong steering, 20=near-constrained optimization.
+    latent_regime_weight: float = 0.0
 
     # Mode benchmark — marqueur pour désactiver les caches coûteux en dehors du GA.
     # Utilisé uniquement par benchmark_lri.py — n'affecte pas le comportement du GA.
@@ -269,6 +272,10 @@ class GeneticAlgorithm:
         self._nav_roles: dict = self._load_nav_roles()
         self._nav_params: dict = self._load_nav_params()
         self._nav_cache: dict = {}  # cache (px,py,cx,cy,role) → score, clé arrondie à 4 décimales (~11m)
+
+        # ── Cache projections LRI per génération (terme N) ───────────────────────
+        # Clé : id(circuit). Invalidé (clear) au début de chaque génération.
+        self._fitness_lri_cache: dict = {}
 
         # ── ISOM sémantique (termes N, O, P) ──────────────────────────────────────
         import json as _json_isom
@@ -861,10 +868,12 @@ class GeneticAlgorithm:
         # Évaluer la population initiale
         for circuit in self.population:
             circuit.fitness = self.scoring_function(circuit, self.config)
+            self._apply_regime_score_n(circuit)
 
         # Trier par fitness
         self.population.sort(key=lambda c: c.fitness, reverse=True)
         self.best_solution = self.population[0]
+        self._post_generation_hook(0)  # gen=0 = état post-initialisation
 
         if self._route_analyzer is not None:
             _cov = self._osm_coverage_ratio(self.config.bounding_box)
@@ -874,6 +883,7 @@ class GeneticAlgorithm:
         # Boucle évolutionnaire
         for gen in range(self.config.generations):
             self.generation = gen + 1
+            self._fitness_lri_cache.clear()  # invalider les PCs avant mutations/sélection
 
             # Timeout : retourner le meilleur trouvé plutôt que boucler à l'infini
             if _time_ga.time() - _t0_ga > self.config.timeout_seconds:
@@ -892,6 +902,7 @@ class GeneticAlgorithm:
             for circuit in offspring:
                 circuit.fitness = self.scoring_function(circuit, self.config)
                 circuit.generation = self.generation
+                self._apply_regime_score_n(circuit)
 
             # Élitisme - garder les meilleurs
             elite = self.population[: self.config.elite_count]
@@ -904,6 +915,8 @@ class GeneticAlgorithm:
             # Mettre à jour le meilleur
             if self.population[0].fitness > self.best_solution.fitness:
                 self.best_solution = self.population[0]
+
+            self._post_generation_hook(gen + 1)
 
             # Critère d'arrêt précoce
             if self._check_early_stop():
@@ -1037,6 +1050,44 @@ class GeneticAlgorithm:
         if not candidates:
             return None
         return max(candidates, key=lambda x: x[1])[0]
+
+    def _apply_regime_score_n(self, circuit: "Circuit") -> None:
+        """Terme N — ajoute le score de proximité régime à circuit.fitness.
+
+        Centré autour de 0 : +1 proche centroid cible, ~0 à la frontière, -1 centroid opposé.
+        No-op si latent_regime_weight == 0 ou LRI non disponible.
+        """
+        if (
+            not self.config.latent_regime
+            or self.config.latent_regime_weight <= 0
+            or self._seg_index is None
+        ):
+            return
+        lri = _get_lri_model() if _get_lri_model is not None else None
+        if lri is None:
+            return
+        cid = id(circuit)
+        if cid not in self._fitness_lri_cache:
+            feats = self._aggregate_circuit_features(circuit)
+            self._fitness_lri_cache[cid] = (
+                lri.project(feats) if feats is not None else None
+            )
+        pc = self._fitness_lri_cache[cid]
+        if pc is None:
+            return
+        target_idx = {v: int(k) for k, v in lri.regime_names.items()}.get(
+            self.config.latent_regime, 0
+        )
+        dist = float(np.linalg.norm(pc - lri.cluster_centroids_pc[target_idx]))
+        regime_score_n = float(np.clip(
+            2.0 * (1.0 - dist / max(lri.centroid_distance_pc, 1e-9)) - 1.0,
+            -1.0, 1.0,
+        ))
+        circuit.fitness += self.config.latent_regime_weight * regime_score_n
+
+    def _post_generation_hook(self, gen: int) -> None:
+        """Hook appelé après chaque génération (gen=0 = initialisation). No-op par défaut."""
+        pass
 
     # ── Fin LRI ───────────────────────────────────────────────────────────────
 

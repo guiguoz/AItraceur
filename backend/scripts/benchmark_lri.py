@@ -73,7 +73,8 @@ DISTANCES = {3: 4000, 4: 6000, 5: 9000}
 CONTROLS  = {3: 11,   4: 15,   5: 20}
 CT_TYPE   = {3: "md", 4: "ld", 5: "ld"}
 
-CONDITIONS = [(None, "A"), ("open", "B-open"), ("handrail", "B-handrail")]
+# Les conditions sont définies localement dans main() selon le mode d'exécution.
+_CHECKPOINTS: frozenset[int] = frozenset({0, 10, 50, 100, 150})
 
 OUTPUT_DIR = _ROOT / "output"
 
@@ -234,6 +235,34 @@ def _fitness_hash(population) -> int:
     return hash(tuple(sorted(round(c.fitness, 6) for c in population)))
 
 
+# ── Phase 3 — Instrumentation GA ─────────────────────────────────────────────
+
+class _InstrumentedGA(GeneticAlgorithm):
+    """GA instrumenté pour tracer l'entropie de régime au fil des générations."""
+
+    def __init__(self, cfg: GenerationConfig) -> None:
+        super().__init__(cfg)
+        self.entropy_log: list[tuple[int, float]] = []
+
+    def _post_generation_hook(self, g: int) -> None:
+        # Le GA appelle hook(0) après init, puis hook(gen+1) en boucle.
+        # La dernière invocation est hook(generations), pas hook(generations-1).
+        if g not in _CHECKPOINTS and g != self.config.generations:
+            return
+        if not self.population:
+            return
+        _lri = get_lri_model()
+        if not _lri:
+            return
+        sample = random.sample(self.population, min(50, len(self.population)))
+        regimes = [
+            _lri.assign_regime(_lri.project(f))
+            for c in sample
+            if (f := self._aggregate_circuit_features(c)) is not None
+        ]
+        self.entropy_log.append((g, _regime_entropy(regimes)))
+
+
 # ── RunResult ─────────────────────────────────────────────────────────────────
 
 def run_one(
@@ -244,7 +273,9 @@ def run_one(
     seg_index,
     lri,
     eps: float,
-) -> tuple[list[dict], dict[str, np.ndarray], int]:
+    latent_regime_weight: float = 0.0,
+    use_instrumented: bool = False,
+) -> tuple[list[dict], dict[str, np.ndarray], int, float, list]:
     """
     Execute one GA run.
 
@@ -274,19 +305,26 @@ def run_one(
         segment_index=seg_index,
         ga_seed=seed,
         latent_regime=condition,
+        latent_regime_weight=latent_regime_weight,
         benchmark_mode=True,
         timeout_seconds=120.0,
     )
     assert cfg.segment_index is not None, "seg_index absent du cfg avant init GA"
 
     t0 = time.time()
-    ga = GeneticAlgorithm(cfg)
+    ga: GeneticAlgorithm = _InstrumentedGA(cfg) if use_instrumented else GeneticAlgorithm(cfg)
     assert ga._seg_index is not None, (
         "ga._seg_index est None apres init — _aggregate_circuit_features() retournera None."
         " Verifier que ocad_line_segments est non-vide."
     )
     ga.generate(start, end)
     elapsed = time.time() - t0
+
+    # Trajectoire entropie (peuplée seulement si _InstrumentedGA)
+    _elog: list[tuple[int, float]] = getattr(ga, "entropy_log", [])
+    entropy_gen0     = next((e for g, e in _elog if g == 0), float("nan"))
+    entropy_genfinal = _elog[-1][1] if _elog else float("nan")
+    best_fitness     = float(ga.best_solution.fitness) if ga.best_solution else float("nan")
 
     population_snapshot = list(ga.population)
     top_k = population_snapshot[:TOP_K]
@@ -376,6 +414,9 @@ def run_one(
             "lri_changed_selection": "",
             "lri_push_distance": float("nan"),
             "pc1_offset_from_boundary": float("nan"),
+            "entropy_gen0": float("nan"),
+            "entropy_genFinal": float("nan"),
+            "fitness_tradeoff_vs_A": float("nan"),
         })
 
     # niveau selected
@@ -402,9 +443,12 @@ def run_one(
         "lri_changed_selection": lri_changed,
         "lri_push_distance": round(push_dist, 4),
         "pc1_offset_from_boundary": round(pc1_offset, 4),
+        "entropy_gen0": round(entropy_gen0, 6),
+        "entropy_genFinal": round(entropy_genfinal, 6),
+        "fitness_tradeoff_vs_A": float("nan"),  # rempli par main()
     })
 
-    return records, pcs_by_level, _fitness_hash(population_snapshot)
+    return records, pcs_by_level, _fitness_hash(population_snapshot), best_fitness, _elog
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -427,6 +471,20 @@ def main() -> None:
         if n_seeds == N_SEEDS:
             n_seeds = 3
         print("[benchmark] MODE PRODUCTION: pop=100 gens=200")
+        run_conditions = [
+            (None,   "A",          0.0),
+            ("open", "B-open-w5",  5.0),
+            ("open", "B-open-w10", 10.0),
+            ("open", "B-open-w20", 20.0),
+        ]
+        use_instrumented = True
+    else:
+        run_conditions = [
+            (None,       "A",          0.0),
+            ("open",     "B-open",     0.0),
+            ("handrail", "B-handrail", 0.0),
+        ]
+        use_instrumented = False
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # ── LRI ──────────────────────────────────────────────────────────────────
@@ -456,28 +514,35 @@ def main() -> None:
     print(f"[benchmark] seg_index built — {seg_index.segment_count} segments")
 
     # ── Passe 1 : 60 runs sans redundancy_rate, collecte pcs_A ──────────────
-    total_runs = len(CONDITIONS) * n_seeds
+    total_runs = len(run_conditions) * n_seeds
     print(f"\n=== Passe 1 : {total_runs} runs (eps=0 -> redundancy_rate=nan) ===")
 
     all_records: list[dict] = []
     all_pcs: dict[tuple, dict[str, np.ndarray]] = {}   # (cond_label, seed) -> pcs_by_level
     pop_hashes: dict[tuple, int] = {}                  # (cond_label, seed) -> fitness_hash
+    a_best_fitness: dict[int, float] = {}              # seed -> fitness baseline A
+    best_fitness_map: dict[tuple, float] = {}          # (label, seed) -> best_fitness
 
-    for condition, label in CONDITIONS:
+    for condition, label, weight in run_conditions:
         print(f"\n-- condition {label} --")
         for seed in range(n_seeds):
-            recs, pcs_by_level, fhash = run_one(
-                seed, condition, label, bbox, seg_index, lri, eps=0.0
+            recs, pcs_by_level, fhash, best_fit, _ = run_one(
+                seed, condition, label, bbox, seg_index, lri, eps=0.0,
+                latent_regime_weight=weight,
+                use_instrumented=use_instrumented,
             )
             all_records.extend(recs)
             all_pcs[(label, seed)] = pcs_by_level
             pop_hashes[(label, seed)] = fhash
+            best_fitness_map[(label, seed)] = best_fit
+            if condition is None:
+                a_best_fitness[seed] = best_fit
 
     # ── Valider identite population A == B pour les 3 premiers seeds ─────────
     print("\n[benchmark] Validation identite population A == B (seeds 0-2) :")
     for seed in range(min(3, n_seeds)):
         hA = pop_hashes.get(("A", seed))
-        for _, label in CONDITIONS[1:]:
+        for _, label, _ in run_conditions[1:]:
             hB = pop_hashes.get((label, seed))
             match = "OK" if hA == hB else "WARN mismatch"
             print(f"  seed={seed}  A vs {label} : {match}  (hA={hA}  hB={hB})")
@@ -499,6 +564,16 @@ def main() -> None:
     else:
         eps = 1.0
     print(f"\n[benchmark] eps = {eps:.4f}  (n_dists_used={len(dists_A) if pop_pcs_A else 0})")
+
+    # ── Remplir fitness_tradeoff_vs_A pour les conditions B ──────────────────
+    for rec in all_records:
+        if rec["level"] == "selected" and rec["condition"] != "A":
+            _seed = rec["seed"]
+            _label = rec["condition"]
+            b_fit = best_fitness_map.get((_label, _seed), float("nan"))
+            a_fit = a_best_fitness.get(_seed, float("nan"))
+            if not (math.isnan(b_fit) or math.isnan(a_fit)):
+                rec["fitness_tradeoff_vs_A"] = round(b_fit - a_fit, 4)
 
     # ── Passe 2 : mettre a jour redundancy_rate dans tous les records ─────────
     print("\n=== Passe 2 : post-traitement redundancy_rate ===")
@@ -522,6 +597,7 @@ def main() -> None:
         "selection_alignment", "regime_pressure",
         "pre_lri_regime", "post_lri_regime", "lri_changed_selection", "lri_push_distance",
         "pc1_offset_from_boundary",
+        "entropy_gen0", "entropy_genFinal", "fitness_tradeoff_vs_A",
     ]
     csv_path = OUTPUT_DIR / "benchmark_lri_results.csv"
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
@@ -553,10 +629,17 @@ def _plot_scatter(
 
     fig, ax = plt.subplots(figsize=(8, 6))
 
+    _palette  = ["#888888", "#1565C0", "#B71C1C", "#2E7D32", "#F57F17", "#4A148C"]
+    _markers  = ["o", "^", "s", "D", "v", "P"]
+    _all_labels = sorted({k[0] for k in all_pcs.keys()})
     cond_style = {
-        "A":          {"color": "#888888", "marker": "o", "alpha": 0.55, "zorder": 2},
-        "B-open":     {"color": "#1565C0", "marker": "^", "alpha": 0.75, "zorder": 3},
-        "B-handrail": {"color": "#B71C1C", "marker": "s", "alpha": 0.75, "zorder": 3},
+        lbl: {
+            "color":  _palette[i % len(_palette)],
+            "marker": _markers[i % len(_markers)],
+            "alpha":  0.55 if lbl == "A" else 0.75,
+            "zorder": 2   if lbl == "A" else 3,
+        }
+        for i, lbl in enumerate(_all_labels)
     }
 
     for label, style in cond_style.items():

@@ -41,6 +41,7 @@ class LRIModel:
     pca_components: np.ndarray        # (2, 10) -- Vt2 avec orientation canonique deja appliquee
     cluster_centroids_pc: np.ndarray  # (k, 2) -- espace PC runtime, tries par PC1 desc
     regime_names: dict[str, str]      # {"0": "open", "1": "handrail", ...}
+    centroid_distance_pc: float = 0.0    # ||c0 - c1|| en espace PC, gelé au load
     cluster_semantics_version: int = 1   # audit trail -- ne pas utiliser en runtime
     sklearn_version: str = "unknown"     # version sklearn du fit KMeans
 
@@ -91,12 +92,16 @@ class LRIModel:
                     f"handrail_pc1_mean={h} devrait etre < 0 (low PC1 = regime handrail)."
                 )
 
+        centroids = np.array(data["cluster_centroids_pc"], dtype=float)
+        c_dist = float(np.linalg.norm(centroids[0] - centroids[1])) if len(centroids) >= 2 else 1.0
+
         return cls(
             pca_mean=np.array(data["pca_mean"], dtype=float),
             pca_std=np.array(data["pca_std"], dtype=float),
             pca_components=np.array(data["pca_components"], dtype=float),
-            cluster_centroids_pc=np.array(data["cluster_centroids_pc"], dtype=float),
+            cluster_centroids_pc=centroids,
             regime_names=data["regime_names"],
+            centroid_distance_pc=c_dist,
             cluster_semantics_version=data.get("cluster_semantics_version", 0),
             sklearn_version=data.get("sklearn_version", "unknown"),
         )

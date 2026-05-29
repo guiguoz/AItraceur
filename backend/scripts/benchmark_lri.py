@@ -289,8 +289,8 @@ def run_one(
     # Résoudre __random__ avant toute utilisation de `condition`
     original_condition = condition
     if condition == "__random__":
-        _rng_c = random.Random((seed << 1) ^ 0xDEAD)
-        condition = _rng_c.choice(sorted(lri.available_regimes))
+        available = sorted(lri.available_regimes)
+        condition = available[seed % len(available)]
 
     assigned_target_regime = (
         original_condition if original_condition not in (None, "__random__")

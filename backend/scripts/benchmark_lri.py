@@ -543,7 +543,7 @@ def main() -> None:
     )
     print(f"[benchmark] LRI loaded — regimes={lri.available_regimes}  v={lri.cluster_semantics_version}")
 
-    _lri_model_path  = _BACKEND / "data" / "lri_model.json"
+    _lri_model_path  = _BACKEND / "data" / "lri_baseline.json"
     lri_model_hash   = hashlib.sha256(_lri_model_path.read_bytes()).hexdigest()[:8]
     lri_model_source = getattr(lri, "source_tag", "crohot_td4")
     print(f"[benchmark] lri_model_hash={lri_model_hash}  source={lri_model_source}")

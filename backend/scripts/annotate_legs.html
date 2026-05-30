@@ -173,10 +173,9 @@ body { display: flex; height: 100vh; font-family: system-ui, sans-serif; font-si
     <div id="ann-info">← Sélectionner une carte et une jambe</div>
     <div id="ann-pc1-line"></div>
     <div id="ann-buttons">
-      <button class="ann-btn suivi"      onclick="annotate('suivi')">Suivi</button>
-      <button class="ann-btn attaque"    onclick="annotate('attaque')">Attaque</button>
-      <button class="ann-btn transition" onclick="annotate('transition')">Transition</button>
-      <button class="ann-btn uncertain"  onclick="annotate('uncertain')">?</button>
+      <button class="ann-btn suivi"     onclick="annotate('suivi')">Suivi</button>
+      <button class="ann-btn attaque"   onclick="annotate('attaque')">Attaque</button>
+      <button class="ann-btn uncertain" onclick="annotate('uncertain')">?</button>
     </div>
     <div id="ann-nav">
       <button id="btn-prev" onclick="navLeg(-1)">◀ Préc.</button>
@@ -488,10 +487,9 @@ document.getElementById('blind-chk').addEventListener('change', () => {
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   switch (e.key) {
-    case '1': annotate('suivi');      break;
-    case '2': annotate('attaque');    break;
-    case '3': annotate('transition'); break;
-    case '4': annotate('uncertain');  break;
+    case '1': annotate('suivi');     break;
+    case '2': annotate('attaque');   break;
+    case '3': annotate('uncertain'); break;
     case 'ArrowRight': case 'n': navLeg(+1); break;
     case 'ArrowLeft':  case 'p': navLeg(-1); break;
   }

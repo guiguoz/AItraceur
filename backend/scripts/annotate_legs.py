@@ -29,7 +29,7 @@ _ROOT   = _SCRIPT.parent.parent
 OUTPUT  = _ROOT / "output"
 HTML    = _SCRIPT / "annotate_legs.html"
 
-VALID_LABELS = {"suivi", "attaque", "transition", "uncertain"}
+VALID_LABELS = {"suivi", "attaque", "uncertain"}
 
 ANNOTATION_FIELDS = ["map", "circuit_id", "leg_index", "label", "timestamp"]
 

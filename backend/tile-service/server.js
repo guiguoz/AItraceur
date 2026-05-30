@@ -85,9 +85,9 @@ app.use('/renders', express.static(RENDER_DIR, {
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }))
 
-// OOB symbols : 709000 = ISSprOM Out of Bounds, 527000 = ISOM Out of Bounds
-// symNum format in ocad2geojson: integer symbol number × 1000 (e.g. sym 709 → 709000)
-const OOB_SYMS = [709000, 527000, 709001, 527001, 709002, 527002]
+// OOB symbols : 520 = zone interdite (ISOM + ISSprOM) ; 709 = OOB sprint additionnel (ISSprOM)
+// symNum format in ocad2geojson: integer × 1000 (e.g. sym 709 → 709000)
+const OOB_SYMS = [520000, 520001, 520002, 709000, 709001, 709002]
 
 app.get('/map/:mapId/forbidden-zones', async (req, res) => {
   const { mapId } = req.params

@@ -31,6 +31,55 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 import numpy as np
 
+try:
+    from shapely.geometry import Point, shape
+    from shapely.ops import unary_union
+    _HAS_SHAPELY = True
+except ImportError:
+    _HAS_SHAPELY = False
+
+
+def _point_in_polygon(lng: float, lat: float, ring: list) -> bool:
+    inside = False
+    j = len(ring) - 1
+    for i, (xi, yi) in enumerate(ring):
+        xj, yj = ring[j]
+        if ((yi > lat) != (yj > lat)) and (lng < (xj - xi) * (lat - yi) / (yj - yi + 1e-12) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
+def _build_oob_checker(oob_features: list):
+    if not oob_features:
+        return lambda lng, lat: False
+    if _HAS_SHAPELY:
+        from shapely.validation import make_valid
+        polys = []
+        for f in oob_features:
+            try:
+                g = make_valid(shape(f["geometry"]))
+                if not g.is_empty:
+                    polys.append(g)
+            except Exception:
+                pass
+        if not polys:
+            return lambda lng, lat: False
+        combined = unary_union(polys)
+        return lambda lng, lat: combined.contains(Point(lng, lat))
+    else:
+        rings = []
+        for f in oob_features:
+            geom = f.get("geometry", {})
+            if geom.get("type") == "Polygon":
+                rings.append(geom["coordinates"][0])
+            elif geom.get("type") == "MultiPolygon":
+                for poly in geom["coordinates"]:
+                    rings.append(poly[0])
+        if not rings:
+            return lambda lng, lat: False
+        return lambda lng, lat: any(_point_in_polygon(lng, lat, r) for r in rings)
+
 _SCRIPT  = pathlib.Path(__file__).parent
 _BACKEND = _SCRIPT.parent
 _ROOT    = _BACKEND.parent
@@ -132,12 +181,18 @@ proj4.defs('EPSG:2154', '+proj=lcc +lat_0=46.5 +lon_0=3 +lat_1=44 +lat_2=49 +x_0
     const lineFeats = allFeatures.filter(f =>
         f.geometry && (f.geometry.type === 'LineString' || f.geometry.type === 'MultiLineString')
     );
-    console.log(JSON.stringify({ bbox, features: lineFeats }));
+    const OOB_SYMS = new Set([709000, 709001, 709002, 520000, 520001, 520002]);
+    const oobFeats = allFeatures.filter(f =>
+        f.geometry &&
+        (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon') &&
+        f.properties && OOB_SYMS.has(f.properties.sym)
+    );
+    console.log(JSON.stringify({ bbox, features: lineFeats, oob_polygons: oobFeats }));
 })().catch(e => { process.stderr.write(e.message + '\n'); process.exit(1); });
 """
 
 
-def _parse_ocd(ocd_path: str) -> tuple[dict, list]:
+def _parse_ocd(ocd_path: str) -> tuple[dict, list, list]:
     tile_dir = _BACKEND / "tile-service"
     tmp = tile_dir / "_generate_intent_tmp.js"
     tmp.write_text(_NODE_EXTRACT, encoding="utf-8")
@@ -159,7 +214,7 @@ def _parse_ocd(ocd_path: str) -> tuple[dict, list]:
         "min_y": min_lat,
         "max_y": max_lat,
     }
-    return bbox, result.get("features", [])
+    return bbox, result.get("features", []), result.get("oob_polygons", [])
 
 
 def _circuit_id(controls: list) -> str:
@@ -179,7 +234,8 @@ FIELDS = [
 ]
 
 
-def process_map(map_name: str, cfg: dict, lri, seg_index, bbox: dict, center: tuple) -> list[dict]:
+def process_map(map_name: str, cfg: dict, lri, seg_index, bbox: dict, center: tuple,
+                oob_check=None) -> list[dict]:
     is_sprint = cfg["sprint"]
     td        = TD_SPRINT if is_sprint else TD_FOREST
     target_m  = DIST_SPRINT if is_sprint else DIST_FOREST
@@ -220,11 +276,16 @@ def process_map(map_name: str, cfg: dict, lri, seg_index, bbox: dict, center: tu
 
         cid    = _circuit_id(best.controls)
         n_legs = len(best.controls) - 1
-        print(f"{n_legs} jambes  fitness={best.fitness:.1f}")
+        print(f"{n_legs} jambes brutes  fitness={best.fitness:.1f}")
 
+        oob_skipped = 0
         for i in range(n_legs):
             lng0, lat0 = best.controls[i]
             lng1, lat1 = best.controls[i + 1]
+
+            if oob_check and (oob_check(lng0, lat0) or oob_check(lng1, lat1)):
+                oob_skipped += 1
+                continue
 
             m_per_lat = 111000.0
             cos_lat   = math.cos(math.radians((lat0 + lat1) / 2))
@@ -280,14 +341,17 @@ def process_map(map_name: str, cfg: dict, lri, seg_index, bbox: dict, center: tu
                 "SAFETY_RECOVERY":           round(float(nav["SAFETY_RECOVERY"]), 4),
                 "circuit_fitness":            round(float(best.fitness), 4),
             })
+        if oob_skipped:
+            print(f"    → {oob_skipped} jambes ignorées (OOB)")
 
     return rows
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--maps", nargs="*", default=list(MAPS), choices=list(MAPS),
-                        help="Cartes à traiter (défaut: toutes)")
+    MAPS_DEFAULT = [m for m in MAPS if m != "langrune"]  # langrune: 100% OOB en mode benchmark
+    parser.add_argument("--maps", nargs="*", default=MAPS_DEFAULT, choices=list(MAPS),
+                        help="Cartes à traiter (défaut: toutes sauf langrune)")
     args = parser.parse_args()
 
     lri = get_lri_model()
@@ -306,7 +370,7 @@ def main() -> None:
         print(f"{'='*60}")
 
         print(f"  Parsing OCD... ", end="", flush=True)
-        bbox, features = _parse_ocd(cfg["ocd"])
+        bbox, features, oob_polygons = _parse_ocd(cfg["ocd"])
         center_lat = (bbox["min_y"] + bbox["max_y"]) / 2
         center_lon = (bbox["min_x"] + bbox["max_x"]) / 2
         center     = (center_lon, center_lat)
@@ -315,8 +379,11 @@ def main() -> None:
         segments  = extract_line_segments(features, center_lat=center_lat)
         seg_index = build_segment_index(segments, isom_sem, center_lat)
         print(f"  seg_index : {seg_index.segment_count} segments")
+        oob_check = _build_oob_checker(oob_polygons)
+        if oob_polygons:
+            print(f"  OOB zones : {len(oob_polygons)} polygones")
 
-        rows = process_map(map_name, cfg, lri, seg_index, bbox, center)
+        rows = process_map(map_name, cfg, lri, seg_index, bbox, center, oob_check)
 
         if not rows:
             print(f"  [WARN] Aucune jambe générée")

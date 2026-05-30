@@ -251,7 +251,10 @@ async function uploadOcad(file) {
   fd.append('file', file);
   try {
     const resp = await fetch(`${TILE_SERVICE}/upload`, { method: 'POST', body: fd });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      throw new Error(body.error || `HTTP ${resp.status}`);
+    }
     const data = await resp.json();
     localStorage.setItem(`ocad_${currentMap}`, JSON.stringify({
       imageUrl: TILE_SERVICE + data.imageUrl,

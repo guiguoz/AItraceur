@@ -1,353 +1,228 @@
+#!/usr/bin/env python3
 """
-annotate_legs.py — CLI d'annotation manuelle des legs pour la calibration Phase 0.
-
-Produit backend/data/benchmark_legs.json : vérité terrain pour calibrer les seuils
-leg_type_thresholds (route_choice_jaccard, handrail_coverage, low_catch_score).
+annotate_legs.py — STEP B
+Serveur HTTP stdlib pour l'annotation humaine des jambes LRI.
 
 Usage :
-    cd backend
-    python scripts/annotate_legs.py
-    python scripts/annotate_legs.py --index ../../vikazimut/index.json --n 25
-    python scripts/annotate_legs.py --show-map   # ouvre un aperçu Leaflet par jambe
+  python backend/scripts/annotate_legs.py [--port 5500]
+  → http://localhost:5500
 
-Format de sortie benchmark_legs.json :
-    [{
-      "circuit_id": "vikazimut_4231",
-      "td_level": 3,
-      "circuit_type": "sprint",
-      "legs": [{
-        "idx": 0,
-        "dist_m": 185.3,
-        "bearing_deg": 42,
-        "labels": ["route_choice"],
-        "decision_points_manual": 2,
-        "decision_points_auto": 1,
-        "difficulty": 7
-      }]
-    }]
+Fichiers lus    : output/intent_legs_<map>.csv
+Fichiers écrits : output/annotations_<map>.csv
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import json
-import math
-import os
+import pathlib
 import sys
-import webbrowser
-from pathlib import Path
-from typing import List, Optional
+import urllib.parse
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
-# ── Path setup ──────────────────────────────────────────────────────────────
-SCRIPT_DIR = Path(__file__).resolve().parent
-BACKEND_DIR = SCRIPT_DIR.parent
-sys.path.insert(0, str(BACKEND_DIR))
+sys.stdout.reconfigure(encoding="utf-8")
 
+_SCRIPT = pathlib.Path(__file__).parent
+_ROOT   = _SCRIPT.parent.parent
+OUTPUT  = _ROOT / "output"
+HTML    = _SCRIPT / "annotate_legs.html"
 
-# ── Géo helpers ──────────────────────────────────────────────────────────────
+VALID_LABELS = {"suivi", "attaque", "transition", "uncertain"}
 
-def _haversine(lng1: float, lat1: float, lng2: float, lat2: float) -> float:
-    R = 6_371_000.0
-    dlat = math.radians(lat2 - lat1)
-    dlng = math.radians(lng2 - lng1)
-    a = (math.sin(dlat / 2) ** 2
-         + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2))
-         * math.sin(dlng / 2) ** 2)
-    return R * 2 * math.asin(math.sqrt(a))
+ANNOTATION_FIELDS = ["map", "circuit_id", "leg_index", "label", "timestamp"]
 
 
-def _bearing(lng1: float, lat1: float, lng2: float, lat2: float) -> int:
-    dlng = math.radians(lng2 - lng1)
-    lat1r, lat2r = math.radians(lat1), math.radians(lat2)
-    x = math.sin(dlng) * math.cos(lat2r)
-    y = math.cos(lat1r) * math.sin(lat2r) - math.sin(lat1r) * math.cos(lat2r) * math.cos(dlng)
-    return int((math.degrees(math.atan2(x, y)) + 360) % 360)
+# ── Helpers CSV ───────────────────────────────────────────────────────────────
+
+def _available_maps() -> list[str]:
+    return sorted(
+        p.stem.removeprefix("intent_legs_")
+        for p in OUTPUT.glob("intent_legs_*.csv")
+    )
 
 
-# ── Aperçu carte (--show-map) ─────────────────────────────────────────────────
-
-def _show_leg_map(lng1: float, lat1: float, lng2: float, lat2: float) -> None:
-    html = f"""<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Leg preview</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <style>body{{margin:0}}#map{{height:100vh}}</style>
-</head>
-<body>
-<div id="map"></div>
-<script>
-  var map = L.map('map').setView([{(lat1+lat2)/2}, {(lng1+lng2)/2}], 15);
-  L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png').addTo(map);
-  L.polyline([[{lat1},{lng1}],[{lat2},{lng2}]], {{color:'red',weight:5}}).addTo(map);
-  L.circleMarker([{lat1},{lng1}], {{radius:8,color:'green'}}).addTo(map).bindPopup('Départ').openPopup();
-  L.circleMarker([{lat2},{lng2}], {{radius:8,color:'blue'}}).addTo(map).bindPopup('Arrivée');
-</script>
-</body>
-</html>"""
-    tmp = Path(os.environ.get("TEMP", "/tmp")) / "leg_preview.html"
-    tmp.write_text(html, encoding="utf-8")
-    webbrowser.open(tmp.as_uri())
+def _load_legs(map_name: str) -> list[dict]:
+    path = OUTPUT / f"intent_legs_{map_name}.csv"
+    if not path.exists():
+        return []
+    with open(path, encoding="utf-8") as f:
+        return list(csv.DictReader(f))
 
 
-# ── Chargement index Vikazimut ────────────────────────────────────────────────
-
-def _load_courses(index_path: Path, n: int, circuit_type: Optional[str]) -> List[dict]:
-    if not index_path.exists():
-        print(f"[ERREUR] index.json introuvable : {index_path}")
-        sys.exit(1)
-
-    with open(index_path, encoding="utf-8") as f:
-        all_courses = json.load(f)
-
-    usable = [
-        c for c in all_courses
-        if c.get("is_foot_o")
-        and c.get("controls")
-        and c.get("bounds")
-        and len([x for x in c.get("controls", []) if x.get("type") == "Control"]) >= 5
-    ]
-
-    if circuit_type == "sprint":
-        usable = [c for c in usable if c.get("discipline") in ("urbano", "sprint")]
-    elif circuit_type in ("forest", "md"):
-        usable = [c for c in usable if c.get("discipline") not in ("urbano", "sprint")]
-
-    return usable[:n]
+def _load_annotations(map_name: str) -> list[dict]:
+    path = OUTPUT / f"annotations_{map_name}.csv"
+    if not path.exists():
+        return []
+    with open(path, encoding="utf-8") as f:
+        return list(csv.DictReader(f))
 
 
-# ── Auto decision_points (si RouteAnalyzer disponible) ──────────────────────
-
-def _auto_dp(lng1, lat1, lng2, lat2) -> Optional[int]:
-    """Tente de charger le RouteAnalyzer depuis OSM pour calculer DP auto."""
-    try:
-        import osmnx  # noqa: F401 — vérifie juste la dispo
-    except ImportError:
-        return None
-    try:
-        from src.services.optimization.route_analyzer import RouteAnalyzer
-        # Bbox minimale autour du leg
-        margin = 0.006
-        ways_placeholder = []  # sans ways OSM, retourne None
-        ra = RouteAnalyzer(ways_placeholder)
-        return ra.count_decision_points(lng1, lat1, lng2, lat2)
-    except Exception:
-        return None
-
-
-# ── Saisie utilisateur ────────────────────────────────────────────────────────
-
-_LABEL_MAP = {
-    "r": "route_choice",
-    "h": "handrail",
-    "t": "technical_read",
-    "d": "direct",
-}
-
-
-def _prompt(msg: str, default: Optional[str] = None) -> str:
-    if default is not None:
-        msg = f"{msg} [{default}]"
-    while True:
-        try:
-            val = input(msg + " : ").strip()
-        except (EOFError, KeyboardInterrupt):
-            raise
-        if not val and default is not None:
-            return default
-        if val:
-            return val
-
-
-def _ask_labels() -> List[str]:
-    while True:
-        raw = _prompt("[R]oute_choice [H]andrail [T]ech_read [D]irect (ex: RH ou D)").lower()
-        labels = [_LABEL_MAP[c] for c in raw if c in _LABEL_MAP]
-        if labels:
-            return labels
-        if raw in ("s", "q"):
-            raise ValueError(raw)
-        print("  Codes valides : R H T D (minuscules acceptées)")
-
-
-def _ask_int(msg: str, lo: int, hi: int, default: Optional[int] = None) -> int:
-    default_str = str(default) if default is not None else None
-    while True:
-        raw = _prompt(msg, default=default_str)
-        try:
-            v = int(raw)
-            if lo <= v <= hi:
-                return v
-            print(f"  Valeur entre {lo} et {hi}")
-        except ValueError:
-            print(f"  Entier attendu")
-
-
-# ── Annotation principale ─────────────────────────────────────────────────────
-
-def annotate(
-    courses: List[dict],
-    benchmark: List[dict],
-    out_path: Path,
-    td_level: int,
-    circuit_type: str,
-    show_map: bool,
-) -> None:
-    annotated_ids = {c["circuit_id"] for c in benchmark}
-
-    for course in courses:
-        cid = str(course.get("id", "?"))
-        discipline = course.get("discipline", "?")
-        controls_raw = [c for c in course.get("controls", []) if c.get("type") == "Control"]
-
-        if cid in annotated_ids:
-            print(f"⏭  Skip {cid} (déjà annoté)")
-            continue
-
-        n_legs = len(controls_raw) - 1
-        if n_legs < 1:
-            continue
-
-        print(f"\n{'─'*60}")
-        print(f"Circuit {cid} ({discipline}, TD{td_level}) — {n_legs} jambes")
-        print(f"{'─'*60}")
-
-        legs_data = []
-        skip_circuit = False
-
-        for i in range(n_legs):
-            a = controls_raw[i]
-            b = controls_raw[i + 1]
-            lng1, lat1 = float(a["lng"]), float(a["lat"])
-            lng2, lat2 = float(b["lng"]), float(b["lat"])
-            dist_m = _haversine(lng1, lat1, lng2, lat2)
-            bearing = _bearing(lng1, lat1, lng2, lat2)
-
-            auto_dp = _auto_dp(lng1, lat1, lng2, lat2)
-
-            print(f"\n  Jambe {i+1}/{n_legs} → {dist_m:.0f}m")
-            print(f"    De  : {lat1:.5f}, {lng1:.5f}  (ctrl #{i})")
-            print(f"    À   : {lat2:.5f}, {lng2:.5f}  (ctrl #{i+1})")
-            print(f"    Google Maps (départ) : https://maps.google.com/?q={lat1},{lng1}")
-            if auto_dp is not None:
-                print(f"    Auto decision_points : {auto_dp}")
-            else:
-                print(f"    Auto decision_points : n/a (OSM non disponible)")
-
-            if show_map:
-                _show_leg_map(lng1, lat1, lng2, lat2)
-
-            try:
-                labels = _ask_labels()
-            except ValueError as e:
-                if str(e) == "s":
-                    skip_circuit = True
-                    break
-                elif str(e) == "q":
-                    _save(benchmark, out_path)
-                    print(f"\nSauvegardé → {out_path}")
-                    sys.exit(0)
-                raise
-
-            dp_manual = _ask_int(
-                f"    Decision points manuels (0-5)",
-                0, 5, default=auto_dp
-            )
-            difficulty = _ask_int("    Difficulté (1-10)", 1, 10)
-
-            legs_data.append({
-                "idx": i,
-                "dist_m": round(dist_m, 1),
-                "bearing_deg": bearing,
-                "labels": labels,
-                "decision_points_manual": dp_manual,
-                "decision_points_auto": auto_dp,
-                "difficulty": difficulty,
-            })
-
-        if skip_circuit:
-            print(f"  ↩ Circuit {cid} ignoré")
-            continue
-
-        benchmark.append({
-            "circuit_id": cid,
-            "td_level": td_level,
-            "circuit_type": circuit_type,
-            "legs": legs_data,
+def _save_annotation(map_name: str, circuit_id: str, leg_index: int,
+                     label: str) -> None:
+    path = OUTPUT / f"annotations_{map_name}.csv"
+    with open(path, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=ANNOTATION_FIELDS)
+        if f.tell() == 0:   # fichier vide → écrire le header (atomique, pas de TOCTOU)
+            w.writeheader()
+        w.writerow({
+            "map":        map_name,
+            "circuit_id": circuit_id,
+            "leg_index":  leg_index,
+            "label":      label,
+            "timestamp":  datetime.now(timezone.utc).isoformat(),
         })
-        annotated_ids.add(cid)
-        _save(benchmark, out_path)
-        print(f"\n  ✓ Circuit {cid} annoté ({len(legs_data)} jambes) — sauvegardé")
-
-    print(f"\n{'='*60}")
-    print(f"Annotation terminée — {len(benchmark)} circuits dans {out_path}")
 
 
-def _save(benchmark: List[dict], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(benchmark, f, ensure_ascii=False, indent=2)
+# ── Request handler ───────────────────────────────────────────────────────────
+
+class Handler(BaseHTTPRequestHandler):
+
+    def log_message(self, fmt: str, *args) -> None:
+        if args and str(args[1]) == "200":
+            return
+        super().log_message(fmt, *args)
+
+    def _send_json(self, data, status: int = 200) -> None:
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_error_json(self, msg: str, status: int = 400) -> None:
+        self._send_json({"error": msg}, status)
+
+    def do_OPTIONS(self) -> None:
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
+    def do_GET(self) -> None:
+        parsed = urllib.parse.urlparse(self.path)
+        path   = parsed.path.rstrip("/")
+
+        if path == "" or path == "/":
+            self._serve_html()
+        elif path == "/api/maps":
+            self._send_json(_available_maps())
+        elif path.startswith("/api/legs/"):
+            map_name = path.removeprefix("/api/legs/")
+            if not map_name or any(c in map_name for c in ('/', '\\', '..')):
+                self._send_error_json("map_name invalide", 400)
+                return
+            legs = _load_legs(map_name)
+            if not legs:
+                self._send_error_json(f"Carte '{map_name}' introuvable ou vide", 404)
+                return
+            slim = [
+                {
+                    "circuit_id":        r["circuit_id"],
+                    "condition":         r.get("condition", ""),
+                    "leg_index":         int(r["leg_index"]),
+                    "leg_m":             float(r["leg_m"]),
+                    "start_lat":         float(r["start_lat"]),
+                    "start_lon":         float(r["start_lon"]),
+                    "end_lat":           float(r["end_lat"]),
+                    "end_lon":           float(r["end_lon"]),
+                    "pc1":               float(r["pc1"]),
+                    "pc2":               float(r.get("pc2", 0)),
+                    "decision_pressure": float(r.get("decision_pressure", 0)),
+                    "HANDRAIL_FOLLOW":   float(r.get("HANDRAIL_FOLLOW", 0)),
+                    "ATTACK_POINT":      float(r.get("ATTACK_POINT", 0)),
+                    "SAFETY_RECOVERY":   float(r.get("SAFETY_RECOVERY", 0)),
+                    "RELIEF_CROSSING_GUIDANCE": float(r.get("RELIEF_CROSSING_GUIDANCE", 0)),
+                }
+                for r in legs
+            ]
+            self._send_json(slim)
+        elif path.startswith("/api/annotations/"):
+            map_name = path.removeprefix("/api/annotations/")
+            if not map_name or any(c in map_name for c in ('/', '\\', '..')):
+                self._send_error_json("map_name invalide", 400)
+                return
+            self._send_json(_load_annotations(map_name))
+        else:
+            self._send_error_json("Not found", 404)
+
+    def _serve_html(self) -> None:
+        if not HTML.exists():
+            self._send_error_json("annotate_legs.html introuvable", 500)
+            return
+        body = HTML.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self) -> None:
+        parsed = urllib.parse.urlparse(self.path)
+        path   = parsed.path.rstrip("/")
+
+        if path != "/api/annotate":
+            self._send_error_json("Not found", 404)
+            return
+
+        length = int(self.headers.get("Content-Length", 0))
+        body   = self.rfile.read(length)
+        try:
+            data = json.loads(body)
+        except json.JSONDecodeError:
+            self._send_error_json("JSON invalide")
+            return
+
+        map_name   = str(data.get("map", "")).strip()
+        circuit_id = str(data.get("circuit_id", "")).strip()
+        leg_index  = data.get("leg_index")
+        label      = str(data.get("label", "")).strip()
+
+        if not map_name or not circuit_id:
+            self._send_error_json("map et circuit_id requis")
+            return
+        if leg_index is None:
+            self._send_error_json("leg_index requis")
+            return
+        if label not in VALID_LABELS:
+            self._send_error_json(
+                f"label invalide : {label!r}  (valides: {sorted(VALID_LABELS)})"
+            )
+            return
+
+        try:
+            leg_index = int(leg_index)
+        except (TypeError, ValueError):
+            self._send_error_json("leg_index doit être un entier")
+            return
+
+        _save_annotation(map_name, circuit_id, leg_index, label)
+        self._send_json({"ok": True, "map": map_name, "leg_index": leg_index, "label": label})
 
 
-# ── Main ─────────────────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="CLI d'annotation manuelle des legs CO pour calibration Phase 0"
-    )
-    parser.add_argument(
-        "--index",
-        default=str(BACKEND_DIR.parent / "vikazimut" / "index.json"),
-        help="Chemin vers vikazimut/index.json",
-    )
-    parser.add_argument(
-        "--out",
-        default=str(BACKEND_DIR / "data" / "benchmark_legs.json"),
-        help="Fichier de sortie (défaut: data/benchmark_legs.json)",
-    )
-    parser.add_argument("--n", type=int, default=25,
-                        help="Nombre de circuits à annoter (défaut: 25)")
-    parser.add_argument("--td", type=int, default=3, choices=[1, 2, 3, 4, 5],
-                        help="Niveau TD à assigner (défaut: 3)")
-    parser.add_argument("--circuit-type", default="sprint",
-                        choices=["sprint", "forest", "md"],
-                        help="Type de circuit (défaut: sprint)")
-    parser.add_argument("--show-map", action="store_true",
-                        help="Ouvrir un aperçu Leaflet HTML par jambe (nécessite un navigateur)")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=5500)
     args = parser.parse_args()
 
-    out_path = Path(args.out)
-
-    # Charger annotation existante (resume-capable)
-    benchmark: List[dict] = []
-    if out_path.exists():
-        with open(out_path, encoding="utf-8") as f:
-            benchmark = json.load(f)
-        print(f"Reprise : {len(benchmark)} circuits déjà annotés dans {out_path}")
+    maps = _available_maps()
+    if maps:
+        print(f"[annotate] Cartes disponibles : {maps}")
     else:
-        print(f"Nouveau fichier : {out_path}")
+        print("[annotate] Aucune carte — lancer d'abord generate_intent_legs.py")
+    print(f"[annotate] Démarrage sur http://localhost:{args.port}")
 
-    courses = _load_courses(Path(args.index), args.n, args.circuit_type)
-    if not courses:
-        print("[ERREUR] Aucun circuit Vikazimut disponible.")
-        sys.exit(1)
-
-    print(f"\n{len(courses)} circuits chargés. Commandes : [s]=skip circuit  [q]=quitter & sauvegarder\n")
-
+    server = HTTPServer(("localhost", args.port), Handler)
     try:
-        annotate(
-            courses=courses,
-            benchmark=benchmark,
-            out_path=out_path,
-            td_level=args.td,
-            circuit_type=args.circuit_type,
-            show_map=args.show_map,
-        )
+        server.serve_forever()
     except KeyboardInterrupt:
-        _save(benchmark, out_path)
-        print(f"\nInterrompu — sauvegardé : {out_path}")
+        print("\n[annotate] Arrêt.")
 
 
 if __name__ == "__main__":

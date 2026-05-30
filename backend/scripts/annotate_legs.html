@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LRI — Annotation jambes</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { display: flex; height: 100vh; font-family: system-ui, sans-serif; font-size: 13px; background: #1a1a2e; color: #e0e0e0; }
+
+/* ── Sidebar ─────────────────────────────────────────────────── */
+#sidebar {
+  width: 300px; min-width: 280px;
+  display: flex; flex-direction: column;
+  background: #16213e; border-right: 1px solid #2a2a4a;
+}
+#sidebar-header {
+  padding: 12px;
+  border-bottom: 1px solid #2a2a4a;
+  background: #0f3460;
+}
+#sidebar-header h1 { font-size: 14px; font-weight: 600; letter-spacing: 0.05em; }
+#sidebar-header p  { font-size: 11px; color: #94a3b8; margin-top: 3px; }
+
+#controls-bar {
+  padding: 10px 12px;
+  border-bottom: 1px solid #2a2a4a;
+  display: flex; flex-direction: column; gap: 8px;
+}
+#map-select {
+  width: 100%; padding: 6px 8px; border-radius: 4px;
+  background: #1e2d4a; border: 1px solid #2a3a5a; color: #e0e0e0;
+  font-size: 12px;
+}
+#progress-bar-wrap { position: relative; height: 6px; background: #2a3a5a; border-radius: 3px; }
+#progress-bar      { height: 100%; background: #4ade80; border-radius: 3px; transition: width 0.3s; }
+#progress-label    { font-size: 11px; color: #94a3b8; text-align: right; }
+
+#blind-toggle {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: #94a3b8; cursor: pointer; user-select: none;
+}
+#blind-toggle input { accent-color: #4ade80; }
+
+#leg-list {
+  flex: 1; overflow-y: auto;
+  padding: 4px 0;
+}
+.leg-item {
+  padding: 7px 12px; cursor: pointer;
+  display: flex; align-items: center; gap: 8px;
+  border-bottom: 1px solid #1e2a3a;
+  transition: background 0.1s;
+}
+.leg-item:hover  { background: #1e2d4a; }
+.leg-item.active { background: #0f3460; }
+.leg-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: #2a3a5a;
+}
+.leg-dot.annotated { background: #4ade80; }
+.leg-dot.uncertain { background: #facc15; }
+.leg-meta { flex: 1; min-width: 0; }
+.leg-title { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.leg-sub   { font-size: 10px; color: #64748b; margin-top: 1px; }
+.leg-label { font-size: 10px; color: #4ade80; font-weight: 600; text-transform: uppercase; flex-shrink: 0; }
+.leg-label.uncertain { color: #facc15; }
+
+/* ── Map area ────────────────────────────────────────────────── */
+#map-wrap { flex: 1; display: flex; flex-direction: column; }
+#map      { flex: 1; }
+
+/* ── Annotation panel ────────────────────────────────────────── */
+#ann-panel {
+  height: 140px; background: #16213e;
+  border-top: 1px solid #2a2a4a;
+  padding: 10px 16px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+#ann-info {
+  font-size: 12px; color: #94a3b8;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#ann-pc1-line {
+  font-size: 11px; color: #38bdf8;
+  min-height: 15px;
+}
+#ann-buttons {
+  display: flex; gap: 8px;
+}
+.ann-btn {
+  flex: 1; padding: 8px 4px;
+  border: 2px solid transparent; border-radius: 6px;
+  background: #1e2d4a; color: #e0e0e0;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: all 0.15s; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.ann-btn:hover { border-color: currentColor; }
+.ann-btn.suivi     { color: #60a5fa; }
+.ann-btn.attaque   { color: #f87171; }
+.ann-btn.transition{ color: #a78bfa; }
+.ann-btn.uncertain { color: #facc15; }
+.ann-btn.active-btn { border-color: currentColor !important; background: #0f3460; }
+
+#ann-nav {
+  display: flex; gap: 8px; align-items: center;
+}
+#btn-prev, #btn-next {
+  padding: 5px 12px; border-radius: 4px;
+  background: #1e2d4a; border: 1px solid #2a3a5a;
+  color: #e0e0e0; font-size: 11px; cursor: pointer;
+}
+#btn-prev:hover, #btn-next:hover { background: #2a3a5a; }
+#auto-advance {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11px; color: #64748b; cursor: pointer; margin-left: auto;
+}
+#auto-advance input { accent-color: #4ade80; }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<div id="sidebar">
+  <div id="sidebar-header">
+    <h1>LRI — Annotation jambes</h1>
+    <p>Validation métier : PC1 ↔ qualité traceur FFCO</p>
+  </div>
+
+  <div id="controls-bar">
+    <select id="map-select"><option value="">— Sélectionner une carte —</option></select>
+    <div>
+      <div id="progress-bar-wrap"><div id="progress-bar" style="width:0%"></div></div>
+      <div id="progress-label">0 / 0 annotées</div>
+    </div>
+    <label id="blind-toggle">
+      <input type="checkbox" id="blind-chk" checked>
+      Mode aveugle (PC1 caché)
+    </label>
+  </div>
+
+  <div id="leg-list"></div>
+</div>
+
+<!-- Map + panel -->
+<div id="map-wrap">
+  <div id="map"></div>
+  <div id="ann-panel">
+    <div id="ann-info">← Sélectionner une carte et une jambe</div>
+    <div id="ann-pc1-line"></div>
+    <div id="ann-buttons">
+      <button class="ann-btn suivi"      onclick="annotate('suivi')">Suivi</button>
+      <button class="ann-btn attaque"    onclick="annotate('attaque')">Attaque</button>
+      <button class="ann-btn transition" onclick="annotate('transition')">Transition</button>
+      <button class="ann-btn uncertain"  onclick="annotate('uncertain')">?</button>
+    </div>
+    <div id="ann-nav">
+      <button id="btn-prev" onclick="navLeg(-1)">◀ Préc.</button>
+      <button id="btn-next" onclick="navLeg(+1)">Suiv. ▶</button>
+      <label id="auto-advance">
+        <input type="checkbox" id="auto-adv-chk" checked>
+        Auto-suivant
+      </label>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let currentMap  = null;
+let legs        = [];    // [{circuit_id, leg_index, start_lat, ...}, ...]
+let annotations = {};    // "circuit_id:leg_index" → label
+let order       = [];    // shuffled indices into legs[]
+let currentPos  = 0;     // index into order[]
+let mapLayer    = null;
+let legLine     = null;
+let startMarker = null;
+let endMarker   = null;
+
+// ── Leaflet ───────────────────────────────────────────────────────────────────
+const lmap = L.map('map', { zoomControl: true });
+
+const tileOTM = L.tileLayer(
+  'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+  { attribution: '© OpenTopoMap', maxZoom: 17 }
+).addTo(lmap);
+
+const tileOSM = L.tileLayer(
+  'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  { attribution: '© OpenStreetMap', maxZoom: 19 }
+);
+
+L.control.layers(
+  { 'OpenTopoMap (relief)': tileOTM, 'OpenStreetMap': tileOSM },
+  {}, { position: 'topright' }
+).addTo(lmap);
+
+lmap.setView([46.5, 2.5], 6);
+
+// ── Startup ───────────────────────────────────────────────────────────────────
+async function init() {
+  const resp = await fetch('/api/maps');
+  const maps = await resp.json();
+  const sel  = document.getElementById('map-select');
+  maps.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m; opt.textContent = m;
+    sel.appendChild(opt);
+  });
+}
+
+document.getElementById('map-select').addEventListener('change', e => {
+  if (e.target.value) loadMap(e.target.value);
+});
+
+// ── Load map data ─────────────────────────────────────────────────────────────
+async function loadMap(mapName) {
+  currentMap  = mapName;
+  currentPos  = 0;
+
+  const [legsResp, annResp] = await Promise.all([
+    fetch(`/api/legs/${mapName}`),
+    fetch(`/api/annotations/${mapName}`)
+  ]);
+  legs = await legsResp.json();
+  const annList = await annResp.json();
+
+  annotations = {};
+  annList.forEach(a => {
+    annotations[`${a.circuit_id}:${a.leg_index}`] = a.label;
+  });
+
+  // Shuffle stable par (map, date de session)
+  const shuffleSeed = hashCode(mapName + new Date().toDateString());
+  order = shuffleSeeded([...Array(legs.length).keys()], shuffleSeed);
+
+  renderLegList();
+  updateProgress();
+
+  // Aller sur la première jambe non annotée
+  const firstUnannotated = order.findIndex(i => !annotations[legKey(legs[i])]);
+  currentPos = firstUnannotated >= 0 ? firstUnannotated : 0;
+  selectLeg(currentPos);
+}
+
+// ── Leg list ──────────────────────────────────────────────────────────────────
+function legKey(leg) { return `${leg.circuit_id}:${leg.leg_index}`; }
+
+function renderLegList() {
+  const ul = document.getElementById('leg-list');
+  ul.innerHTML = '';
+  order.forEach((legIdx, pos) => {
+    const leg   = legs[legIdx];
+    const key   = legKey(leg);
+    const label = annotations[key];
+    const li    = document.createElement('div');
+    li.className = 'leg-item' + (pos === currentPos ? ' active' : '');
+    li.dataset.pos = pos;
+
+    const dot = document.createElement('div');
+    dot.className = 'leg-dot' + (label ? (label === 'uncertain' ? ' uncertain' : ' annotated') : '');
+
+    const meta  = document.createElement('div');
+    meta.className = 'leg-meta';
+    meta.innerHTML = `<div class="leg-title">${leg.condition} · jambe #${leg.leg_index}</div>`
+      + `<div class="leg-sub">${leg.leg_m}m · circ. ${leg.circuit_id}</div>`;
+
+    li.appendChild(dot);
+    li.appendChild(meta);
+
+    if (label) {
+      const lbl = document.createElement('div');
+      lbl.className = 'leg-label' + (label === 'uncertain' ? ' uncertain' : '');
+      lbl.textContent = label;
+      li.appendChild(lbl);
+    }
+
+    li.addEventListener('click', () => { currentPos = pos; selectLeg(pos); });
+    ul.appendChild(li);
+  });
+}
+
+// ── Select + display leg ──────────────────────────────────────────────────────
+function selectLeg(pos) {
+  currentPos = pos;
+  if (pos < 0 || pos >= order.length) return;
+
+  // Update active in list
+  document.querySelectorAll('.leg-item').forEach(el => {
+    el.classList.toggle('active', +el.dataset.pos === pos);
+  });
+
+  // Scroll active item into view
+  const active = document.querySelector('.leg-item.active');
+  if (active) active.scrollIntoView({ block: 'nearest' });
+
+  const leg   = legs[order[pos]];
+  const key   = legKey(leg);
+  const label = annotations[key] || null;
+
+  // Draw on map
+  drawLeg(leg);
+
+  // Info panel
+  const isBlind = document.getElementById('blind-chk').checked;
+  document.getElementById('ann-info').textContent =
+    `Carte: ${currentMap}  ·  ${leg.condition}  ·  jambe #${leg.leg_index}  ·  ${leg.leg_m}m`;
+
+  const pc1Line = document.getElementById('ann-pc1-line');
+  if (isBlind) {
+    pc1Line.textContent = '(PC1 masqué — mode aveugle actif)';
+    pc1Line.style.color = '#4b5563';
+  } else {
+    pc1Line.textContent =
+      `PC1 = ${leg.pc1.toFixed(3)}  ·  PC2 = ${leg.pc2.toFixed(3)}  ·  `
+      + `decision_pressure = ${leg.decision_pressure.toFixed(3)}  ·  `
+      + `ATTACK = ${leg.ATTACK_POINT.toFixed(3)}  ·  `
+      + `HANDRAIL = ${leg.HANDRAIL_FOLLOW.toFixed(3)}`;
+    pc1Line.style.color = '#38bdf8';
+  }
+
+  // Highlight current active button
+  document.querySelectorAll('.ann-btn').forEach(b => {
+    b.classList.toggle('active-btn', label && b.classList.contains(label));
+  });
+}
+
+function drawLeg(leg) {
+  if (legLine)   { lmap.removeLayer(legLine);   legLine   = null; }
+  if (startMarker){ lmap.removeLayer(startMarker); startMarker = null; }
+  if (endMarker)  { lmap.removeLayer(endMarker);   endMarker   = null; }
+
+  const p0 = [leg.start_lat, leg.start_lon];
+  const p1 = [leg.end_lat,   leg.end_lon];
+
+  legLine = L.polyline([p0, p1], { color: '#c026d3', weight: 4, opacity: 0.9 }).addTo(lmap);
+
+  startMarker = L.circleMarker(p0, {
+    radius: 7, color: '#15803d', fillColor: '#4ade80', fillOpacity: 1, weight: 2
+  }).addTo(lmap).bindTooltip('Départ', { permanent: false });
+
+  endMarker = L.circleMarker(p1, {
+    radius: 7, color: '#991b1b', fillColor: '#f87171', fillOpacity: 1, weight: 2
+  }).addTo(lmap).bindTooltip('Arrivée', { permanent: false });
+
+  lmap.fitBounds(L.latLngBounds([p0, p1]).pad(0.4));
+}
+
+// ── Annotation ────────────────────────────────────────────────────────────────
+async function annotate(label) {
+  if (!currentMap || order.length === 0) return;
+  const leg = legs[order[currentPos]];
+  const key = legKey(leg);
+
+  await fetch('/api/annotate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      map: currentMap,
+      circuit_id: leg.circuit_id,
+      leg_index: leg.leg_index,
+      label
+    })
+  });
+
+  annotations[key] = label;
+  renderLegList();
+  updateProgress();
+  selectLeg(currentPos);   // refresh button highlight
+
+  if (document.getElementById('auto-adv-chk').checked) {
+    // Avancer à la prochaine jambe non annotée
+    const next = findNextUnannotated(currentPos);
+    if (next !== null) selectLeg(next);
+  }
+}
+
+function findNextUnannotated(from) {
+  for (let i = from + 1; i < order.length; i++) {
+    if (!annotations[legKey(legs[order[i]])]) return i;
+  }
+  // Wrap around
+  for (let i = 0; i < from; i++) {
+    if (!annotations[legKey(legs[order[i]])]) return i;
+  }
+  return null;
+}
+
+function navLeg(delta) {
+  const next = Math.max(0, Math.min(order.length - 1, currentPos + delta));
+  selectLeg(next);
+}
+
+function updateProgress() {
+  const total    = legs.length;
+  const annotated = Object.keys(annotations).length;
+  const pct = total ? (annotated / total * 100) : 0;
+  document.getElementById('progress-bar').style.width = pct + '%';
+  document.getElementById('progress-label').textContent = `${annotated} / ${total} annotées`;
+}
+
+// ── Blind mode toggle ─────────────────────────────────────────────────────────
+document.getElementById('blind-chk').addEventListener('change', () => {
+  if (order.length > 0) selectLeg(currentPos);
+});
+
+// ── Keyboard shortcuts ────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  switch (e.key) {
+    case '1': annotate('suivi');      break;
+    case '2': annotate('attaque');    break;
+    case '3': annotate('transition'); break;
+    case '4': annotate('uncertain');  break;
+    case 'ArrowRight': case 'n': navLeg(+1); break;
+    case 'ArrowLeft':  case 'p': navLeg(-1); break;
+  }
+});
+
+// ── Utils ─────────────────────────────────────────────────────────────────────
+function hashCode(str) {
+  let h = 0;
+  for (const c of str) { h = Math.imul(31, h) + c.charCodeAt(0) | 0; }
+  return h;
+}
+
+function shuffleSeeded(arr, seed) {
+  const a = [...arr];
+  let s = seed >>> 0;
+  for (let i = a.length - 1; i > 0; i--) {
+    s = (Math.imul(1664525, s) + 1013904223) >>> 0;
+    const j = s % (i + 1);
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>

@@ -128,7 +128,7 @@ proj4.defs('EPSG:2154', '+proj=lcc +lat_0=46.5 +lon_0=3 +lat_1=44 +lat_2=49 +x_0
     if (xs.length === 0) { process.stderr.write('No coords extracted\n'); process.exit(1); }
     xs.sort((a, b) => a - b); ys.sort((a, b) => a - b);
     const p = (arr, q) => arr[Math.max(0, Math.min(arr.length - 1, Math.floor(arr.length * q)))];
-    const bbox = [p(xs, 0.01), p(ys, 0.01), p(xs, 0.99), p(ys, 0.99)];
+    const bbox = [p(xs, 0.05), p(ys, 0.05), p(xs, 0.95), p(ys, 0.95)];
     const lineFeats = allFeatures.filter(f =>
         f.geometry && (f.geometry.type === 'LineString' || f.geometry.type === 'MultiLineString')
     );
@@ -153,12 +153,11 @@ def _parse_ocd(ocd_path: str) -> tuple[dict, list]:
     result = json.loads(r.stdout.strip())
     raw_bbox = result["bbox"]
     min_lon, min_lat, max_lon, max_lat = raw_bbox
-    margin = 0.001
     bbox = {
-        "min_x": min_lon - margin,
-        "max_x": max_lon + margin,
-        "min_y": min_lat - margin,
-        "max_y": max_lat + margin,
+        "min_x": min_lon,
+        "max_x": max_lon,
+        "min_y": min_lat,
+        "max_y": max_lat,
     }
     return bbox, result.get("features", [])
 

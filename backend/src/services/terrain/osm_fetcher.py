@@ -31,12 +31,14 @@ def _post_overpass(query: str, timeout: int = 120) -> "requests.Response":
     les pannes Overpass ne bloquent l'endpoint pendant 45+ secondes.
     """
     _CONNECT_TIMEOUT = 5.0  # secondes max pour établir la connexion TCP
+    _HEADERS = {"User-Agent": "AItraceur/1.0 (orienteering course design; contact github.com/aitraceur)"}
     last_exc: Exception = RuntimeError("No Overpass mirrors configured")
     for url in _OVERPASS_MIRRORS:
         try:
             resp = requests.post(
                 url,
                 data={"data": query},
+                headers=_HEADERS,
                 timeout=(_CONNECT_TIMEOUT, timeout),  # (connect, read)
             )
             resp.raise_for_status()

@@ -38,6 +38,13 @@ try:
 except ImportError:
     _HAS_SHAPELY = False
 
+try:
+    from PIL import Image, ImageDraw
+    from scipy.ndimage import binary_dilation
+    _HAS_PIL = True
+except ImportError:
+    _HAS_PIL = False
+
 
 def _point_in_polygon(lng: float, lat: float, ring: list) -> bool:
     inside = False
@@ -79,6 +86,54 @@ def _build_oob_checker(oob_features: list):
         if not rings:
             return lambda lng, lat: False
         return lambda lng, lat: any(_point_in_polygon(lng, lat, r) for r in rings)
+
+def _build_oob_heatmap_cache(oob_polygons: list, bbox: dict):
+    """Rasterise les polygones OOB en forbidden_mask 1024×1024 pour le GA."""
+    if not _HAS_PIL:
+        return None
+    from services.learning.ocad_patch_scorer import HeatmapCache
+
+    W, H = 1024, 1024
+    min_lng, max_lng = bbox["min_x"], bbox["max_x"]
+    min_lat, max_lat = bbox["min_y"], bbox["max_y"]
+
+    def to_px(lng: float, lat: float) -> tuple[int, int]:
+        px = int((lng - min_lng) / (max_lng - min_lng) * W)
+        py = int((max_lat - lat) / (max_lat - min_lat) * H)
+        return (max(0, min(W - 1, px)), max(0, min(H - 1, py)))
+
+    img = Image.new("1", (W, H), 0)
+    draw = ImageDraw.Draw(img)
+    for f in oob_polygons:
+        geom = f.get("geometry", {})
+        gtype = geom.get("type", "")
+        if gtype == "Polygon":
+            rings = geom["coordinates"]
+        elif gtype == "MultiPolygon":
+            rings = [r for poly in geom["coordinates"] for r in poly]
+        else:
+            continue
+        for ring in rings:
+            pts = [to_px(c[0], c[1]) for c in ring]
+            if len(pts) >= 3:
+                draw.polygon(pts, fill=1)
+
+    forbidden_mask = np.array(img, dtype=bool)
+    # Dilate ~30 m so controls don't spawn right on OOB edges
+    mpp = (max_lng - min_lng) * 111000.0 / W
+    k = max(5, int(30.0 / mpp))
+    forbidden_mask = binary_dilation(forbidden_mask, structure=np.ones((k, k), dtype=bool))
+
+    scores = np.full((H, W), 0.45, dtype=np.float32)
+    return HeatmapCache(
+        scores=scores,
+        bbox=(min_lng, min_lat, max_lng, max_lat),
+        step_px=1,
+        map_w=W,
+        map_h=H,
+        forbidden_mask=forbidden_mask,
+    )
+
 
 _SCRIPT  = pathlib.Path(__file__).parent
 _BACKEND = _SCRIPT.parent
@@ -137,6 +192,22 @@ MAPS: dict[str, dict] = {
     "bayeux": {
         "ocd":    r"E:\RunningRaid\Cartographie\entrainements Vikazim\Bayeux - Octobre 2025\O20_2023-bayeux-2203.ocd",
         "sprint": True,
+    },
+    "montmirel": {
+        "ocd":    r"E:\RunningRaid\Cartographie\entrainements Vikazim\stage 2026\Bois de Montmirel II  2024 10000.ocd",
+        "sprint": False,
+    },
+    "cerisy": {
+        "ocd":    r"E:\RunningRaid\Cartographie\fichiers OCAD et jpg\O11_CerisyMaisonForet2021_oc12.ocd",
+        "sprint": False,
+    },
+    "grochot": {
+        "ocd":    r"E:\RunningRaid\Cartographie\fichiers OCAD et jpg\O12_2019-05-25_Grand-Crohot-Nord_ech-15000.ocd10.ocd",
+        "sprint": False,
+    },
+    "steanne": {
+        "ocd":    r"E:\RunningRaid\Cartographie\fichiers OCAD et jpg\La Route de Ste Anne II.ocd",
+        "sprint": False,
     },
 }
 
@@ -235,7 +306,7 @@ FIELDS = [
 
 
 def process_map(map_name: str, cfg: dict, lri, seg_index, bbox: dict, center: tuple,
-                oob_check=None) -> list[dict]:
+                oob_check=None, oob_cache=None) -> list[dict]:
     is_sprint = cfg["sprint"]
     td        = TD_SPRINT if is_sprint else TD_FOREST
     target_m  = DIST_SPRINT if is_sprint else DIST_FOREST
@@ -255,7 +326,7 @@ def process_map(map_name: str, cfg: dict, lri, seg_index, bbox: dict, center: tu
             technical_level=td,
             population_size=POP_SIZE,
             generations=GENS,
-            heatmap_cache=None,
+            heatmap_cache=oob_cache,
             elevation_cache=None,
             route_analyzer=None,
             segment_index=seg_index,
@@ -380,10 +451,18 @@ def main() -> None:
         seg_index = build_segment_index(segments, isom_sem, center_lat)
         print(f"  seg_index : {seg_index.segment_count} segments")
         oob_check = _build_oob_checker(oob_polygons)
+        oob_cache = None
         if oob_polygons:
             print(f"  OOB zones : {len(oob_polygons)} polygones")
+            oob_cache = _build_oob_heatmap_cache(oob_polygons, bbox)
+            if oob_cache is not None:
+                n_forbidden = int(oob_cache.forbidden_mask.sum())
+                print(f"  OOB cache : {n_forbidden}/{1024*1024} px interdits "
+                      f"({100*n_forbidden/(1024*1024):.1f}%)")
+            else:
+                print(f"  OOB cache : désactivé (PIL absent)")
 
-        rows = process_map(map_name, cfg, lri, seg_index, bbox, center, oob_check)
+        rows = process_map(map_name, cfg, lri, seg_index, bbox, center, oob_check, oob_cache)
 
         if not rows:
             print(f"  [WARN] Aucune jambe générée")

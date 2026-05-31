@@ -89,7 +89,7 @@ body { display: flex; height: 100vh; font-family: system-ui, sans-serif; font-si
 
 /* ── Annotation panel ────────────────────────────────────────── */
 #ann-panel {
-  height: 140px; background: #16213e;
+  min-height: 140px; background: #16213e;
   border-top: 1px solid #2a2a4a;
   padding: 10px 16px;
   display: flex; flex-direction: column; gap: 8px;
@@ -102,8 +102,17 @@ body { display: flex; height: 100vh; font-family: system-ui, sans-serif; font-si
   font-size: 11px; color: #38bdf8;
   min-height: 15px;
 }
-#ann-buttons {
+#ann-buttons-forest {
   display: flex; gap: 8px;
+}
+#ann-buttons-sprint {
+  display: none; flex-direction: column; gap: 6px; width: 100%;
+}
+.sprint-row {
+  display: flex; gap: 6px; align-items: center;
+}
+.sprint-row-label {
+  font-size: 10px; color: #64748b; min-width: 52px; flex-shrink: 0;
 }
 .ann-btn {
   flex: 1; padding: 8px 4px;
@@ -117,6 +126,12 @@ body { display: flex; height: 100vh; font-family: system-ui, sans-serif; font-si
 .ann-btn.attaque   { color: #f87171; }
 .ann-btn.transition{ color: #a78bfa; }
 .ann-btn.uncertain { color: #facc15; }
+.ann-btn.count-0   { color: #94a3b8; }
+.ann-btn.count-1   { color: #a78bfa; }
+.ann-btn.count-2   { color: #f87171; }
+.ann-btn.impact-0  { color: #4ade80; }
+.ann-btn.impact-1  { color: #fb923c; }
+.ann-btn.impact-2  { color: #ef4444; }
 .ann-btn.active-btn { border-color: currentColor !important; background: #0f3460; }
 
 #ann-nav {
@@ -172,10 +187,24 @@ body { display: flex; height: 100vh; font-family: system-ui, sans-serif; font-si
   <div id="ann-panel">
     <div id="ann-info">← Sélectionner une carte et une jambe</div>
     <div id="ann-pc1-line"></div>
-    <div id="ann-buttons">
+    <div id="ann-buttons-forest">
       <button class="ann-btn suivi"     onclick="annotate('suivi')">Suivi</button>
       <button class="ann-btn attaque"   onclick="annotate('attaque')">Attaque</button>
       <button class="ann-btn uncertain" onclick="annotate('uncertain')">?</button>
+    </div>
+    <div id="ann-buttons-sprint">
+      <div class="sprint-row">
+        <span class="sprint-row-label">Nb routes</span>
+        <button class="ann-btn count-0" onclick="setSprintDim('count',0)">0 — évident</button>
+        <button class="ann-btn count-1" onclick="setSprintDim('count',1)">1 — 2 variantes</button>
+        <button class="ann-btn count-2" onclick="setSprintDim('count',2)">2 — plusieurs</button>
+      </div>
+      <div class="sprint-row">
+        <span class="sprint-row-label">Impact</span>
+        <button class="ann-btn impact-0" onclick="setSprintDim('impact',0)">0 — peu importe</button>
+        <button class="ann-btn impact-1" onclick="setSprintDim('impact',1)">1 — influence</button>
+        <button class="ann-btn impact-2" onclick="setSprintDim('impact',2)">2 — déterminant</button>
+      </div>
     </div>
     <div id="ann-nav">
       <button id="btn-prev" onclick="navLeg(-1)">◀ Préc.</button>
@@ -190,17 +219,20 @@ body { display: flex; height: 100vh; font-family: system-ui, sans-serif; font-si
 
 <script>
 const TILE_SERVICE = 'http://localhost:8089';
+const SPRINT_MAPS  = new Set(["caen", "bayeux", "langrune"]);
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let currentMap  = null;
-let legs        = [];    // [{circuit_id, leg_index, start_lat, ...}, ...]
-let annotations = {};    // "circuit_id:leg_index" → label
-let order       = [];    // shuffled indices into legs[]
-let currentPos  = 0;     // index into order[]
-let legLine     = null;
-let startMarker = null;
-let endMarker   = null;
-let ocadOverlay = null;
+let currentMap         = null;
+let legs               = [];    // [{circuit_id, leg_index, start_lat, ...}, ...]
+let annotations        = {};    // "circuit_id:leg_index" → label
+let order              = [];    // shuffled indices into legs[]
+let currentPos         = 0;     // index into order[]
+let legLine            = null;
+let startMarker        = null;
+let endMarker          = null;
+let ocadOverlay        = null;
+let sprintCountPending  = null;  // 0 | 1 | 2 | null
+let sprintImpactPending = null;  // 0 | 1 | 2 | null
 
 // ── Leaflet ───────────────────────────────────────────────────────────────────
 const lmap = L.map('map', { zoomControl: true });
@@ -315,6 +347,7 @@ async function loadMap(mapName) {
   const shuffleSeed = hashCode(mapName + new Date().toDateString());
   order = shuffleSeeded([...Array(legs.length).keys()], shuffleSeed);
 
+  updateSprintPanel();
   renderLegList();
   updateProgress();
   tryLoadCachedOcad(mapName);
@@ -352,8 +385,14 @@ function renderLegList() {
 
     if (label) {
       const lbl = document.createElement('div');
-      lbl.className = 'leg-label' + (label === 'uncertain' ? ' uncertain' : '');
-      lbl.textContent = label;
+      if (/^\d_\d$/.test(label)) {
+        const [c, i] = label.split('_');
+        lbl.className = 'leg-label';
+        lbl.textContent = `C${c}·I${i}`;
+      } else {
+        lbl.className = 'leg-label' + (label === 'uncertain' ? ' uncertain' : '');
+        lbl.textContent = label;
+      }
       li.appendChild(lbl);
     }
 
@@ -402,9 +441,20 @@ function selectLeg(pos) {
   }
 
   // Highlight current active button
-  document.querySelectorAll('.ann-btn').forEach(b => {
-    b.classList.toggle('active-btn', label && b.classList.contains(label));
-  });
+  if (isSprint()) {
+    const [c, i] = label && /^\d_\d$/.test(label) ? label.split('_').map(Number) : [null, null];
+    sprintCountPending  = c;
+    sprintImpactPending = i;
+    document.querySelectorAll('#ann-buttons-sprint .ann-btn').forEach(b => {
+      const isActiveCount  = c !== null && b.classList.contains(`count-${c}`);
+      const isActiveImpact = i !== null && b.classList.contains(`impact-${i}`);
+      b.classList.toggle('active-btn', isActiveCount || isActiveImpact);
+    });
+  } else {
+    document.querySelectorAll('#ann-buttons-forest .ann-btn').forEach(b => {
+      b.classList.toggle('active-btn', label && b.classList.contains(label));
+    });
+  }
 }
 
 function drawLeg(leg) {
@@ -489,14 +539,57 @@ document.getElementById('blind-chk').addEventListener('change', () => {
 // ── Keyboard shortcuts ────────────────────────────────────────────────────────
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-  switch (e.key) {
-    case '1': annotate('suivi');     break;
-    case '2': annotate('attaque');   break;
-    case '3': annotate('uncertain'); break;
-    case 'ArrowRight': case 'n': navLeg(+1); break;
-    case 'ArrowLeft':  case 'p': navLeg(-1); break;
+  if (isSprint()) {
+    switch (e.key) {
+      case 'q': setSprintDim('count',  0); break;
+      case 'w': setSprintDim('count',  1); break;
+      case 'e': setSprintDim('count',  2); break;
+      case 'a': setSprintDim('impact', 0); break;
+      case 's': setSprintDim('impact', 1); break;
+      case 'd': setSprintDim('impact', 2); break;
+      case 'ArrowRight': case 'n': navLeg(+1); break;
+      case 'ArrowLeft':  case 'p': navLeg(-1); break;
+    }
+  } else {
+    switch (e.key) {
+      case '1': annotate('suivi');     break;
+      case '2': annotate('attaque');   break;
+      case '3': annotate('uncertain'); break;
+      case 'ArrowRight': case 'n': navLeg(+1); break;
+      case 'ArrowLeft':  case 'p': navLeg(-1); break;
+    }
   }
 });
+
+// ── Sprint helpers ────────────────────────────────────────────────────────────
+function isSprint() { return currentMap && SPRINT_MAPS.has(currentMap); }
+
+function updateSprintPanel() {
+  const forPanel = document.getElementById('ann-buttons-forest');
+  const sprPanel = document.getElementById('ann-buttons-sprint');
+  if (isSprint()) {
+    forPanel.style.display = 'none';
+    sprPanel.style.display = 'flex';
+  } else {
+    forPanel.style.display = 'flex';
+    sprPanel.style.display = 'none';
+  }
+}
+
+function setSprintDim(dim, value) {
+  if (dim === 'count') sprintCountPending  = value;
+  else                 sprintImpactPending = value;
+
+  document.querySelectorAll('#ann-buttons-sprint .ann-btn').forEach(b => {
+    const isCount  = sprintCountPending  !== null && b.classList.contains(`count-${sprintCountPending}`);
+    const isImpact = sprintImpactPending !== null && b.classList.contains(`impact-${sprintImpactPending}`);
+    b.classList.toggle('active-btn', isCount || isImpact);
+  });
+
+  if (sprintCountPending !== null && sprintImpactPending !== null) {
+    annotate(`${sprintCountPending}_${sprintImpactPending}`);
+  }
+}
 
 // ── Utils ─────────────────────────────────────────────────────────────────────
 function hashCode(str) {

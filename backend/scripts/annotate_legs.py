@@ -17,6 +17,7 @@ import argparse
 import csv
 import json
 import pathlib
+import re
 import sys
 import urllib.parse
 from datetime import datetime, timezone
@@ -30,6 +31,11 @@ OUTPUT  = _ROOT / "output"
 HTML    = _SCRIPT / "annotate_legs.html"
 
 VALID_LABELS = {"suivi", "attaque", "uncertain"}
+_SPRINT_LABEL_RE = re.compile(r"^[012]_[012]$")
+
+
+def _is_valid_label(label: str) -> bool:
+    return label in VALID_LABELS or bool(_SPRINT_LABEL_RE.match(label))
 
 ANNOTATION_FIELDS = ["map", "circuit_id", "leg_index", "label", "timestamp"]
 
@@ -188,9 +194,10 @@ class Handler(BaseHTTPRequestHandler):
         if leg_index is None:
             self._send_error_json("leg_index requis")
             return
-        if label not in VALID_LABELS:
+        if not _is_valid_label(label):
             self._send_error_json(
-                f"label invalide : {label!r}  (valides: {sorted(VALID_LABELS)})"
+                f"label invalide : {label!r}  "
+                f"(valides: suivi/attaque/uncertain ou N_M avec N,M ∈ {{0,1,2}})"
             )
             return
 

@@ -1880,8 +1880,10 @@ class GeneticAlgorithm:
 
         for i in range(1, len(controls) - 1):
             prev, curr, nxt = controls[i-1], controls[i], controls[i+1]
-            in_a = math.atan2(curr[1]-prev[1], curr[0]-prev[0])
-            out_a = math.atan2(nxt[1]-curr[1],  nxt[0]-curr[0])
+            _cos_in  = math.cos(math.radians((prev[1] + curr[1]) / 2.0))
+            in_a     = math.atan2(curr[1]-prev[1], (curr[0]-prev[0]) * _cos_in)
+            _cos_out = math.cos(math.radians((curr[1] + nxt[1]) / 2.0))
+            out_a    = math.atan2(nxt[1]-curr[1],  (nxt[0]-curr[0]) * _cos_out)
             diff = abs(math.degrees(out_a - in_a)) % 360
             if diff > 180:
                 diff = 360 - diff
@@ -2836,7 +2838,10 @@ class GeneticAlgorithm:
             length_score = 75.0
 
         # --- 2. Dénivelé (15%) : D+ ≤ 4% de la distance (IOF AA8.3) ---
-        climb = config.target_climb_m
+        if config.elevation_cache is not None:
+            climb = config.elevation_cache.estimate_dplus(controls)
+        else:
+            climb = config.target_climb_m
         if total_length > 0 and climb > 0:
             climb_ratio = climb / total_length
             if climb_ratio <= 0.04:
@@ -2870,8 +2875,10 @@ class GeneticAlgorithm:
             total_angles = len(controls) - 2
             for i in range(1, len(controls) - 1):
                 prev, curr, nxt = controls[i-1], controls[i], controls[i+1]
-                in_a = math.atan2(curr[1]-prev[1], curr[0]-prev[0])
-                out_a = math.atan2(nxt[1]-curr[1], nxt[0]-curr[0])
+                _cos_in  = math.cos(math.radians((prev[1] + curr[1]) / 2.0))
+                in_a     = math.atan2(curr[1]-prev[1], (curr[0]-prev[0]) * _cos_in)
+                _cos_out = math.cos(math.radians((curr[1] + nxt[1]) / 2.0))
+                out_a    = math.atan2(nxt[1]-curr[1],  (nxt[0]-curr[0]) * _cos_out)
                 diff = abs(math.degrees(out_a - in_a)) % 360
                 if diff > 180:
                     diff = 360 - diff
@@ -2890,8 +2897,10 @@ class GeneticAlgorithm:
         if len(controls) >= 3:
             for i in range(1, len(controls) - 1):
                 prev, curr, nxt = controls[i-1], controls[i], controls[i+1]
-                in_a = math.atan2(curr[1]-prev[1], curr[0]-prev[0])
-                out_a = math.atan2(nxt[1]-curr[1], nxt[0]-curr[0])
+                _cos_in  = math.cos(math.radians((prev[1] + curr[1]) / 2.0))
+                in_a     = math.atan2(curr[1]-prev[1], (curr[0]-prev[0]) * _cos_in)
+                _cos_out = math.cos(math.radians((curr[1] + nxt[1]) / 2.0))
+                out_a    = math.atan2(nxt[1]-curr[1],  (nxt[0]-curr[0]) * _cos_out)
                 diff = abs(math.degrees(out_a - in_a)) % 360
                 if diff > 180:
                     diff = 360 - diff

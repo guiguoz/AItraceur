@@ -123,25 +123,24 @@ function assignInsertionPositions(existingControls, suggestions) {
     return `poste #${n}`
   }
 
-  const circuit = [...ordered]
-
   return suggestions.map(s => {
-    let bestIdx = circuit.length - 2
+    let bestIdx = ordered.length - 2
     let bestCost = Infinity
-    for (let i = 0; i < circuit.length - 1; i++) {
-      const A = circuit[i], B = circuit[i + 1]
+    for (let i = 0; i < ordered.length - 1; i++) {
+      const A = ordered[i], B = ordered[i + 1]
       const cost = haversineDistance(s, A) + haversineDistance(s, B) - haversineDistance(A, B)
       if (cost < bestCost) { bestCost = cost; bestIdx = i }
     }
-    const A = circuit[bestIdx], B = circuit[bestIdx + 1]
+    const A = ordered[bestIdx], B = ordered[bestIdx + 1]
     const fromOk = haversineDistance(s, A) >= MIN_LEG_M
     const toOk   = haversineDistance(s, B) >= MIN_LEG_M
-    const ok = fromOk && toOk
-    const insertLabel = ok
-      ? `intercaler entre ${legLabel(A, bestIdx, circuit)} → ${legLabel(B, bestIdx + 1, circuit)}`
-      : null
-    if (ok) circuit.splice(bestIdx + 1, 0, s)
-    return { ...s, insertAfterId: ok ? A.id : null, insertLabel }
+    return {
+      ...s,
+      insertAfterId: (fromOk && toOk) ? A.id : null,
+      insertLabel: (fromOk && toOk)
+        ? `intercaler entre ${legLabel(A, bestIdx, ordered)} → ${legLabel(B, bestIdx + 1, ordered)}`
+        : null,
+    }
   })
 }
 

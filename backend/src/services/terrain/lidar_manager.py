@@ -161,6 +161,30 @@ def build_elevation_cache(
     if None in (min_lng, min_lat, max_lng, max_lat):
         return None
 
+    import hashlib
+    import pathlib
+    import tempfile
+    _cache_key = hashlib.md5(
+        f"{min_lng:.5f},{min_lat:.5f},{max_lng:.5f},{max_lat:.5f},{n_rows},{n_cols}".encode()
+    ).hexdigest()[:12]
+    _cache_dir = pathlib.Path(tempfile.gettempdir()) / "aitraceur_elev"
+    _cache_dir.mkdir(parents=True, exist_ok=True)
+    _cache_path = _cache_dir / f"{_cache_key}.npz"
+
+    if _cache_path.exists():
+        try:
+            import numpy as np
+            _d = np.load(_cache_path)
+            print(f"[ElevationCache] cache hit {_cache_key}", flush=True)
+            return ElevationCache(
+                altitudes=_d["altitudes"],
+                bbox=(min_lng, min_lat, max_lng, max_lat),
+                n_rows=n_rows,
+                n_cols=n_cols,
+            )
+        except Exception:
+            _cache_path.unlink(missing_ok=True)
+
     # Construire la grille (row=lat, col=lng) — lat décroissant (image convention)
     lngs = [min_lng + (max_lng - min_lng) * c / max(n_cols - 1, 1) for c in range(n_cols)]
     lats = [max_lat - (max_lat - min_lat) * r / max(n_rows - 1, 1) for r in range(n_rows)]
@@ -193,6 +217,11 @@ def build_elevation_cache(
     )
     if n_valid == 0:
         return None
+
+    try:
+        np.savez_compressed(_cache_path, altitudes=grid)
+    except Exception:
+        pass
 
     return ElevationCache(
         altitudes=grid,

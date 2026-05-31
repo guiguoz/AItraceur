@@ -123,22 +123,25 @@ function assignInsertionPositions(existingControls, suggestions) {
     return `poste #${n}`
   }
 
+  const circuit = [...ordered]
+
   return suggestions.map(s => {
-    let bestIdx = ordered.length - 2
-    let bestDist = Infinity
-    for (let i = 0; i < ordered.length - 1; i++) {
-      const d = pointToSegmentDist(s, ordered[i], ordered[i + 1])
-      if (d < bestDist) { bestDist = d; bestIdx = i }
+    let bestIdx = circuit.length - 2
+    let bestCost = Infinity
+    for (let i = 0; i < circuit.length - 1; i++) {
+      const A = circuit[i], B = circuit[i + 1]
+      const cost = haversineDistance(s, A) + haversineDistance(s, B) - haversineDistance(A, B)
+      if (cost < bestCost) { bestCost = cost; bestIdx = i }
     }
-    const fromOk = haversineDistance(s, ordered[bestIdx]) >= MIN_LEG_M
-    const toOk = haversineDistance(s, ordered[bestIdx + 1]) >= MIN_LEG_M
-    return {
-      ...s,
-      insertAfterId: (fromOk && toOk) ? ordered[bestIdx].id : null,
-      insertLabel: (fromOk && toOk)
-        ? `intercaler entre ${legLabel(ordered[bestIdx], bestIdx, ordered)} → ${legLabel(ordered[bestIdx + 1], bestIdx + 1, ordered)}`
-        : null,
-    }
+    const A = circuit[bestIdx], B = circuit[bestIdx + 1]
+    const fromOk = haversineDistance(s, A) >= MIN_LEG_M
+    const toOk   = haversineDistance(s, B) >= MIN_LEG_M
+    const ok = fromOk && toOk
+    const insertLabel = ok
+      ? `intercaler entre ${legLabel(A, bestIdx, circuit)} → ${legLabel(B, bestIdx + 1, circuit)}`
+      : null
+    if (ok) circuit.splice(bestIdx + 1, 0, s)
+    return { ...s, insertAfterId: ok ? A.id : null, insertLabel }
   })
 }
 

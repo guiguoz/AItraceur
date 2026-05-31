@@ -2092,13 +2092,13 @@ class GeneticAlgorithm:
                 _per_leg_jaccard.append(_j)
                 if _td_level >= 3:
                     if _ct == "sprint":
-                        # En sprint TD3+ : récompenser les choix G/D visuellement ambigus.
-                        # similarity_ratio = min_dist/max_dist — 1.0 = longueurs identiques.
-                        # Inactif en TD1/TD2 : jeunes coureurs sur parcours linéaires.
+                        # En sprint TD3+ : récompenser les dilemmes route gauche/droite.
+                        # similarity_ratio = min_dist/max_dist parmi routes crédibles (RouteAnalyzer).
+                        # ≤ 0.50 → une option ≥ 2× plus longue → pas de dilemme réel → score 0.
+                        # Jaccard retiré : ρ≈+0.17 ns sur Caen n=46 vs ρ=+0.546 similarity_ratio.
                         _sim = div.get("similarity_ratio", 0.0)
-                        _sim_bonus = 1.0 if _sim >= 0.85 else (_sim / 0.85)
-                        _choice_score = _j * _sim_bonus  # ∈ [0, 1]
-                        diversity_bonus += (_choice_score - 0.15) * 15.0
+                        _sim_score = max(0.0, min(1.0, (_sim - 0.50) / 0.50))
+                        diversity_bonus += _sim_score * 8.0
                     else:
                         diversity_bonus += (_j - 0.20) * 15.0
                 # TD1/TD2 : jaccard enregistré pour Terme M, mais aucun bonus/malus.

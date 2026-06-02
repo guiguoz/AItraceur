@@ -224,6 +224,7 @@ class GeneticAlgorithm:
         self.graph = None
         self._stagnation_count = 0
         self._last_best_fitness = 0.0
+        self._cognitive_calls = 0  # profiling temporaire
 
         # Seuils calibrés depuis placement_rules.json (Étape 11b)
         self._placement_rules = self._load_placement_rules()
@@ -1500,6 +1501,7 @@ class GeneticAlgorithm:
         """Construit un LegIntentInference via l'index spatial pré-filtré.
         Niveau 1 : N/O/P + contour_crossing_guidance + direct_run_index + safety_recovery.
         """
+        self._cognitive_calls += 1  # profiling temporaire
         from .perceptual_model import LegIntentInference
         if self._seg_index is None:
             return LegIntentInference()

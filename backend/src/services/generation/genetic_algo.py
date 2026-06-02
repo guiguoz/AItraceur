@@ -187,6 +187,23 @@ def scale_min_separation(
     return int(max(lo, min(hi, math.ceil(base_m * map_scale / ref))))
 
 
+
+def _haversine_batch(
+    lons1: np.ndarray, lats1: np.ndarray,
+    lons2: np.ndarray, lats2: np.ndarray,
+) -> np.ndarray:
+    """Haversine vectorisé numpy — entrées degrés WGS84, sortie mètres.
+    Supporte 1-D (legs séquentiels) et pairwise via broadcasting caller-controlled.
+    """
+    R = 6_371_000.0
+    lat1 = np.radians(lats1)
+    lat2 = np.radians(lats2)
+    dlat = np.radians(lats2 - lats1)
+    dlng = np.radians(lons2 - lons1)
+    a = np.sin(dlat / 2.0) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlng / 2.0) ** 2
+    return R * 2.0 * np.arctan2(np.sqrt(a), np.sqrt(1.0 - a))
+
+
 # =============================================
 # Algorithme génétique
 # =============================================
@@ -1258,6 +1275,13 @@ class GeneticAlgorithm:
         dlng = math.radians(p2[0] - p1[0])
         a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlng / 2) ** 2
         return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    def _leg_distances_m(self, controls: List[Tuple[float, float]]) -> np.ndarray:
+        """Distances de toutes les jambes en un batch numpy (1-D, mètres)."""
+        if len(controls) < 2:
+            return np.empty(0, dtype=np.float64)
+        arr = np.asarray(controls, dtype=np.float64)  # (N, 2) col0=lng col1=lat
+        return _haversine_batch(arr[:-1, 0], arr[:-1, 1], arr[1:, 0], arr[1:, 1])
 
     def _isom_profile(self, code: int) -> dict:
         """Profil sémantique d'un code ISOM depuis isom_semantics.json."""
@@ -2768,7 +2792,11 @@ class GeneticAlgorithm:
         else:
             return max(0.0, 40.0 - (max_run - 4) * 15.0)
 
-    def _leg_alternation_score(self, controls: List[Tuple[float, float]]) -> float:
+    def _leg_alternation_score(
+        self,
+        controls: List[Tuple[float, float]],
+        leg_m: Optional[np.ndarray] = None,
+    ) -> float:
         """
         Récompense l'alternance court/long entre jambes consécutives.
         Classe chaque jambe en C(<80% moy), L(>120% moy) ou M.
@@ -2777,8 +2805,8 @@ class GeneticAlgorithm:
         """
         if len(controls) < 4:
             return 75.0
-        legs = [self._haversine_m(controls[i], controls[i + 1]) for i in range(len(controls) - 1)]
-        mean_leg = sum(legs) / len(legs) if legs else 0.0
+        legs = leg_m if (leg_m is not None and len(leg_m) > 0) else self._leg_distances_m(controls)
+        mean_leg = float(legs.mean()) if len(legs) > 0 else 0.0
         if mean_leg == 0.0:
             return 75.0
         types = [
@@ -2820,11 +2848,10 @@ class GeneticAlgorithm:
                     return -10000.0
         # ──────────────────────────────────────────────────────────────────
 
-        total_length = self._calculate_total_length(controls)
-        leg_lengths = [
-            self._haversine_m(controls[i], controls[i+1])
-            for i in range(len(controls) - 1)
-        ]
+        self._pair_cache = None  # partagé entre equity et cluster dans cet appel
+        _leg_m = self._leg_distances_m(controls)
+        total_length = float(_leg_m.sum())
+        leg_lengths = _leg_m
 
         # --- 1. Longueur (20%) : gradient continu — pas de clamping à 0 ---
         # Sans clamping, le GA peut distinguer 10km vs 17km (les deux mauvais).
@@ -2856,10 +2883,10 @@ class GeneticAlgorithm:
             climb_score = 75.0
 
         # --- 3. Cohérence TD (15%) : CV des jambes entre 20% et 50% ---
-        if leg_lengths:
-            mean_leg = sum(leg_lengths) / len(leg_lengths)
+        if len(leg_lengths) > 0:
+            mean_leg = float(leg_lengths.mean())
             if mean_leg > 0:
-                cv = (sum((l - mean_leg)**2 for l in leg_lengths) / len(leg_lengths))**0.5 / mean_leg
+                cv = float(leg_lengths.std()) / mean_leg
                 if 0.20 <= cv <= 0.50:
                     td_score = 100.0
                 elif cv < 0.20:
@@ -2908,11 +2935,15 @@ class GeneticAlgorithm:
                     diff = 360 - diff
                 if diff < _dogleg_threshold:
                     dog_legs += 1
-        for i in range(len(controls)):
-            for j in range(i + 1, len(controls)):
-                d = self._haversine_m(controls[i], controls[j])
-                if d < _min_sep:
-                    too_close += 1
+        if len(controls) >= 2:
+            if self._pair_cache is None:
+                _arr = np.asarray(controls, dtype=np.float64)
+                _lon, _lat = _arr[:, 0], _arr[:, 1]
+                self._pair_cache = _haversine_batch(
+                    _lon[:, None], _lat[:, None], _lon[None, :], _lat[None, :]
+                )
+            _uidx = np.triu_indices(len(controls), k=1)
+            too_close = int(np.sum(self._pair_cache[_uidx] < _min_sep))
         equity_score = max(0.0, 100.0 - dog_legs * 15 - too_close * 20)
 
         # --- 6. Sécurité (10%) : pénalité si nb postes incorrect ---
@@ -2934,10 +2965,10 @@ class GeneticAlgorithm:
         monotony_score = self._monotony_score(controls)
 
         # --- 9. Alternance court/long ---
-        alternation_score = self._leg_alternation_score(controls)
+        alternation_score = self._leg_alternation_score(controls, leg_m=_leg_m)
 
         # --- 10. Sprint : pénaliser les jambes > max_leg_m (seuil dynamique) ---
-        if config.sprint_mode and leg_lengths:
+        if config.sprint_mode and len(leg_lengths) > 0:
             max_leg_m = float(_rules.get("max_leg_m", 200))
             long_legs = sum(1 for l in leg_lengths if l > max_leg_m)
             sprint_leg_score = max(0.0, 100.0 - long_legs * 25)
@@ -2954,11 +2985,17 @@ class GeneticAlgorithm:
                 for i in range(n):
                     if i in counted_in_cluster:
                         continue
-                    nearby = [i]
-                    for j in range(n):
-                        if j != i and j not in counted_in_cluster:
-                            if self._haversine_m(controls[i], controls[j]) <= cluster_radius:
-                                nearby.append(j)
+                    if self._pair_cache is None:
+                        _arr = np.asarray(controls, dtype=np.float64)
+                        _lon, _lat = _arr[:, 0], _arr[:, 1]
+                        self._pair_cache = _haversine_batch(
+                            _lon[:, None], _lat[:, None], _lon[None, :], _lat[None, :]
+                        )
+                    nearby = [i] + [
+                        j for j in range(n)
+                        if j != i and j not in counted_in_cluster
+                        and self._pair_cache[i, j] <= cluster_radius
+                    ]
                     if len(nearby) >= cluster_target_size:
                         found_clusters += 1
                         counted_in_cluster.update(nearby[:cluster_target_size])
@@ -3022,10 +3059,9 @@ class GeneticAlgorithm:
 
     def _calculate_total_length(self, controls: List[Tuple[float, float]]) -> float:
         """Calcule la longueur totale en mètres (haversine WGS84)."""
-        total = 0.0
-        for i in range(len(controls) - 1):
-            total += self._haversine_m(controls[i], controls[i + 1])
-        return total
+        if len(controls) < 2:
+            return 0.0
+        return float(self._leg_distances_m(controls).sum())
 
     def _get_min_control_distance(self, controls: List[Tuple[float, float]]) -> float:
         """Calcule la distance minimale entre postes en mètres."""

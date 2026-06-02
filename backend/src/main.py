@@ -4572,6 +4572,52 @@ def _sprint_impl(task_id: str, body: dict) -> None:
             )
             final_report = _final_report_with_nav
 
+    # ── Profiling parcours ────────────────────────────────────────────────────
+    _course_profile_dict: dict = {}
+    _map_profile_dict: dict = {}
+    _exploitation_profile_dict: dict = {}
+    try:
+        import dataclasses as _prof_dc
+        import numpy as _prof_np
+        from src.services.generation.profiling import (
+            compute_course_profile as _ccp,
+            compute_map_profile as _cmp,
+            compute_exploitation_profile as _cep,
+        )
+        _bb = bounding_box
+        _bbox_t = (_bb.get("min_x", 0.0), _bb.get("min_y", 0.0), _bb.get("max_x", 0.0), _bb.get("max_y", 0.0))
+        _ctrl_t = [(c["lng"], c["lat"]) for c in current_controls]
+        if _ga is not None:
+            _legs_m_prof = _ga._leg_distances_m(_ctrl_t)
+        else:
+            _lng = _prof_np.array([c[0] for c in _ctrl_t])
+            _lat = _prof_np.array([c[1] for c in _ctrl_t])
+            _R = 6_371_000.0
+            _dlat = _prof_np.radians(_lat[1:] - _lat[:-1])
+            _dlng = _prof_np.radians(_lng[1:] - _lng[:-1])
+            _a = _prof_np.sin(_dlat/2)**2 + _prof_np.cos(_prof_np.radians(_lat[:-1]))*_prof_np.cos(_prof_np.radians(_lat[1:]))*_prof_np.sin(_dlng/2)**2
+            _legs_m_prof = _R * 2.0 * _prof_np.arctan2(_prof_np.sqrt(_a), _prof_np.sqrt(1.0 - _a))
+        _mp = _cmp(
+            _bbox_t,
+            heatmap_cache=heatmap_cache,
+            elevation_cache=_elevation_cache,
+            route_analyzer=route_analyzer,
+            candidate_points=candidate_points,
+            ocad_line_segments=ocad_line_segments_sprint,
+        )
+        _cp = _ccp(
+            _ctrl_t, _legs_m_prof, _bbox_t,
+            heatmap_cache=heatmap_cache,
+            elevation_cache=_elevation_cache,
+            route_analyzer=route_analyzer,
+        )
+        _ep = _cep(_cp, _mp, _ctrl_t, _legs_m_prof, elevation_cache=_elevation_cache)
+        _course_profile_dict = _prof_dc.asdict(_cp)
+        _map_profile_dict = _prof_dc.asdict(_mp)
+        _exploitation_profile_dict = _prof_dc.asdict(_ep)
+    except Exception as _prof_err:
+        print(f"{_tag} WARN profiling: {_prof_err}", flush=True)
+
     # ── Résultat ─────────────────────────────────────────────────────────────
     final_report_dict = controleur.to_dict(final_report) if final_report else {}
     final_report_dict["iterations_used"] = len([d for d in dialogue if d["role"] == "traceur"])
@@ -4591,6 +4637,9 @@ def _sprint_impl(task_id: str, body: dict) -> None:
             "nav_summary": _nav_summary,
             "warning": _generation_warning,
             "distance_ratio": _distance_ratio,
+            "course_profile": _course_profile_dict,
+            "map_profile": _map_profile_dict,
+            "exploitation_profile": _exploitation_profile_dict,
         },
         "_ga": getattr(generator, "_last_ga", None),         # pour endpoint nav-context
         "_route_analyzer": route_analyzer,                   # pour fallback sans KDTree

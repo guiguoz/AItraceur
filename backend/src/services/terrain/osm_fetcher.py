@@ -3,12 +3,16 @@
 # Sprint 3: Intégration OSM & Overlay Forêt/Ville
 # =============================================
 
+import hashlib
 import json
+import tempfile
 import requests
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
+
+_OSM_CACHE_DIR = Path(tempfile.gettempdir()) / "aitraceur_osm"
 
 
 # =============================================
@@ -558,6 +562,23 @@ def extract_sprint_features(bbox_dict: dict, include_buildings: bool = True) -> 
     import random
     from collections import defaultdict
 
+    # ── Cache disque (même pattern que HeatmapCache + ElevationCache) ────────
+    _bbox_key = (
+        f"{bbox_dict.get('min_x', 0):.5f},{bbox_dict.get('min_y', 0):.5f},"
+        f"{bbox_dict.get('max_x', 0):.5f},{bbox_dict.get('max_y', 0):.5f},"
+        f"{'b' if include_buildings else 'n'}"
+    )
+    _cache_hash = hashlib.md5(_bbox_key.encode()).hexdigest()[:12]
+    _cache_path = _OSM_CACHE_DIR / f"{_cache_hash}.json"
+    if _cache_path.exists():
+        try:
+            result = json.loads(_cache_path.read_text(encoding="utf-8"))
+            print(f"[sprint_features] Cache disque : {_cache_hash} ({len(result.get('candidates', []))} candidats)")
+            return result
+        except Exception:
+            pass  # cache corrompu → recalcul
+    # ─────────────────────────────────────────────────────────────────────────
+
     b = f"{bbox_dict['min_y']},{bbox_dict['min_x']},{bbox_dict['max_y']},{bbox_dict['max_x']}"
 
     walk_tags = "residential|service|unclassified|tertiary|secondary|primary|pedestrian|path|footway|steps|living_street|alley"
@@ -717,11 +738,20 @@ out body;"""
         + f", {len(building_polygons)} OOB polygones"
     )
 
-    return {
+    result = {
         "candidates": candidates,
         "oob_polygons": building_polygons,
         "highway_ways": highway_coord_lists,  # pour RouteAnalyzer (graphe NetworkX)
     }
+
+    # Sauvegarder en cache disque
+    try:
+        _OSM_CACHE_DIR.mkdir(exist_ok=True)
+        _cache_path.write_text(json.dumps(result), encoding="utf-8")
+    except Exception:
+        pass
+
+    return result
 
 
 # =============================================

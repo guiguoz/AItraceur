@@ -4094,6 +4094,22 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                     merged.append(ocp)
             candidate_points = merged[:800]
 
+            # Sauvegarde disque pour profiling Mode B (chargée par scripts/profile_ga.py)
+            try:
+                import json as _jcpts, hashlib as _hcpts
+                _bbox_k = f"{bounding_box.get('min_x',0):.4f},{bounding_box.get('min_y',0):.4f},{bounding_box.get('max_x',0):.4f},{bounding_box.get('max_y',0):.4f}"
+                _cpts_path = Path(tempfile.gettempdir()) / f"aitraceur_cpts_{_hcpts.md5(_bbox_k.encode()).hexdigest()[:12]}.json"
+                _cpts_path.write_text(
+                    _jcpts.dumps({
+                        "candidate_points": candidate_points,
+                        "ocad_line_segments": ocad_line_segments_sprint,
+                        "bbox": bounding_box,
+                    }),
+                    encoding="utf-8",
+                )
+            except Exception:
+                pass
+
             # ── Construire RouteAnalyzer depuis les ways piétons OSM ──────────
             highway_ways = osm_result.get("highway_ways") or []
             if highway_ways:

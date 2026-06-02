@@ -1,10 +1,17 @@
 """
 Profiling GA — identifie les vrais bottlenecks avant optimisation.
 
-Usage:
-    cd backend
-    python scripts/profile_ga.py
+Modes :
+  Mode A (défaut) : sans OCAD (KDTree absent, cognitive_calls=0)
+  Mode B          : avec OCAD réel sauvegardé par _sprint_impl (ou fallback synthétique)
+                    → active KDTree, _build_leg_cognitive_profile, _seg_index
 
+Usage :
+    cd backend
+    python scripts/profile_ga.py          # Mode A
+    python scripts/profile_ga.py --modeB  # Mode B
+
+Prérequis Mode B : générer un sprint depuis le frontend (sauvegarde auto aitraceur_cpts_*.json).
 Sortie : top 40 fonctions par cumtime + callers + stats RouteAnalyzer.
 Dump   : backend/ga_profile.prof  (snakeviz ga_profile.prof pour UI)
 """
@@ -15,6 +22,8 @@ import sys
 import os
 import pathlib
 import tempfile
+import json
+import random
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -82,7 +91,58 @@ def load_elevation_cache(bbox):
     return None
 
 
-def make_config(bbox, hmc, ec, ra):
+def load_ocad_data(bbox):
+    """Charge candidate_points + ocad_line_segments depuis le cache disque sprint.
+
+    Priorité : fichier aitraceur_cpts_*.json le plus récent (sauvegardé par _sprint_impl).
+    Fallback  : données synthétiques activant le KDTree (≥20 points ISOM).
+    """
+    tmp = pathlib.Path(tempfile.gettempdir())
+    files = sorted(tmp.glob("aitraceur_cpts_*.json"), key=lambda f: f.stat().st_mtime)
+    if files:
+        path = files[-1]
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            cpts = data.get("candidate_points", [])
+            segs = data.get("ocad_line_segments", [])
+            n_isom = sum(1 for cp in cpts if cp.get("isom"))
+            print(f"[profile] OCAD data : {path.name} — {len(cpts)} pts ({n_isom} isom), {len(segs)} segs")
+            return cpts, segs
+        except Exception as e:
+            print(f"[profile] WARN: lecture {path.name} échouée ({e})")
+
+    print("[profile] WARN: aucun aitraceur_cpts_*.json — données synthétiques (active KDTree, biais partiel)")
+    return _make_synthetic_ocad(bbox)
+
+
+def _make_synthetic_ocad(bbox):
+    """Génère candidate_points + ocad_line_segments synthétiques pour activer le KDTree."""
+    min_lng, min_lat, max_lng, max_lat = bbox
+    rng = random.Random(42)
+
+    ISOM_ATTRACTIVE = [101, 106, 107, 108, 113, 115, 201, 304, 401, 402, 501, 502, 503, 521, 522]
+    candidate_points = [
+        {
+            "x": min_lng + rng.random() * (max_lng - min_lng),
+            "y": min_lat + rng.random() * (max_lat - min_lat),
+            "isom": rng.choice(ISOM_ATTRACTIVE),
+        }
+        for _ in range(80)
+    ]
+
+    # Segments synthétiques : contours E-O + chemins N-S
+    segs = []
+    for i in range(6):
+        lat = min_lat + (i + 1) * (max_lat - min_lat) / 7
+        segs.append({"p0": [min_lng, lat], "p1": [max_lng, lat], "isom_code": 101})
+    for i in range(4):
+        lng = min_lng + (i + 1) * (max_lng - min_lng) / 5
+        segs.append({"p0": [lng, min_lat], "p1": [lng, max_lat], "isom_code": 501})
+
+    return candidate_points, segs
+
+
+def make_config(bbox, hmc, ec, ra, candidate_points=None, ocad_line_segments=None):
     return GenerationConfig(
         circuit_type='sprint',
         bounding_box={'min_x': bbox[0], 'min_y': bbox[1], 'max_x': bbox[2], 'max_y': bbox[3]},
@@ -93,25 +153,36 @@ def make_config(bbox, hmc, ec, ra):
         heatmap_cache=hmc,
         elevation_cache=ec,
         route_analyzer=ra,
+        candidate_points=candidate_points or [],
+        ocad_line_segments=ocad_line_segments or [],
         population_size=50,
         generations=100,
     )
 
 
-def run():
+def run(mode_b: bool = False):
     hmc, bbox = load_heatmap_cache()
     ra = load_route_analyzer(bbox)
     ec = load_elevation_cache(bbox)
-    config = make_config(bbox, hmc, ec, ra)
 
-    # Positions départ/arrivée dérivées de la bbox (coins NW et SE)
+    candidate_points, ocad_line_segments = [], []
+    if mode_b:
+        candidate_points, ocad_line_segments = load_ocad_data(bbox)
+
+    config = make_config(bbox, hmc, ec, ra, candidate_points, ocad_line_segments)
+
+    mode_label = "B (OCAD)" if mode_b else "A (sans OCAD)"
+    n_isom = sum(1 for cp in candidate_points if cp.get("isom"))
+    print(f"[profile] Mode {mode_label} — {len(candidate_points)} candidats ({n_isom} isom), {len(ocad_line_segments)} segs")
+
+    # Positions départ/arrivée dérivées de la bbox
     min_lng, min_lat, max_lng, max_lat = bbox
     center_lng = (min_lng + max_lng) / 2
     center_lat = (min_lat + max_lat) / 2
     start_pos = (center_lng - (max_lng - min_lng) * 0.2, center_lat)
     end_pos   = (center_lng + (max_lng - min_lng) * 0.2, center_lat)
 
-    # Warm-up : pré-remplit les caches internes (RouteAnalyzer, etc.) hors profiling
+    # Warm-up hors profiling
     print("[profile] Warm-up (pop=10, gen=5)...")
     try:
         import dataclasses
@@ -161,4 +232,4 @@ def run():
 
 
 if __name__ == '__main__':
-    run()
+    run(mode_b='--modeB' in sys.argv)

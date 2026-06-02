@@ -120,12 +120,21 @@ def main():
         from src.services.controleur.controleur import ControleurSprint
         best = result.circuits[0] if hasattr(result, 'circuits') and result.circuits else None
         if best:
+            n = len(best.controls)
+            ctrl_dicts = [
+                {
+                    "lng": c[0], "lat": c[1],
+                    "type": "start" if i == 0 else ("finish" if i == n - 1 else "control"),
+                    "order": i,
+                }
+                for i, c in enumerate(best.controls)
+            ]
             ctrl = ControleurSprint()
             t = time.perf_counter()
             report = ctrl.validate(
-                best.controls,
+                ctrl_dicts,
                 oob_polygons=[],
-                config={"category": "sprint"},
+                circuit_config={"category": "sprint", "circuit_type": "sprint"},
                 route_analyzer=ra,
             )
             errors = report.error_count if hasattr(report, 'error_count') else '?'

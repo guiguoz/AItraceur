@@ -141,7 +141,7 @@ class RouteAnalyzer:
         n_start: tuple,
         n_end: tuple,
         k: int,
-        timeout_ms: int = 200,
+        timeout_ms: int = 50,
     ) -> list:
         """k-shortest paths avec cache (n_start, n_end, k) et timeout."""
         import time as _t
@@ -279,7 +279,7 @@ class RouteAnalyzer:
         start_lng: float, start_lat: float,
         end_lng: float, end_lat: float,
         k: int = 3,
-        timeout_ms: int = 200,
+        timeout_ms: int = 50,
     ) -> dict:
         """
         Score Jaccard + nombre de routes crédibles (ratio longueur 0.85–1.30).

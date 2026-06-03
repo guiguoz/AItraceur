@@ -2967,7 +2967,32 @@ class GeneticAlgorithm:
         # --- 9. Alternance court/long ---
         alternation_score = self._leg_alternation_score(controls, leg_m=_leg_m)
 
-        # --- 10. Sprint : pénaliser les jambes > max_leg_m (seuil dynamique) ---
+        # --- M. Couverture carte : bbox controls / bbox map ---
+        _bb = config.bounding_box
+        if _bb and len(controls) >= 3:
+            _lngs = [c[0] for c in controls]
+            _lats = [c[1] for c in controls]
+            _map_w = max(_bb.get("max_x", 0) - _bb.get("min_x", 0), 1e-8)
+            _map_h = max(_bb.get("max_y", 0) - _bb.get("min_y", 0), 1e-8)
+            _coverage = (max(_lngs) - min(_lngs)) / _map_w * (max(_lats) - min(_lats)) / _map_h
+            coverage_score = min(100.0, _coverage / 0.30 * 100.0)
+        else:
+            coverage_score = 50.0
+
+        # --- N. Variété terrain : std scores CNN aux milieux de jambes ---
+        if config.heatmap_cache is not None and len(controls) >= 3:
+            _mid_cnn = np.array([
+                config.heatmap_cache.query(
+                    (controls[i][0] + controls[i + 1][0]) / 2.0,
+                    (controls[i][1] + controls[i + 1][1]) / 2.0,
+                )
+                for i in range(len(controls) - 1)
+            ], dtype=np.float32)
+            variety_score = min(100.0, float(_mid_cnn.std()) / 0.15 * 100.0)
+        else:
+            variety_score = 50.0
+
+        # --- Sprint : pénaliser les jambes > max_leg_m (seuil dynamique) ---
         if config.sprint_mode and len(leg_lengths) > 0:
             max_leg_m = float(_rules.get("max_leg_m", 200))
             long_legs = sum(1 for l in leg_lengths if l > max_leg_m)
@@ -3016,19 +3041,23 @@ class GeneticAlgorithm:
                     + safety_score      * _w.w_safety
                     + terrain_score     * _w.w_terrain
                     + monotony_score    * _w.w_monotony
-                    + alternation_score * _w.w_alternation) * base_weight_adj
+                    + alternation_score * _w.w_alternation
+                    + coverage_score    * _w.w_coverage
+                    + variety_score     * _w.w_variety) * base_weight_adj
                     + cluster_bonus * cluster_weight
                 )
             return (
-                (length_score       * 0.22
-                + sprint_leg_score  * 0.15
-                + td_score          * 0.11
-                + angle_score       * 0.17
+                (length_score       * 0.20
+                + sprint_leg_score  * 0.13
+                + td_score          * 0.10
+                + angle_score       * 0.15
                 + equity_score      * 0.07
                 + safety_score      * 0.05
-                + terrain_score     * 0.10
+                + terrain_score     * 0.09
                 + monotony_score    * 0.07
-                + alternation_score * 0.06) * base_weight_adj
+                + alternation_score * 0.06
+                + coverage_score    * 0.05
+                + variety_score     * 0.03) * base_weight_adj
                 + cluster_bonus * cluster_weight
             )
 
@@ -3044,17 +3073,21 @@ class GeneticAlgorithm:
                 + terrain_score    * _w.w_terrain
                 + monotony_score   * _w.w_monotony
                 + alternation_score * _w.w_alternation
+                + coverage_score   * _w.w_coverage
+                + variety_score    * _w.w_variety
             )
         return (
-            length_score       * 0.18
-            + climb_score      * 0.10
-            + td_score         * 0.11
-            + angle_score      * 0.15
-            + equity_score     * 0.13
-            + safety_score     * 0.08
-            + terrain_score    * 0.10
-            + monotony_score   * 0.08
+            length_score       * 0.17
+            + climb_score      * 0.09
+            + td_score         * 0.10
+            + angle_score      * 0.13
+            + equity_score     * 0.12
+            + safety_score     * 0.07
+            + terrain_score    * 0.09
+            + monotony_score   * 0.07
             + alternation_score * 0.07
+            + coverage_score   * 0.05
+            + variety_score    * 0.04
         )
 
     def _calculate_total_length(self, controls: List[Tuple[float, float]]) -> float:

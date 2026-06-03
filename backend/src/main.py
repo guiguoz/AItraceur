@@ -4618,6 +4618,49 @@ def _sprint_impl(task_id: str, body: dict) -> None:
     except Exception as _prof_err:
         print(f"{_tag} WARN profiling: {_prof_err}", flush=True)
 
+    # ── Diversification — 3 circuits aux profils distincts ───────────────────
+    _circuits_array: list = []
+    if gen_result and len(gen_result) >= 2 and _map_profile_dict:
+        try:
+            from src.services.generation.profiling import select_diverse_circuits as _sdc
+            import dataclasses as _div_dc
+            _cands = gen_result[:10]
+            _pool: list = []
+            for _circ in _cands:
+                _ct_i = [(c["x"], c["y"]) for c in _circ.controls]
+                if _ga is not None:
+                    _lm_i = _ga._leg_distances_m(_ct_i)
+                else:
+                    _lng_i = _prof_np.array([c[0] for c in _ct_i])
+                    _lat_i = _prof_np.array([c[1] for c in _ct_i])
+                    _dlat_i = _prof_np.radians(_lat_i[1:] - _lat_i[:-1])
+                    _dlng_i = _prof_np.radians(_lng_i[1:] - _lng_i[:-1])
+                    _a_i = (_prof_np.sin(_dlat_i/2)**2
+                            + _prof_np.cos(_prof_np.radians(_lat_i[:-1]))
+                            * _prof_np.cos(_prof_np.radians(_lat_i[1:]))
+                            * _prof_np.sin(_dlng_i/2)**2)
+                    _lm_i = 6_371_000.0 * 2.0 * _prof_np.arctan2(_prof_np.sqrt(_a_i), _prof_np.sqrt(1.0 - _a_i))
+                _cp_i = _ccp(
+                    _ct_i, _lm_i, _bbox_t,
+                    heatmap_cache=heatmap_cache,
+                    elevation_cache=_elevation_cache,
+                )
+                _ep_i = _cep(_cp_i, _mp, _ct_i, _lm_i, elevation_cache=_elevation_cache)
+                _pool.append((_circ, _cp_i, _ep_i))
+
+            _diverse = _sdc([(_c, _cp_) for _c, _cp_, _ in _pool], n_select=3)
+            for _dc_circ, _dc_cp in _diverse:
+                _dc_ep = next(ep_ for c_, cp_, ep_ in _pool if c_ is _dc_circ)
+                _circuits_array.append({
+                    "controls": [{"x": c["x"], "y": c["y"], "type": c.get("type", "control"), "order": c.get("order", i)} for i, c in enumerate(_dc_circ.controls)],
+                    "score": round(float(getattr(_dc_circ, "score", 0.0)), 3),
+                    "fitness": round(float(getattr(_dc_circ, "fitness", 0.0)), 3),
+                    "course_profile": _div_dc.asdict(_dc_cp),
+                    "exploitation_profile": _div_dc.asdict(_dc_ep),
+                })
+        except Exception as _div_err:
+            print(f"{_tag} WARN diversification: {_div_err}", flush=True)
+
     # ── Résultat ─────────────────────────────────────────────────────────────
     final_report_dict = controleur.to_dict(final_report) if final_report else {}
     final_report_dict["iterations_used"] = len([d for d in dialogue if d["role"] == "traceur"])
@@ -4640,6 +4683,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
             "course_profile": _course_profile_dict,
             "map_profile": _map_profile_dict,
             "exploitation_profile": _exploitation_profile_dict,
+            "circuits": _circuits_array,
         },
         "_ga": getattr(generator, "_last_ga", None),         # pour endpoint nav-context
         "_route_analyzer": route_analyzer,                   # pour fallback sans KDTree

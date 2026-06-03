@@ -163,24 +163,26 @@ def build_caches(bb_dict: dict, bbox_tuple: tuple) -> dict:
     """
     Construit HeatmapCache, ElevationCache, RouteAnalyzer pour une bbox.
     Retourne un dict avec les clés : heatmap_cache, elevation_cache, route_analyzer.
+    HeatmapCache peut être None (GA tourne en mode fallback ISOM, has_heatmap=False).
     """
     from src.services.terrain.osm_fetcher import extract_sprint_features
     from src.services.optimization.route_analyzer import RouteAnalyzer
     from src.services.terrain.lidar_manager import build_elevation_cache
-    from src.services.learning.ocad_patch_scorer import HeatmapCache
+    from src.services.learning.ocad_patch_scorer import HeatmapCache, OcadPatchScorer
 
     # OSM (disk-cached automatiquement par extract_sprint_features)
     t0 = time.perf_counter()
     osm = extract_sprint_features(bb_dict)
     ra = RouteAnalyzer(osm.get("highway_ways", []))
-    log.info("  OSM + RouteAnalyzer: %.2fs (%d ways, %d nodes)", time.perf_counter() - t0, len(osm.get("highway_ways", [])), ra.node_count)
+    log.info("  OSM + RouteAnalyzer: %.2fs (%d ways, %d nodes)",
+             time.perf_counter() - t0, len(osm.get("highway_ways", [])), ra.node_count)
 
     # ElevationCache (disk-cached dans lidar_manager)
     t0 = time.perf_counter()
     ec = build_elevation_cache(bb_dict)
     log.info("  ElevationCache: %.2fs (%s)", time.perf_counter() - t0, "hit" if ec else "None")
 
-    # HeatmapCache — disk cache via clé bbox
+    # HeatmapCache — disk cache via clé bbox, sinon MapAnt, sinon None (GA fallback)
     hmc = None
     step_px = 20
     _key = hashlib.md5(f"atlas|{bbox_tuple}|{step_px}|cnn".encode()).hexdigest()[:12]
@@ -201,11 +203,17 @@ def build_caches(bb_dict: dict, bbox_tuple: tuple) -> dict:
                 cnn = CnnPatchScorer.load()
             except Exception:
                 cnn = None
-            hmc = HeatmapCache.build_from_image(img, bbox=bbox_img, mpp=mpp, step_px=step_px, cnn_scorer=cnn)
+            scorer_v2 = OcadPatchScorer.load()
+            if scorer_v2 is None:
+                log.info("  HeatmapCache: OcadPatchScorer non chargé → None")
+                return {"heatmap_cache": None, "elevation_cache": ec, "route_analyzer": ra}
+            hmc = scorer_v2.build_heatmap_cache(
+                map_img=img, bbox=bbox_img, mpp=mpp, step_px=step_px, cnn_scorer=cnn,
+            )
             hmc.save(_hmc_path)
             log.info("  HeatmapCache: %.2fs (built from MapAnt)", time.perf_counter() - t0)
         else:
-            log.warning("  HeatmapCache: MapAnt indisponible → None")
+            log.info("  HeatmapCache: MapAnt indisponible → None (GA fallback ISOM)")
 
     return {"heatmap_cache": hmc, "elevation_cache": ec, "route_analyzer": ra}
 
@@ -237,18 +245,26 @@ def pairwise_mean_cosine(vectors: List[np.ndarray]) -> float:
 
 def assign_family_ids(rows: List[dict], k: int = 4) -> None:
     """Assigne family_id à chaque ligne par K-Means sur les vecteurs profil."""
+    if not rows:
+        return
+    k_actual = min(k, len(rows))
+    if k_actual < 2:
+        for row in rows:
+            row["family_id"] = 0
+        return
     try:
         from sklearn.cluster import KMeans
         from sklearn.impute import SimpleImputer
 
         vectors = [np.array(r["_profile_vector"], dtype=float) for r in rows]
         X = np.vstack(vectors)
-        # Imputer NaN à la médiane avant K-Means
         imp = SimpleImputer(strategy="median")
         X_imp = imp.fit_transform(X)
-        labels = KMeans(n_clusters=k, random_state=42, n_init=10).fit_predict(X_imp)
+        labels = KMeans(n_clusters=k_actual, random_state=42, n_init=10).fit_predict(X_imp)
         for row, label in zip(rows, labels):
             row["family_id"] = int(label)
+        if k_actual < k:
+            log.info("K-Means : k réduit à %d (n_samples=%d)", k_actual, len(rows))
     except Exception as exc:
         log.warning("K-Means clustering échoué : %s", exc)
         for row in rows:
@@ -352,6 +368,7 @@ def run_atlas(max_bboxes: int, n_runs: int, top_n: int, k_clusters: int = 4) -> 
                     "fitness": round(float(circuit.fitness), 4),
                     "has_heatmap": hmc is not None,
                     "has_elevation": ec is not None,
+                    "has_osm": ra.node_count > 0,
                     # Profil parcours
                     "map_coverage": cp.map_coverage,
                     "zone_balance": cp.zone_balance,
@@ -423,7 +440,7 @@ def run_atlas(max_bboxes: int, n_runs: int, top_n: int, k_clusters: int = 4) -> 
     csv_path = _OUTPUT_DIR / "atlas_results.csv"
     _CSV_COLS = [
         "bbox_id", "run_id", "rank_in_run", "fitness",
-        "has_heatmap", "has_elevation",
+        "has_heatmap", "has_elevation", "has_osm",
         "map_coverage", "zone_balance", "variety_score", "alternation", "route_choice_density",
         "narrative_shape", "transition_count", "transition_strength",
         "relief_ratio", "route_choice_ratio", "speed_ratio",

@@ -10,11 +10,11 @@ import numpy as np
 
 @dataclass
 class MapProfile:
-    navigation_complexity: float   # densité ISOM → lecture fine requise [0-1]
-    route_choice_potential: float  # densité arêtes OSM → potentiel choix itinéraire [0-1]
-    speed_potential: float         # fraction terrain CNN > 0.6 → zones rapides [0-1]
-    micro_relief_potential: float  # std altitudes locale (ElevationCache) [0-1]
-    visibility_complexity: float   # densité courbes de niveau OCAD [0-1]
+    navigation_complexity: Optional[float]   # None si candidate_points ISOM absent
+    route_choice_potential: float            # densité arêtes OSM [0-1]
+    speed_potential: float                   # fraction terrain CNN > 0.6 [0-1]
+    micro_relief_potential: float            # std altitudes locale (ElevationCache) [0-1]
+    visibility_complexity: Optional[float]   # None si ocad_line_segments absent
 
 
 def compute_map_profile(
@@ -38,13 +38,12 @@ def compute_map_profile(
     bbox_km2 = (max_lng - min_lng) * lng_scale * (max_lat - min_lat) * lat_scale / 1e6
     bbox_km2 = max(bbox_km2, 0.01)
 
-    # ── navigation_complexity : densité ISOM ───────────────────────────────────
+    # ── navigation_complexity : densité ISOM (None si données absentes) ──────────
     if candidate_points:
         isom_count = sum(1 for cp in candidate_points if cp.get("isom"))
-        # Seuil : 50 points ISOM/km² = complexité maximale
-        nav_complexity = min(1.0, isom_count / (bbox_km2 * 50.0))
+        nav_complexity: Optional[float] = min(1.0, isom_count / (bbox_km2 * 50.0))
     else:
-        nav_complexity = 0.5
+        nav_complexity = None
 
     # ── route_choice_potential : densité arêtes OSM ───────────────────────────
     if route_analyzer is not None:
@@ -79,17 +78,16 @@ def compute_map_profile(
     else:
         relief_pot = 0.0
 
-    # ── visibility_complexity : densité courbes de niveau ────────────────────
+    # ── visibility_complexity : densité courbes de niveau (None si données absentes) ──
     if ocad_line_segments:
-        # Seuil : 100 segments/km²
-        vis_complexity = min(1.0, len(ocad_line_segments) / (bbox_km2 * 100.0))
+        vis_complexity: Optional[float] = min(1.0, len(ocad_line_segments) / (bbox_km2 * 100.0))
     else:
-        vis_complexity = 0.5
+        vis_complexity = None
 
     return MapProfile(
-        navigation_complexity=round(nav_complexity, 3),
+        navigation_complexity=round(nav_complexity, 3) if nav_complexity is not None else None,
         route_choice_potential=round(route_potential, 3),
         speed_potential=round(speed_pot, 3),
         micro_relief_potential=round(relief_pot, 3),
-        visibility_complexity=round(vis_complexity, 3),
+        visibility_complexity=round(vis_complexity, 3) if vis_complexity is not None else None,
     )

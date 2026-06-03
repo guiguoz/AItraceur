@@ -26,6 +26,7 @@ class CourseProfile:
 
     # Couverture géographique
     map_coverage: float             # aire convex hull / aire bbox [0-1]
+    zone_balance: float             # entropie Shannon grille 4×4 [0=concentré, 1=uniforme]
 
     # Épisodes & séquence
     episodes: List[ProfileEpisode]
@@ -64,6 +65,30 @@ def _alternation_score(legs_m: np.ndarray) -> float:
         return 75.0
     alternations = sum(1 for a, b in zip(relevant, relevant[1:]) if a != b)
     return 100.0 * alternations / (len(relevant) - 1)
+
+
+def _zone_balance(controls: list, bbox: tuple, n: int = 4) -> float:
+    """Entropie de Shannon normalisée de la distribution des postes dans une grille n×n."""
+    if len(controls) < 2:
+        return 0.0
+    min_lng, min_lat, max_lng, max_lat = bbox
+    w = max_lng - min_lng
+    h = max_lat - min_lat
+    if w <= 0 or h <= 0:
+        return 0.0
+    counts = np.zeros(n * n, dtype=float)
+    for c in controls:
+        ci = min(n - 1, int((c[0] - min_lng) / w * n))
+        cj = min(n - 1, int((c[1] - min_lat) / h * n))
+        counts[cj * n + ci] += 1
+    total = counts.sum()
+    if total == 0:
+        return 0.0
+    probs = counts / total
+    nonzero = probs[probs > 0]
+    entropy = max(0.0, -float(np.sum(nonzero * np.log(nonzero))))
+    h_max = math.log(n * n)
+    return float(min(1.0, entropy / h_max))
 
 
 def _map_coverage(controls: list, bbox: tuple) -> float:
@@ -282,6 +307,7 @@ def compute_course_profile(
         alternation=round(alternation, 1),
         climb_distribution=round(climb_distribution, 3),
         map_coverage=round(_map_coverage(controls, bbox), 3),
+        zone_balance=round(_zone_balance(controls, bbox), 3),
         episodes=episodes,
         zone_sequence=zone_sequence,
         profile_segments=segs,

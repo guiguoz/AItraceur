@@ -9,7 +9,7 @@ from .course_profile import CourseProfile
 
 
 def course_profile_vector(cp: CourseProfile) -> np.ndarray:
-    """Vecteur numérique normalisé extraict d'un CourseProfile."""
+    """Vecteur numérique 11-dim extrait d'un CourseProfile. NaN = donnée absente."""
     hist = cp.leg_intent_histogram
     total = max(1, sum(hist.values()))
     nav_f = hist.get("navigation", 0) / total
@@ -21,6 +21,7 @@ def course_profile_vector(cp: CourseProfile) -> np.ndarray:
         cp.alternation / 100.0,
         cp.climb_distribution,
         cp.map_coverage,
+        cp.zone_balance,
         min(1.0, cp.transition_count / 10.0),
         cp.transition_strength,
         nav_f,
@@ -30,11 +31,15 @@ def course_profile_vector(cp: CourseProfile) -> np.ndarray:
 
 
 def cosine_distance(v1: np.ndarray, v2: np.ndarray) -> float:
-    """Distance cosinus ∈ [0, 1]. 0 = identiques, 1 = orthogonaux."""
-    norms = np.linalg.norm(v1) * np.linalg.norm(v2)
+    """Distance cosinus ∈ [0, 1]. Ignore les dimensions NaN."""
+    mask = ~(np.isnan(v1) | np.isnan(v2))
+    if not mask.any():
+        return 0.0
+    a, b = v1[mask], v2[mask]
+    norms = np.linalg.norm(a) * np.linalg.norm(b)
     if norms == 0:
         return 0.0
-    return float(1.0 - np.dot(v1, v2) / norms)
+    return float(1.0 - np.dot(a, b) / norms)
 
 
 def select_diverse_circuits(

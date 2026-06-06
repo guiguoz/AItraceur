@@ -173,7 +173,11 @@ class HeatmapCache:
         nz = int(d["n_zones"]) if "n_zones" in d else 0
         scores = d["scores"].astype(np.float32)
         bbox = tuple(d["bbox"].tolist())
-        is_flat = bool(d["is_flat_signal"]) if "is_flat_signal" in d else False
+        # is_flat_signal : recalculer depuis les données si absent (fichiers pré-Sprint 3.5c)
+        if "is_flat_signal" in d:
+            is_flat = bool(d["is_flat_signal"])
+        else:
+            is_flat = bool(float(scores.std()) < 0.05)
         # Recompute zones si absent (backward compat avec les fichiers pré-Couche 0)
         if nz == 0:
             try:

@@ -2284,6 +2284,7 @@ def _circuit_impl(body: dict) -> dict:
                             mpp=_mpp,
                             step_px=_step_px,
                             force_mode=force_mode,
+                            candidate_points=candidate_points or [],
                             cnn_scorer=_cnn_scorer,
                         )
                         heatmap_cache.save(_hmc_path)
@@ -4211,6 +4212,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                             mpp=_mpp,
                             step_px=_step_px,
                             force_mode=force_mode,
+                            candidate_points=candidate_points or [],
                             cnn_scorer=_cnn_scorer,
                         )
                         heatmap_cache.save(_hmc_path)

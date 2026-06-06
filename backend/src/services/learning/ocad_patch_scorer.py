@@ -65,6 +65,8 @@ class HeatmapCache:
     forbidden_mask: Optional[np.ndarray] = None  # (H_img, W_img) bool — zones interdites dilatées
     scores_std: float = 0.0      # écart-type de la grille — 0 si non calculé
     is_flat_signal: bool = False  # True si std < 0.05 (CNN non-informatif, fallback ISOM en GA)
+    zone_labels: Optional[np.ndarray] = None  # (H_grid, W_grid) uint8 — 0/1/2 (pauvre/modérée/riche)
+    n_zones: int = 0  # 0=non initialisé, 1=signal plat (fallback neutre), 3=segmentation active
 
     def query(self, lng: float, lat: float) -> float:
         """
@@ -154,6 +156,8 @@ class HeatmapCache:
             step_px=np.array(self.step_px),
             map_w=np.array(self.map_w),
             map_h=np.array(self.map_h),
+            zone_labels=self.zone_labels if self.zone_labels is not None else np.array([], dtype=np.uint8),
+            n_zones=np.array(self.n_zones),
         )
         log.debug("HeatmapCache: sauvegardé → %s", _p)
 
@@ -164,13 +168,27 @@ class HeatmapCache:
         _p = _Path(path).with_suffix(".npz")
         d = np.load(str(_p), allow_pickle=False)
         fm = d["forbidden"] if d["forbidden"].ndim == 2 else None
+        zl_arr = d["zone_labels"] if "zone_labels" in d else np.array([], dtype=np.uint8)
+        zl = zl_arr if zl_arr.ndim == 2 else None
+        nz = int(d["n_zones"]) if "n_zones" in d else 0
+        scores = d["scores"].astype(np.float32)
+        bbox = tuple(d["bbox"].tolist())
+        is_flat = bool(d["is_flat_signal"]) if "is_flat_signal" in d else False
+        # Recompute zones si absent (backward compat avec les fichiers pré-Couche 0)
+        if nz == 0:
+            try:
+                zl, nz = _compute_zones(scores, bbox, is_flat)
+            except Exception:
+                pass
         return cls(
-            scores=d["scores"].astype(np.float32),
-            bbox=tuple(d["bbox"].tolist()),
+            scores=scores,
+            bbox=bbox,
             step_px=int(d["step_px"]),
             map_w=int(d["map_w"]),
             map_h=int(d["map_h"]),
             forbidden_mask=fm,
+            zone_labels=zl,
+            n_zones=nz,
         )
 
 
@@ -391,6 +409,7 @@ class OcadPatchScorer:
         mpp: float = 0.5,
         step_px: int = 20,
         force_mode: Optional[str] = None,
+        candidate_points: Optional[list] = None,
         cnn_scorer: Optional["CnnPatchScorer"] = None,
     ) -> "HeatmapCache":
         """
@@ -501,6 +520,10 @@ class OcadPatchScorer:
                 "HeatmapCache: signal plat (std=%.4f < 0.05) — fallback ISOM activé en GA",
                 _scores_std,
             )
+        # ── Segmentation zones (Couche 0) ─────────────────────────────────────────────────
+        _zone_labels, _n_zones = _compute_zones(scores_grid, bbox, _is_flat, candidate_points)
+        _zone_method = "flat/neutre" if _n_zones == 1 else ("k-means CNN" if not _is_flat else "densité ISOM")
+        log.info("HeatmapCache: zones=%d (%s)", _n_zones, _zone_method)
         # ─────────────────────────────────────────────────────────────────────────────────
         return HeatmapCache(
             scores=scores_grid,
@@ -511,6 +534,8 @@ class OcadPatchScorer:
             forbidden_mask=_forbidden_mask,
             scores_std=_scores_std,
             is_flat_signal=_is_flat,
+            zone_labels=_zone_labels,
+            n_zones=_n_zones,
         )
 
     # ------------------------------------------------------------------
@@ -670,6 +695,80 @@ def _build_dem_tiles(
     elev_norm  = np.clip(np.array(elev_img,  dtype=np.float32) / 3000.0, 0.0, 1.0)
     slope_norm = np.clip(np.array(slope_img, dtype=np.float32) / 45.0,   0.0, 1.0)
     return elev_norm, slope_norm  # (map_h, map_w) chacun
+
+
+# ---------------------------------------------------------------------------
+# Zone segmentation helpers (Couche 0)
+# ---------------------------------------------------------------------------
+
+def _kmeans_1d(values: np.ndarray, k: int = 3, max_iter: int = 50) -> np.ndarray:
+    """K-means 1D pur numpy — labels 0..k-1, forme identique à values."""
+    flat = values.ravel().astype(np.float32)
+    pcts = np.linspace(0.0, 100.0, k + 2)[1:-1]
+    centroids = np.percentile(flat, pcts).astype(np.float32)
+    labels = np.zeros(len(flat), dtype=np.int32)
+    for _ in range(max_iter):
+        dists = np.abs(flat[:, None] - centroids[None, :])  # (N, k)
+        new_labels = dists.argmin(axis=1).astype(np.int32)
+        if np.array_equal(new_labels, labels):
+            break
+        labels = new_labels
+        for j in range(k):
+            mask = labels == j
+            if mask.any():
+                centroids[j] = flat[mask].mean()
+    return labels.reshape(values.shape)
+
+
+def _compute_zones(
+    scores_grid: np.ndarray,
+    bbox: tuple,
+    is_flat_signal: bool,
+    candidate_points: Optional[list] = None,
+) -> "tuple[np.ndarray, int]":
+    """
+    Segmente la grille en 3 zones de richesse terrain (0=pauvre, 1=modérée, 2=riche).
+
+    Branche 1 (normal)          : k-means 1D sur scores_grid.
+    Branche 2 (signal plat + ISOM) : densité spatiale via histogram sur candidate_points.
+    Fallback                    : zone_labels = 1 partout, n_zones = 1.
+
+    Returns:
+        (zone_labels, n_zones) — labels (H, W) uint8, n_zones = 1 ou 3.
+    """
+    H, W = scores_grid.shape
+
+    def _sorted_labels(raw: np.ndarray, source: np.ndarray) -> np.ndarray:
+        # Re-trier pour 0=pauvre (centroïde le plus bas) et 2=riche (le plus haut)
+        centroids_val = np.array(
+            [source[raw == j].mean() if (raw == j).any() else 0.0 for j in range(3)],
+            dtype=np.float32,
+        )
+        centroids_val = np.nan_to_num(centroids_val, nan=0.0)  # cluster vide → 0
+        rank = np.argsort(np.argsort(centroids_val))  # double argsort = rang ordinal
+        return rank[raw].astype(np.uint8)
+
+    if not is_flat_signal:
+        raw = _kmeans_1d(scores_grid, k=3)
+        return _sorted_labels(raw, scores_grid), 3
+
+    if candidate_points and len(candidate_points) >= 9:
+        try:
+            min_lng, min_lat, max_lng, max_lat = bbox
+            pts = np.array([[cp["x"], cp["y"]] for cp in candidate_points], dtype=np.float32)
+            density, _, _ = np.histogram2d(
+                pts[:, 0], pts[:, 1],  # lng, lat
+                bins=[W, H],
+                range=[[min_lng, max_lng], [min_lat, max_lat]],
+            )
+            density = density.T[::-1, :].astype(np.float32)  # (H, W), row 0 = max_lat
+            if float(density.std()) > 0:
+                raw = _kmeans_1d(density, k=3)
+                return _sorted_labels(raw, density), 3
+        except Exception:
+            pass
+
+    return np.ones((H, W), dtype=np.uint8), 1
 
 
 # ---------------------------------------------------------------------------

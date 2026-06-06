@@ -49,6 +49,10 @@ class CourseProfile:
     geo_spread_x: float = 0.0   # dispersion postes X normalisée [0,1] (std × 3)
     geo_spread_y: float = 0.0   # dispersion postes Y normalisée [0,1] (std × 3)
 
+    # Couche 0 — Segmentation de la carte (zones riches vs pauvres)
+    zone_coverage: float = 0.0  # fraction des secteurs riches visités [0-1]
+    zone_diversity: float = 0.0  # zones distinctes traversées / n_zones [0-1]
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -126,6 +130,68 @@ def _map_coverage(controls: list, bbox: tuple) -> float:
         ) / 2.0
 
     return float(min(1.0, hull_area / bbox_area))
+
+
+def _zone_metrics(controls: list, heatmap_cache, sectors: int = 4) -> "tuple[float, float]":
+    """
+    Calcule (zone_coverage, zone_diversity) à partir de zone_labels du HeatmapCache.
+
+    zone_coverage  : fraction des secteurs riches (zone=2 majoritaire) ayant ≥1 contrôle.
+    zone_diversity : nombre de valeurs de zone distinctes visitées / n_zones.
+    """
+    if not controls:
+        return 0.0, 0.0
+    if (heatmap_cache is None
+            or not hasattr(heatmap_cache, "zone_labels")
+            or heatmap_cache.zone_labels is None
+            or heatmap_cache.n_zones <= 1):  # n_zones=0 (absent) ou =1 (signal plat) → non significatif
+        return 0.0, 0.0
+
+    zl = heatmap_cache.zone_labels  # (H, W) uint8
+    H, W = zl.shape
+    n_zones = heatmap_cache.n_zones
+    min_lng, min_lat, max_lng, max_lat = heatmap_cache.bbox
+    bw = max(max_lng - min_lng, 1e-9)
+    bh = max(max_lat - min_lat, 1e-9)
+
+    def _to_grid(lng: float, lat: float) -> "tuple[int, int]":
+        col = int((lng - min_lng) / bw * (W - 1))
+        row = int((1.0 - (lat - min_lat) / bh) * (H - 1))
+        return max(0, min(H - 1, row)), max(0, min(W - 1, col))
+
+    # zone_diversity
+    zones_visited: set = set()
+    for ctrl in controls:
+        lng, lat = (ctrl["x"], ctrl["y"]) if isinstance(ctrl, dict) else (ctrl[0], ctrl[1])
+        r, c = _to_grid(lng, lat)
+        zones_visited.add(int(zl[r, c]))
+    zone_diversity = len(zones_visited) / max(n_zones, 1)
+
+    # zone_coverage via grille de secteurs (4×4 par défaut)
+    s = sectors
+    h_blk = max(H // s, 1)
+    w_blk = max(W // s, 1)
+    rich_sectors: set = set()
+    for si in range(s):
+        for sj in range(s):
+            block = zl[si * h_blk:(si + 1) * h_blk, sj * w_blk:(sj + 1) * w_blk]
+            if block.size > 0 and float(block.mean()) > 1.5:
+                rich_sectors.add((si, sj))
+
+    if not rich_sectors:
+        zone_coverage = 1.0
+    else:
+        visited_sectors: set = set()
+        for ctrl in controls:
+            lng, lat = (ctrl["x"], ctrl["y"]) if isinstance(ctrl, dict) else (ctrl[0], ctrl[1])
+            r, c = _to_grid(lng, lat)
+            si = min(r // h_blk, s - 1)
+            sj = min(c // w_blk, s - 1)
+            if (si, sj) in rich_sectors:
+                visited_sectors.add((si, sj))
+        zone_coverage = len(visited_sectors) / len(rich_sectors)
+
+    return float(zone_coverage), float(zone_diversity)
 
 
 def _classify_zone_cnn(cnn_score: float) -> str:
@@ -307,6 +373,9 @@ def compute_course_profile(
         difficulty = leg_norm
     difficulty_curve = [round(float(v), 3) for v in difficulty]
 
+    # ── Couche 0 — Zone metrics ───────────────────────────────────────────────────
+    _zone_cov, _zone_div = _zone_metrics(controls, heatmap_cache)
+
     # ── Géographie ────────────────────────────────────────────────────────────────
     _inner = controls[1:-1] if len(controls) > 2 else controls
     _min_lng, _min_lat, _max_lng, _max_lat = bbox
@@ -342,4 +411,6 @@ def compute_course_profile(
         geo_center_y=_geo_cy,
         geo_spread_x=_geo_sx,
         geo_spread_y=_geo_sy,
+        zone_coverage=round(_zone_cov, 3),
+        zone_diversity=round(_zone_div, 3),
     )

@@ -42,7 +42,7 @@ VIKAZIMUT_INDEX = ROOT / "vikazimut" / "index.json"
 OUTPUT_DIR = ROOT / "output" / "sprint_4_3"
 
 GA_SEED = 42
-N_RUNS = 2
+N_RUNS = 3
 TOP_K = 10
 N_VARIANTS = 3
 
@@ -185,6 +185,20 @@ def compute_metrics(circuits: List, bb_info: dict, caches: dict) -> Optional[dic
     hmc = caches.get("heatmap_cache")
     bb_tuple = (bb_info["min_x"], bb_info["min_y"], bb_info["max_x"], bb_info["max_y"])
 
+    # ── Diagnostic per-variant : snapping + longueur jambes ───────────────────
+    if ra is not None:
+        for vi, c in enumerate(circuits[:3]):
+            pts_v = [(ctrl["x"], ctrl["y"]) for ctrl in c.controls]
+            arr_v = np.array(pts_v)
+            legs_v = _haversine_batch(arr_v[:-1, 0], arr_v[:-1, 1], arr_v[1:, 0], arr_v[1:, 1])
+            n_same = sum(
+                1 for p0, p1 in zip(pts_v[:-1], pts_v[1:])
+                if ra._nearest_node(p0[0], p0[1]) == ra._nearest_node(p1[0], p1[1])
+            )
+            log.info("  [diag] V%s: n_legs=%d mean_leg_m=%.0f n_same_node=%d",
+                     "ABC"[vi] if vi < 3 else str(vi), len(pts_v) - 1,
+                     float(np.mean(legs_v)), n_same)
+
     rcds, fitnesses, vectors = [], [], []
 
     for c in circuits:
@@ -309,13 +323,14 @@ def generate_report(results: List[dict]) -> str:
               "  " + "-" * 60]
     for r in valid:
         m = r["metrics"]
-        rcds_s = "  ".join(f"{v:.4f}" for v in m["rcds"])
         fits_s = f"{m['fitnesses'][0]:.2f}" if m["fitnesses"] else "?"
-        rcd_vals = m["rcds"] + [0.0] * (3 - len(m["rcds"]))
+        n_real = len(m["rcds"])
+        rcd_vals = m["rcds"] + [None] * (3 - n_real)
         lines.append(
             f"  {r['id']:>6}  {r['terrain']:<8}  {r['scale']:>6}"
-            f"  {rcd_vals[0]:.4f}  {rcd_vals[1]:.4f}  "
-            f"{'?' if len(rcd_vals) < 3 else f'{rcd_vals[2]:.4f}'}  {fits_s:>9}"
+            f"  {rcd_vals[0]:.4f}  "
+            f"{'?' if rcd_vals[1] is None else f'{rcd_vals[1]:.4f}'}  "
+            f"{'?' if rcd_vals[2] is None else f'{rcd_vals[2]:.4f}'}  {fits_s:>9}"
         )
 
     return "\n".join(lines)

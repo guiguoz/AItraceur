@@ -8,7 +8,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace as _dc_replace
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
+import logging
 import numpy as np
+
+log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ..learning.ocad_patch_scorer import HeatmapCache
@@ -310,6 +313,27 @@ class AIGenerator:
 
         # Sélection greedy cosinus
         selected = select_diverse_circuits(deduped, n_select=num_variants)
+
+        # Recalcul profil avec route_analyzer pour les N variantes retenues uniquement
+        # (omis lors de la boucle principale pour éviter ~300 appels sur tout le pool)
+        if request.route_analyzer is not None and selected:
+            recomputed = []
+            for c, _cp_old in selected:
+                try:
+                    arr = np.array(c.controls)
+                    legs_m = _haversine_batch(arr[:-1, 0], arr[:-1, 1], arr[1:, 0], arr[1:, 1])
+                    cp_full = compute_course_profile(
+                        controls=c.controls,
+                        legs_m=legs_m,
+                        bbox=bbox_tuple,
+                        heatmap_cache=request.heatmap_cache,
+                        route_analyzer=request.route_analyzer,
+                    )
+                    recomputed.append((c, cp_full))
+                except Exception:
+                    recomputed.append((c, _cp_old))
+            selected = recomputed
+
         _prof_elapsed = _time_mod.time() - _prof_t0
 
         # Log

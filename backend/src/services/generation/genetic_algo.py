@@ -2021,11 +2021,16 @@ class GeneticAlgorithm:
             return -100.0
 
         # ── A. Score IA (HeatmapCache lookup) ──────────────────────────────
+        _heatmap_flat = False
         if config.heatmap_cache is not None:
             ai_scores = np.array(
                 [config.heatmap_cache.query(lng, lat) for lng, lat in controls]
             )
             ai_score = float(ai_scores.mean())
+            if getattr(config.heatmap_cache, 'is_flat_signal', False):
+                # Signal CNN non-informatif → fallback ISOM (score position-dépendant)
+                _heatmap_flat = True
+                ai_score = self._terrain_quality_score_isom(controls) / 100.0
         else:
             # Fallback : attractivité ISOM rule-based (comportement existant)
             ai_score = self._terrain_quality_score_isom(controls) / 100.0
@@ -2508,6 +2513,8 @@ class GeneticAlgorithm:
             _density_mult = 50.0
         if config.w_dist_override is not None:
             W_DIST = config.w_dist_override
+        if _heatmap_flat:
+            W_AI *= 0.5  # signal CNN absent → réduire poids terme A
         W_SHAPE = 15.0  # forme géométrique — anti-Z/spirale/accordéon (H5 actif)
         W_LEG_PROFILE = 8.0  # conformité longueur jambes au profil format IOF
 

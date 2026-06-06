@@ -9,7 +9,12 @@ from .course_profile import CourseProfile
 
 
 def course_profile_vector(cp: CourseProfile) -> np.ndarray:
-    """Vecteur numérique 11-dim extrait d'un CourseProfile. NaN = donnée absente."""
+    """Vecteur numérique 15-dim extrait d'un CourseProfile. NaN = donnée absente.
+
+    Dims 0-10 : profil technique (inchangé depuis Sprint 3).
+    Dims 11-14 : géographie — centre de gravité + dispersion (Sprint 4).
+                 Rend la diversification terrain-invariante (forêt sans OCAD).
+    """
     hist = cp.leg_intent_histogram
     total = max(1, sum(hist.values()))
     nav_f = hist.get("navigation", 0) / total
@@ -27,6 +32,10 @@ def course_profile_vector(cp: CourseProfile) -> np.ndarray:
         nav_f,
         ori_f,
         spd_f,
+        cp.geo_center_x,
+        cp.geo_center_y,
+        cp.geo_spread_x,
+        cp.geo_spread_y,
     ], dtype=np.float32)
 
 

@@ -63,6 +63,8 @@ class HeatmapCache:
     map_w: int
     map_h: int
     forbidden_mask: Optional[np.ndarray] = None  # (H_img, W_img) bool — zones interdites dilatées
+    scores_std: float = 0.0      # écart-type de la grille — 0 si non calculé
+    is_flat_signal: bool = False  # True si std < 0.05 (CNN non-informatif, fallback ISOM en GA)
 
     def query(self, lng: float, lat: float) -> float:
         """
@@ -479,18 +481,26 @@ class OcadPatchScorer:
             _forbidden_mask = None
         # ─────────────────────────────────────────────────────────────────────────────────
         _pct_forbidden = float(_forbidden_mask.mean()) * 100 if _forbidden_mask is not None else 0.0
+        _scores_std = float(scores_grid.std())
+        _is_flat = _scores_std < 0.05
         log.info(
             "HeatmapCache: %s | grid=%dx%d step=%dpx mpp=%.2fm | "
-            "mean=%.3f p50=%.3f p90=%.3f p99=%.3f | forbidden=%.1f%% | %.0f patches/s (%.2fs)",
+            "mean=%.3f p50=%.3f p90=%.3f p99=%.3f std=%.4f | forbidden=%.1f%% | %.0f patches/s (%.2fs)",
             scorer_label,
             scores_grid.shape[1], scores_grid.shape[0], step_px, mpp,
             float(scores_grid.mean()),
             float(np.percentile(scores_grid, 50)),
             float(np.percentile(scores_grid, 90)),
             float(np.percentile(scores_grid, 99)),
+            _scores_std,
             _pct_forbidden,
             len(candidates) / max(_elapsed, 1e-6), _elapsed,
         )
+        if _is_flat:
+            log.warning(
+                "HeatmapCache: signal plat (std=%.4f < 0.05) — fallback ISOM activé en GA",
+                _scores_std,
+            )
         # ─────────────────────────────────────────────────────────────────────────────────
         return HeatmapCache(
             scores=scores_grid,
@@ -499,6 +509,8 @@ class OcadPatchScorer:
             map_w=map_w,
             map_h=map_h,
             forbidden_mask=_forbidden_mask,
+            scores_std=_scores_std,
+            is_flat_signal=_is_flat,
         )
 
     # ------------------------------------------------------------------

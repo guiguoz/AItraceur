@@ -5,14 +5,22 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace as _dc_replace
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+
+import numpy as np
 
 if TYPE_CHECKING:
     from ..learning.ocad_patch_scorer import HeatmapCache
 
 from .graph_builder import GraphBuilder
-from .genetic_algo import GeneticAlgorithm, GenerationConfig, scale_min_separation
+from .genetic_algo import GeneticAlgorithm, GenerationConfig, scale_min_separation, _haversine_batch
+from .profiling.course_profile import compute_course_profile
+from .profiling.profile_distance import cosine_distance, course_profile_vector, select_diverse_circuits
+
+# ── Constantes diversification inter-runs ──────────────────────────────────────
+DIVERSITY_FITNESS_RATIO = 0.95       # filtre qualité : fitness >= ratio × best
+DIVERSITY_DUPLICATE_THRESHOLD = 0.0002  # seuil dédoublonnage cosinus (intra-run ≈0.0001, inter-run ≈0.001+)
 
 
 # =============================================
@@ -52,6 +60,9 @@ class GenerationRequest:
     ga_seed: Optional[int] = None            # seed déterministe pour reproductibilité inter-runs
     w_diversity_mult: float = 1.0            # multiplicateur W_LEG_DIVERSITY pour expériences
     latent_regime: Optional[str] = None     # régime latent cible (post-sélection LRI)
+    n_runs: int = 3                          # nombre de runs GA pour le pool inter-runs
+    top_k_per_run: int = 10                  # circuits retenus par run dans le pool
+    diversity_fitness_ratio: float = DIVERSITY_FITNESS_RATIO  # filtre qualité pool
 
 
 @dataclass
@@ -193,16 +204,14 @@ class AIGenerator:
         request: GenerationRequest,
         num_variants: int,
     ) -> List[GeneratedCircuit]:
-        """Génère avec l'algorithme génétique."""
-        # Mode sprint : circuit de type sprint OU TD1/TD2 (débutants)
+        """Génère avec l'algorithme génétique — N runs, pool inter-runs, sélection cosinus."""
+        import time as _time_mod
+
         sprint_mode = request.circuit_type == "sprint" or request.technical_level in ("TD1", "TD2")
-        # Fallback dégradé (sans règles JSON) — conservateur
         _base_dist = 30 if sprint_mode else 60
-        # ct pour scaling = format géographique (circuit_type), pas le niveau TD.
-        # TD1/TD2 affecte _base_dist (placement serré) mais pas la référence échelle/clamp.
         min_dist = scale_min_separation(_base_dist, request.map_scale, request.circuit_type or "md")
 
-        config = GenerationConfig(
+        base_config = GenerationConfig(
             target_length_m=request.target_length_m,
             target_climb_m=request.target_climb_m,
             target_controls=request.target_controls,
@@ -228,39 +237,116 @@ class AIGenerator:
             latent_regime=request.latent_regime,
         )
 
-        # Initialiser le GA
-        ga = GeneticAlgorithm(config=config)
-        self._last_ga = ga  # exposé pour compute_nav_scores post-corrections dans main.py
+        # Sprint 3.5d — audit signal terrain : heatmap + gradient ISOM
+        if request.heatmap_cache is not None and getattr(request.heatmap_cache, 'is_flat_signal', False):
+            _n_cands = len(request.candidate_points) if request.candidate_points else 0
+            _isom_info = f"{_n_cands} candidats (gradient attendu)" if _n_cands > 0 else "0 candidats → CONSTANT 50.0 (double signal plat)"
+            log.warning(
+                "[terrain-audit] heatmap plat (std=%.4f) | ISOM fallback: %s",
+                getattr(request.heatmap_cache, 'scores_std', 0.0),
+                _isom_info,
+            )
 
-        # Graphe (simplifié)
+        # Graphe OSM — construit une seule fois, partagé entre tous les runs
         graph = GraphBuilder()
         graph.build_graph(request.bounding_box, include_paths=True)
-        ga.set_graph(graph)
 
-        # Positions de départ/arrivée
         start = request.start_position or (
             (request.bounding_box["min_x"] + request.bounding_box["max_x"]) / 2,
             (request.bounding_box["min_y"] + request.bounding_box["max_y"]) / 2,
         )
         end = request.end_position or start
 
-        # Générer
-        result = ga.generate(start, end, request.forbidden_zones)
+        # ── N runs GA → pool inter-runs ──────────────────────────────────────
+        all_circuits: list = []
+        for run_idx in range(request.n_runs):
+            run_seed = (request.ga_seed + run_idx) if request.ga_seed is not None else None
+            run_config = _dc_replace(base_config, ga_seed=run_seed)
+            ga = GeneticAlgorithm(config=run_config)
+            ga.set_graph(graph)
+            result = ga.generate(start, end, request.forbidden_zones)
+            all_circuits.extend(result.circuits[:request.top_k_per_run])
+            self._last_ga = ga  # _ocad_tree identique entre runs (construit depuis candidate_points)
 
-        # ── Re-ranker choix d'itinéraire (post-GA, sprint uniquement) ──────────
-        import time as _time_mod
-        _route_choices_by_idx: list = [None] * len(result.circuits)
-        if request.route_analyzer is not None and sprint_mode and result.circuits:
+        # ── Filtre qualité avec fallback ─────────────────────────────────────
+        all_circuits.sort(key=lambda c: c.fitness, reverse=True)
+        if all_circuits:
+            ratio = request.diversity_fitness_ratio
+            filtered = [c for c in all_circuits if c.fitness >= ratio * all_circuits[0].fitness]
+            if len(filtered) < num_variants:
+                filtered = all_circuits
+        else:
+            filtered = []
+
+        # ── CourseProfile + déduplication légère ─────────────────────────────
+        _prof_t0 = _time_mod.time()
+        bb = request.bounding_box
+        bbox_tuple = (bb["min_x"], bb["min_y"], bb["max_x"], bb["max_y"])
+
+        circuits_with_profiles: list = []
+        for c in filtered:
+            try:
+                arr = np.array(c.controls)
+                legs_m = _haversine_batch(arr[:-1, 0], arr[:-1, 1], arr[1:, 0], arr[1:, 1])
+                cp = compute_course_profile(
+                    controls=c.controls,
+                    legs_m=legs_m,
+                    bbox=bbox_tuple,
+                    heatmap_cache=request.heatmap_cache,
+                    # route_analyzer omis volontairement : route_diversity_score() trop lent sur 30 circuits
+                )
+                circuits_with_profiles.append((c, cp))
+            except Exception:
+                pass
+
+        # Dédoublonnage : conserver le meilleur fitness si cosinus < seuil
+        deduped: list = []
+        deduped_vecs: list = []
+        for item in circuits_with_profiles:
+            v = course_profile_vector(item[1])
+            if not any(cosine_distance(v, dv) < DIVERSITY_DUPLICATE_THRESHOLD for dv in deduped_vecs):
+                deduped.append(item)
+                deduped_vecs.append(v)
+
+        # Sélection greedy cosinus
+        selected = select_diverse_circuits(deduped, n_select=num_variants)
+        _prof_elapsed = _time_mod.time() - _prof_t0
+
+        # Log
+        if len(selected) > 1:
+            sel_vecs = [course_profile_vector(cp) for _, cp in selected]
+            dists = [
+                cosine_distance(sel_vecs[i], sel_vecs[j])
+                for i in range(len(sel_vecs))
+                for j in range(i + 1, len(sel_vecs))
+            ]
+            mean_cos = sum(dists) / len(dists)
+        else:
+            mean_cos = 0.0
+        print(
+            f"[diversity] runs={request.n_runs} pool={len(all_circuits)} filtered={len(filtered)} "
+            f"deduped={len(deduped)} selected={len(selected)} mean_cosine={mean_cos:.4f} "
+            f"profiling={_prof_elapsed:.2f}s",
+            flush=True,
+        )
+
+        # Fallback edge case : pool vide
+        if not selected and all_circuits:
+            selected = [(all_circuits[0], None)]
+
+        # ── Re-ranker choix d'itinéraire (post-GA, sprint uniquement) ────────
+        _route_choices_by_idx: list = [None] * len(selected)
+        if request.route_analyzer is not None and sprint_mode and selected:
             _best_idx = 0
             _best_total = -1.0
             _reranker_t0 = _time_mod.time()
-            for _ci, _ckt in enumerate(result.circuits[:3]):  # Top-3 max
-                if _time_mod.time() - _reranker_t0 > 15.0:   # cap 15s total
+            for _ci, (_ckt, _) in enumerate(selected[:3]):
+                if _time_mod.time() - _reranker_t0 > 15.0:
                     break
                 try:
                     _rc = request.route_analyzer.score_circuit_choices(
                         _ckt.controls, k=2,
-                        t_deadline=_reranker_t0 + 15.0,  # deadline partagée entre tous les circuits
+                        t_deadline=_reranker_t0 + 15.0,
                     )
                     _route_choices_by_idx[_ci] = _rc
                     if _rc["total_choice_score"] > _best_total:
@@ -269,14 +355,13 @@ class AIGenerator:
                 except Exception:
                     pass
             if _best_idx > 0:
-                result.circuits.insert(0, result.circuits.pop(_best_idx))
+                selected.insert(0, selected.pop(_best_idx))
                 _route_choices_by_idx.insert(0, _route_choices_by_idx.pop(_best_idx))
-        # ────────────────────────────────────────────────────────────────────────
+        # ─────────────────────────────────────────────────────────────────────
 
-        # Convertir en circuits générés
+        # ── Conversion vers GeneratedCircuit ─────────────────────────────────
         circuits = []
-
-        for i, circuit in enumerate(result.circuits[:num_variants]):
+        for i, (circuit, _cp) in enumerate(selected):
             controls = []
             for j, pos in enumerate(circuit.controls):
                 ctrl_type = (
@@ -284,20 +369,16 @@ class AIGenerator:
                     else "finish" if j == len(circuit.controls) - 1
                     else "control"
                 )
-                desc = self._describe_control(
-                    pos[0], pos[1], request.candidate_points
-                )
-                controls.append(
-                    {
-                        "order": j + 1,
-                        "x": pos[0],
-                        "y": pos[1],
-                        "type": ctrl_type,
-                        "description": desc,
-                    }
-                )
+                desc = self._describe_control(pos[0], pos[1], request.candidate_points)
+                controls.append({
+                    "order": j + 1,
+                    "x": pos[0],
+                    "y": pos[1],
+                    "type": ctrl_type,
+                    "description": desc,
+                })
 
-            # Distance réelle via RouteAnalyzer pour le circuit gagnant (Mission 3)
+            # Distance réelle via RouteAnalyzer pour le circuit gagnant
             if request.route_analyzer is not None and i == 0:
                 real_dist = 0.0
                 for _li in range(len(circuit.controls) - 1):
@@ -323,18 +404,17 @@ class AIGenerator:
                 else []
             )
 
-            generated = GeneratedCircuit(
+            circuits.append(GeneratedCircuit(
                 id=f"genetic_{i + 1}",
                 controls=controls,
                 total_length_m=total_length,
-                total_climb_m=request.target_climb_m,  # Simplifié
+                total_climb_m=request.target_climb_m,
                 estimated_time_minutes=request.winning_time_minutes,
                 score=circuit.fitness,
                 generation_method="genetic",
                 description=f"Circuit généré par algorithme génétique (génération {circuit.generation})",
                 leg_route_choices=_leg_choices,
-            )
-            circuits.append(generated)
+            ))
 
         return circuits
 

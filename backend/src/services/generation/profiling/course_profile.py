@@ -43,6 +43,12 @@ class CourseProfile:
                                     # "climax_middle"|"sawtooth"|"random"
     leg_intent_histogram: Dict[str, int]
 
+    # Géographie (Sprint 4 — diversification terrain-invariante)
+    geo_center_x: float = 0.5   # centre de gravité postes normalisé X [0,1] dans bbox
+    geo_center_y: float = 0.5   # centre de gravité postes normalisé Y [0,1] dans bbox
+    geo_spread_x: float = 0.0   # dispersion postes X normalisée [0,1] (std × 3)
+    geo_spread_y: float = 0.0   # dispersion postes Y normalisée [0,1] (std × 3)
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -301,6 +307,22 @@ def compute_course_profile(
         difficulty = leg_norm
     difficulty_curve = [round(float(v), 3) for v in difficulty]
 
+    # ── Géographie ────────────────────────────────────────────────────────────────
+    _inner = controls[1:-1] if len(controls) > 2 else controls
+    _min_lng, _min_lat, _max_lng, _max_lat = bbox
+    _bw = max(_max_lng - _min_lng, 1e-9)
+    _bh = max(_max_lat - _min_lat, 1e-9)
+    if _inner:
+        _nx = [(c[0] - _min_lng) / _bw for c in _inner]
+        _ny = [(c[1] - _min_lat) / _bh for c in _inner]
+        _geo_cx = round(float(np.mean(_nx)), 3)
+        _geo_cy = round(float(np.mean(_ny)), 3)
+        _geo_sx = round(min(1.0, float(np.std(_nx)) * 3.0), 3)
+        _geo_sy = round(min(1.0, float(np.std(_ny)) * 3.0), 3)
+    else:
+        _geo_cx = _geo_cy = 0.5
+        _geo_sx = _geo_sy = 0.0
+
     return CourseProfile(
         technical_balance=round(technical_balance, 3),
         route_choice_density=round(route_choice_density, 3),
@@ -316,4 +338,8 @@ def compute_course_profile(
         difficulty_curve=difficulty_curve,
         narrative_shape=_narrative_shape(difficulty_curve),
         leg_intent_histogram=hist,
+        geo_center_x=_geo_cx,
+        geo_center_y=_geo_cy,
+        geo_spread_x=_geo_sx,
+        geo_spread_y=_geo_sy,
     )

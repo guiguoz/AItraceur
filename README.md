@@ -21,6 +21,10 @@
 - **Détection circuit impossible** : score GA < -5000 → erreur explicite ; distance < 70 % cible → `warning` dans la réponse
 - **Analyse de routes** : NetworkX A*, diversité des itinéraires (Jaccard), détection dog-legs, Re-Ranker Top-3 (budget 15s) ; bouton 🔍 par jambe → k polylines colorées sur la carte (bleu/orange/rouge)
 - **DialogueLog** : panneau visuel des échanges traceur↔contrôleur avec score IOF/FFCO par itération
+- **Diversification inter-runs** : 3 variantes distinctes A/B/C par session de génération — pool multi-runs, filtrage fitness 95%, déduplication cosinus, sélection greedy (`DIVERSITY_FITNESS_RATIO=0.95`) — variantes mesurées par vecteur CourseProfile 15D
+- **Signal terrain adaptatif** : détection `is_flat_signal` (std CNN < 0.05 sur la grille HeatmapCache) → fallback automatique sur features ISOM si MapAnt sans OCAD → pas de convergence en forêt
+- **CourseProfile 15D** : sous-module `profiling/` — vecteur `map_coverage`, `route_choice_density`, `alternation`, `geo_center_x/y`, `geo_spread_x/y`, etc. — mesure la diversité entre variantes A/B/C par distance cosinus
+- **RCD (route_choice_density)** : fraction de jambes où ≥2 itinéraires distincts existent (Jaccard > 0.30, via RouteAnalyzer k-shortest timeout 150ms) — signal non redondant avec fitness (r=0.566, validé sur 3 types de terrain)
 - **Avertissement génération** : si circuit < 70 % de la distance cible → `warning` + `distance_ratio` affichés dans l'interface (fond orange)
 - **Complétion de circuit** : si le circuit validé est sous la distance cible, l'IA propose des postes supplémentaires via `/generate-circuit` avec `required_controls` — chaque suggestion s'intercale dans la jambe géométriquement la plus proche (`insertAfterId` + label "intercaler entre poste #X → poste #Y"), OCAD params (map_id, candidate_points CNN) transmis pour maintenir la qualité forêt
 - **CNN Scorer V4** : MobileNetV3-Small ONNX (6.1 MB), F1=0.814, Recall=0.919 — 428k patches (RG2 UK + Vikazimut FR), entraîné sur Kaggle T4 GPU ; fallback XGBoost V3 (AUC=0.807) si `.onnx` absent
@@ -29,6 +33,22 @@
 - **Terrain OSM** : enrichissement automatique depuis Overpass API (highways pour RouteAnalyzer)
 - **Export** : IOF XML 3.0, GPX, PDF, KML/KMZ — à importer dans OCAD pour le tracé final
 - **RAG local** : 22 PDF IOF/FFCO indexés, chaîne LLM (OpenAI → fallback local)
+
+---
+
+## Roadmap — Conscience globale de la carte
+
+**Constat (Sprint 4.3, juin 2026)** : AItraceur est localement intelligent, globalement aveugle. Le GA place les postes un à un et mesure le résultat global *après*. Un traceur humain lit la carte, identifie les zones riches, conçoit un scénario, puis place les postes. Ce gap est adressé par couches :
+
+| Couche | Statut | Contenu |
+|--------|--------|---------|
+| **0 — Segmentation de carte** | En cours | k-means (k=3) sur `scores_grid` HeatmapCache → zones riches/modérées/pauvres ; nouveaux champs `zone_coverage`, `zone_diversity` dans `CourseProfile` ; fallback KDTree ISOM si CNN plat |
+| **1 — Descripteurs mixtes** | Backlog | Labels absolus calibrés Atlas (p75 Vikazimut) + labels carte-relatifs (zone_coverage > 0.6 → "Exploite la carte") — titre automatique "Exploratoire, multi-zone" etc. |
+| **2 — Scénario pré-génération** | Backlog long terme | Avant GA : choisir un scénario narratif adapté aux zones détectées → soft constraint GA |
+
+**H4 adaptatif** (après validation Couche 0) : remplacer le critère "couvrir la bbox" par "couvrir les zones riches" — H4 actuel pénalise la concentration sans tenir compte de la richesse des zones.
+
+**Autres backlog** : boucles papillon LD (terme fitness figure-8 + contrôleur), déploiement prod.
 
 ---
 

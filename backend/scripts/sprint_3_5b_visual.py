@@ -177,7 +177,7 @@ def generate_abc(bb_info: dict, caches: dict) -> Optional[List]:
 
 # ── Calcul métriques pour affichage ──────────────────────────────────────────
 
-def compute_display_metrics(circuits: List, heatmap_cache=None) -> List[dict]:
+def compute_display_metrics(circuits: List, heatmap_cache=None, route_analyzer=None) -> List[dict]:
     """Calcule fitness, map_coverage, rcd, cosine_from_A pour chaque variante."""
     from src.services.generation.profiling.course_profile import compute_course_profile
     from src.services.generation.profiling.profile_distance import (
@@ -197,7 +197,7 @@ def compute_display_metrics(circuits: List, heatmap_cache=None) -> List[dict]:
             )
             cp = compute_course_profile(
                 controls=pts, legs_m=legs_m, bbox=bb_tuple,
-                heatmap_cache=heatmap_cache,
+                heatmap_cache=heatmap_cache, route_analyzer=route_analyzer,
             )
             profiles.append(course_profile_vector(cp))
         except Exception as e:
@@ -224,7 +224,8 @@ def compute_display_metrics(circuits: List, heatmap_cache=None) -> List[dict]:
             )
             from src.services.generation.profiling.course_profile import compute_course_profile
             cp_obj = compute_course_profile(
-                controls=pts, legs_m=legs_m, bbox=bb_tuple, heatmap_cache=heatmap_cache
+                controls=pts, legs_m=legs_m, bbox=bb_tuple,
+                heatmap_cache=heatmap_cache, route_analyzer=route_analyzer,
             )
         except Exception:
             pass
@@ -422,7 +423,11 @@ def main() -> None:
             circuits.append(circuits[-1])
 
         log.info("  Calcul métriques d'affichage...")
-        metrics = compute_display_metrics(circuits, heatmap_cache=caches.get("heatmap_cache"))
+        metrics = compute_display_metrics(
+            circuits,
+            heatmap_cache=caches.get("heatmap_cache"),
+            route_analyzer=caches.get("route_analyzer"),
+        )
 
         label_str = "  ".join(
             f"{m['label']}: fit={m['fitness']:.2f} cos={m['cosine_from_a']:.4f}"

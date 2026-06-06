@@ -6,7 +6,7 @@ echo ========================================================
 echo.
 
 echo [1/3] Backend FastAPI (port 8000)...
-start "AItraceur - Backend" cmd /k "cd /d %~dp0backend && uvicorn src.main:app --reload"
+start "AItraceur - Backend" cmd /k "cd /d %~dp0backend && python -m uvicorn src.main:app --reload"
 
 echo [2/3] Tile Service (port 8089)...
 start "AItraceur - Tiles" cmd /k "cd /d %~dp0backend\tile-service && node server.js"

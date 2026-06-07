@@ -53,6 +53,31 @@ class CourseProfile:
     zone_coverage: float = 0.0  # fraction des secteurs riches visités [0-1]
     zone_diversity: float = 0.0  # zones distinctes traversées / n_zones [0-1]
 
+    def describe(self, thresholds: dict) -> "tuple[list[str], str]":
+        """Retourne (labels, title) à partir des seuils Atlas.
+
+        Labels absolus (calibrés sur la population Atlas) :
+          Exploratoire, A choix, Rythme, Etendu
+        Labels carte-relatifs (Couche 0) :
+          Exploite la carte, Multi-zone
+        """
+        labels: list[str] = []
+        geo_spread = (self.geo_spread_x + self.geo_spread_y) / 2.0
+        if self.map_coverage > thresholds.get("map_coverage_p75", 0.389):
+            labels.append("Exploratoire")
+        if self.route_choice_density > thresholds.get("route_choice_density_p75", 0.545):
+            labels.append("A choix")
+        if self.alternation >= thresholds.get("alternation_p75", 100.0):
+            labels.append("Rythme")
+        if geo_spread > thresholds.get("geo_spread_p75", 0.50):
+            labels.append("Etendu")
+        if self.zone_coverage > thresholds.get("zone_coverage_high", 0.60):
+            labels.append("Exploite la carte")
+        if self.zone_diversity >= thresholds.get("zone_diversity_full", 1.0):
+            labels.append("Multi-zone")
+        title = ", ".join(labels[:2]) if labels else "Standard"
+        return labels, title
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 

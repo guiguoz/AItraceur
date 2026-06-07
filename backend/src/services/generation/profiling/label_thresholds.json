@@ -1,0 +1,8 @@
+{
+  "map_coverage_p75": 0.389,
+  "route_choice_density_p75": 0.545,
+  "alternation_p75": 100.0,
+  "geo_spread_p75": 0.50,
+  "zone_coverage_high": 0.60,
+  "zone_diversity_full": 1.0
+}

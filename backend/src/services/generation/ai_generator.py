@@ -8,7 +8,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace as _dc_replace
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
+import json
 import logging
+import pathlib
 import numpy as np
 
 log = logging.getLogger(__name__)
@@ -20,6 +22,13 @@ from .graph_builder import GraphBuilder
 from .genetic_algo import GeneticAlgorithm, GenerationConfig, scale_min_separation, _haversine_batch
 from .profiling.course_profile import compute_course_profile
 from .profiling.profile_distance import cosine_distance, course_profile_vector, select_diverse_circuits
+
+# ── Seuils Couche 1 (chargés une fois au démarrage) ───────────────────────────
+_THRESHOLDS_PATH = pathlib.Path(__file__).parent / "profiling" / "label_thresholds.json"
+try:
+    LABEL_THRESHOLDS: dict = json.loads(_THRESHOLDS_PATH.read_text(encoding="utf-8"))
+except Exception:
+    LABEL_THRESHOLDS = {}
 
 # ── Constantes diversification inter-runs ──────────────────────────────────────
 DIVERSITY_FITNESS_RATIO = 0.95       # filtre qualité : fitness >= ratio × best
@@ -84,6 +93,8 @@ class GeneratedCircuit:
     # [{leg_idx, n_routes, distances_m, choice_score, similarity_ratio}, ...]
     nav_scores: list = field(default_factory=list)
     # [{attack, catch, handrail}] par jambe — rempli une seule fois sur le circuit final
+    label: list = field(default_factory=list)  # Couche 1 : ["Exploratoire", "A choix", ...]
+    profile_title: str = ""                     # Couche 1 : "Exploratoire, Rythme"
 
 
 # French descriptions for ISOM 2017 codes — displayed to the traceur for each suggested control
@@ -428,6 +439,7 @@ class AIGenerator:
                 else []
             )
 
+            _labels, _title = _cp.describe(LABEL_THRESHOLDS) if _cp is not None else ([], "Standard")
             circuits.append(GeneratedCircuit(
                 id=f"genetic_{i + 1}",
                 controls=controls,
@@ -438,6 +450,8 @@ class AIGenerator:
                 generation_method="genetic",
                 description=f"Circuit généré par algorithme génétique (génération {circuit.generation})",
                 leg_route_choices=_leg_choices,
+                label=_labels,
+                profile_title=_title,
             ))
 
         return circuits

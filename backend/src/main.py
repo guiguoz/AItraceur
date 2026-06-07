@@ -2458,6 +2458,8 @@ def _circuit_impl(body: dict) -> dict:
                 "score": c.score,
                 "generation_method": c.generation_method,
                 "description": c.description,
+                "label": c.label,
+                "profile_title": c.profile_title,
             }
             for c in circuits
         ],
@@ -4659,6 +4661,8 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                     "fitness": round(float(getattr(_dc_circ, "fitness", 0.0)), 3),
                     "course_profile": _div_dc.asdict(_dc_cp),
                     "exploitation_profile": _div_dc.asdict(_dc_ep),
+                    "label": getattr(_dc_circ, "label", []),
+                    "profile_title": getattr(_dc_circ, "profile_title", ""),
                 })
         except Exception as _div_err:
             print(f"{_tag} WARN diversification: {_div_err}", flush=True)

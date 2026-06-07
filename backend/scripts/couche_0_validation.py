@@ -39,7 +39,7 @@ GA_SEED = 42
 
 # Force la reconstruction des caches HeatmapCache (purge les fichiers stales XGBoost)
 # Mettre False pour re-utiliser les caches existants si deja rebuildes avec CNN
-FORCE_REBUILD = True
+FORCE_REBUILD = False
 
 ZONE_COLORS = ["#d62728", "#ff7f0e", "#2ca02c"]  # rouge/orange/vert = pauvre/modere/riche
 VARIANT_COLORS = {"A": "#1f77b4", "B": "#9b2cae", "C": "#8c564b"}
@@ -131,9 +131,10 @@ def build_caches_fresh(bb_dict: dict, bbox_tuple: tuple) -> dict:
 # ---------------------------------------------------------------------------
 
 def compute_zone_metrics(circuits: list, heatmap_cache, bbox_tuple: tuple) -> List[dict]:
-    """Calcule zone_coverage et zone_diversity pour chaque variante."""
+    """Calcule zone_coverage, zone_diversity et labels Couche 1 pour chaque variante."""
     from src.services.generation.profiling.course_profile import compute_course_profile
     from src.services.generation.genetic_algo import _haversine_batch
+    from src.services.generation.ai_generator import LABEL_THRESHOLDS
 
     results = []
     for i, c in enumerate(circuits):
@@ -145,6 +146,7 @@ def compute_zone_metrics(circuits: list, heatmap_cache, bbox_tuple: tuple) -> Li
                 controls=pts, legs_m=legs_m, bbox=bbox_tuple,
                 heatmap_cache=heatmap_cache,
             )
+            labels, title = cp.describe(LABEL_THRESHOLDS)
             results.append({
                 "label": "ABC"[i] if i < 3 else str(i),
                 "fitness": c.score,
@@ -152,6 +154,8 @@ def compute_zone_metrics(circuits: list, heatmap_cache, bbox_tuple: tuple) -> Li
                 "zone_coverage": cp.zone_coverage,
                 "zone_diversity": cp.zone_diversity,
                 "n_zones": heatmap_cache.n_zones if heatmap_cache else 0,
+                "couche1_labels": labels,
+                "couche1_title": title,
             })
         except Exception as exc:
             log.warning("  profile %d echoue : %s", i, exc)
@@ -162,6 +166,8 @@ def compute_zone_metrics(circuits: list, heatmap_cache, bbox_tuple: tuple) -> Li
                 "zone_coverage": 0.0,
                 "zone_diversity": 0.0,
                 "n_zones": 0,
+                "couche1_labels": [],
+                "couche1_title": "Standard",
             })
     return results
 
@@ -385,6 +391,9 @@ def main() -> None:
                  *[m["zone_coverage"] for m in metrics[:3]])
         log.info("  zone_diversity A=%.3f B=%.3f C=%.3f",
                  *[m["zone_diversity"] for m in metrics[:3]])
+        for m in metrics[:3]:
+            log.info("  [%s] %s  →  %s",
+                     m["label"], m.get("couche1_title", "?"), m.get("couche1_labels", []))
         log.info("  critere Couche 1 : %s", "PASS" if ok else "FAIL")
 
         out_png = OUTPUT_DIR / f"carte_{map_id}.png"

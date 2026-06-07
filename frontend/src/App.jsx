@@ -106,15 +106,17 @@ function pointToSegmentDist(p, a, b) {
   return haversineDistance(p, { lat: a.lat + t * dy, lng: a.lng + t * dx })
 }
 
-// Pour chaque suggestion de complétion, trouve la jambe la plus proche et attribue
-// insertAfterId (id du contrôle de début de jambe) + insertLabel (texte UI).
-// Si le poste serait trop proche d'un existant (< MIN_LEG_M), insertAfterId = null → append.
+// TSP cheapest-insertion V2 — deux passes :
+// 1) Ordre optimal : TSP greedy sur virtualCircuit croissant
+// 2) insertAfterId : calculé contre le circuit ORIGINAL (ids stables — résistant aux skips)
 function assignInsertionPositions(existingControls, suggestions) {
   const MIN_LEG_M = 30
-  const ordered = [...existingControls]
+
+  const originalCircuit = [...existingControls]
     .filter(c => ['start', 'control', 'finish'].includes(c.type))
     .sort((a, b) => a.order - b.order)
-  if (ordered.length < 2) return suggestions
+
+  if (originalCircuit.length < 2) return suggestions.map(s => ({ ...s, insertAfterId: null, insertLabel: null }))
 
   const legLabel = (ctrl, idx, all) => {
     if (ctrl.type === 'start') return 'départ'
@@ -123,22 +125,43 @@ function assignInsertionPositions(existingControls, suggestions) {
     return `poste #${n}`
   }
 
-  return suggestions.map(s => {
-    let bestIdx = ordered.length - 2
-    let bestCost = Infinity
-    for (let i = 0; i < ordered.length - 1; i++) {
-      const A = ordered[i], B = ordered[i + 1]
+  // Passe 1 — déterminer l'ordre d'insertion optimal via TSP cheapest-insertion
+  const remaining = [...suggestions]
+  const orderedSuggs = []
+  const virt = [...originalCircuit]
+
+  while (remaining.length > 0) {
+    let bestCost = Infinity, bestSuggIdx = 0, bestLegIdx = 0
+    for (let si = 0; si < remaining.length; si++) {
+      const s = remaining[si]
+      for (let i = 0; i < virt.length - 1; i++) {
+        const A = virt[i], B = virt[i + 1]
+        const cost = haversineDistance(s, A) + haversineDistance(s, B) - haversineDistance(A, B)
+        if (cost < bestCost) { bestCost = cost; bestSuggIdx = si; bestLegIdx = i }
+      }
+    }
+    const best = remaining[bestSuggIdx]
+    orderedSuggs.push(best)
+    virt.splice(bestLegIdx + 1, 0, best)
+    remaining.splice(bestSuggIdx, 1)
+  }
+
+  // Passe 2 — attribuer insertAfterId contre le circuit original (ids toujours valides)
+  return orderedSuggs.map(s => {
+    let bestIdx = originalCircuit.length - 2, bestCost = Infinity
+    for (let i = 0; i < originalCircuit.length - 1; i++) {
+      const A = originalCircuit[i], B = originalCircuit[i + 1]
       const cost = haversineDistance(s, A) + haversineDistance(s, B) - haversineDistance(A, B)
       if (cost < bestCost) { bestCost = cost; bestIdx = i }
     }
-    const A = ordered[bestIdx], B = ordered[bestIdx + 1]
+    const A = originalCircuit[bestIdx], B = originalCircuit[bestIdx + 1]
     const fromOk = haversineDistance(s, A) >= MIN_LEG_M
     const toOk   = haversineDistance(s, B) >= MIN_LEG_M
     return {
       ...s,
       insertAfterId: (fromOk && toOk) ? A.id : null,
       insertLabel: (fromOk && toOk)
-        ? `intercaler entre ${legLabel(A, bestIdx, ordered)} → ${legLabel(B, bestIdx + 1, ordered)}`
+        ? `intercaler entre ${legLabel(A, bestIdx, originalCircuit)} → ${legLabel(B, bestIdx + 1, originalCircuit)}`
         : null,
     }
   })

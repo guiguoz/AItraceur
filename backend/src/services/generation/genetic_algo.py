@@ -2210,9 +2210,6 @@ class GeneticAlgorithm:
         shape_score = self._compute_shape_score(controls, config.bounding_box,
                                                 heatmap_cache=config.heatmap_cache)
 
-        # ── S. Scénario Couche 2 ──────────────────────────────────────────────
-        scenario_score = self._compute_scenario_score(controls, config.heatmap_cache)
-
         # ── I. Qualité point d'attaque ─────────────────────────────────────────
         # ── J. Ligne d'arrêt ──────────────────────────────────────────────────
         # ── K. Main courante ──────────────────────────────────────────────────
@@ -2561,7 +2558,6 @@ class GeneticAlgorithm:
             W_AI *= 0.5  # signal CNN absent → réduire poids terme A
         W_SHAPE = 15.0  # forme géométrique — anti-Z/spirale/accordéon (H5 actif)
         W_LEG_PROFILE = 8.0  # conformité longueur jambes au profil format IOF
-        W_SCENARIO = 6.0  # Couche 2 : scénario pré-génération (concentré/traversée)
 
         # Pénalité quadratique si trop peu de postes par rapport à la cible
         n_postes = len(controls) - 2  # hors départ et arrivée
@@ -2575,7 +2571,6 @@ class GeneticAlgorithm:
             + W_RHYTHM * rhythm
             + W_LEG_PROFILE * _leg_conformity
             + W_SHAPE * shape_score
-            + W_SCENARIO * scenario_score
             - density_penalty
             + diversity_bonus
             - forbidden_penalty
@@ -2749,49 +2744,16 @@ class GeneticAlgorithm:
                 max_run = cur_run
         h3 = max(0.0, 1.0 - max(0, max_run - 3) * 0.25)  # −0.25 par run > 3
 
-        # ── H4 : Spread spatial (adaptatif si Couche 0 disponible) ───────────
+        # ── H4 : Spread spatial ───────────────────────────────────────────────
         inner = controls[1:-1]  # hors départ et arrivée
         if len(inner) >= 2:
             import numpy as _np
-            # Branche adaptative : reward couvrir les zones riches, pas toute la bbox
-            if (heatmap_cache is not None
-                    and getattr(heatmap_cache, "n_zones", 0) >= 3
-                    and getattr(heatmap_cache, "zone_labels", None) is not None):
-                zl = heatmap_cache.zone_labels  # (H, W) uint8
-                zh, zw = zl.shape
-                min_lng, min_lat, max_lng, max_lat = heatmap_cache.bbox
-                bw = max(max_lng - min_lng, 1e-9)
-                bh = max(max_lat - min_lat, 1e-9)
-                # Secteurs riches 2×2 dans zone_labels
-                rich_cells: set = set()
-                for si in range(2):
-                    for sj in range(2):
-                        blk = zl[si * (zh // 2):(si + 1) * (zh // 2),
-                                 sj * (zw // 2):(sj + 1) * (zw // 2)]
-                        if blk.size > 0 and float(blk.mean()) > 1.5:
-                            rich_cells.add((si, sj))
-                if rich_cells:
-                    visited_rich: set = set()
-                    for p in inner:
-                        col = int((p[0] - min_lng) / bw * (zw - 1))
-                        row = int((1.0 - (p[1] - min_lat) / bh) * (zh - 1))
-                        col = max(0, min(zw - 1, col))
-                        row = max(0, min(zh - 1, row))
-                        si = min(row // max(zh // 2, 1), 1)
-                        sj = min(col // max(zw // 2, 1), 1)
-                        if (si, sj) in rich_cells:
-                            visited_rich.add((si, sj))
-                    h4 = len(visited_rich) / len(rich_cells)
-                else:
-                    h4 = 1.0  # pas de zone riche identifiée → fallback neutre
-            else:
-                # Branche classique : spread ≥ 20 % de la bbox
-                lngs = [p[0] for p in inner]
-                lats = [p[1] for p in inner]
-                bbox_w = max((bounding_box.get("max_x", 0) - bounding_box.get("min_x", 0)), 1e-9)
-                bbox_h = max((bounding_box.get("max_y", 0) - bounding_box.get("min_y", 0)), 1e-9)
-                spread = (float(_np.std(lngs)) / bbox_w + float(_np.std(lats)) / bbox_h) / 2
-                h4 = min(spread / 0.20, 1.0)  # cible : spread ≥ 20 % de la bbox
+            lngs = [p[0] for p in inner]
+            lats = [p[1] for p in inner]
+            bbox_w = max((bounding_box.get("max_x", 0) - bounding_box.get("min_x", 0)), 1e-9)
+            bbox_h = max((bounding_box.get("max_y", 0) - bounding_box.get("min_y", 0)), 1e-9)
+            spread = (float(_np.std(lngs)) / bbox_w + float(_np.std(lats)) / bbox_h) / 2
+            h4 = min(spread / 0.20, 1.0)  # cible : spread ≥ 20 % de la bbox
         else:
             h4 = 0.5
 

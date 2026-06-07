@@ -156,6 +156,7 @@ class HeatmapCache:
             step_px=np.array(self.step_px),
             map_w=np.array(self.map_w),
             map_h=np.array(self.map_h),
+            is_flat_signal=np.array(self.is_flat_signal),
             zone_labels=self.zone_labels if self.zone_labels is not None else np.array([], dtype=np.uint8),
             n_zones=np.array(self.n_zones),
         )
@@ -191,6 +192,7 @@ class HeatmapCache:
             map_w=int(d["map_w"]),
             map_h=int(d["map_h"]),
             forbidden_mask=fm,
+            is_flat_signal=is_flat,
             zone_labels=zl,
             n_zones=nz,
         )

@@ -95,6 +95,7 @@ class GeneratedCircuit:
     # [{attack, catch, handrail}] par jambe — rempli une seule fois sur le circuit final
     label: list = field(default_factory=list)  # Couche 1 : ["Exploratoire", "A choix", ...]
     profile_title: str = ""                     # Couche 1 : "Exploratoire, Rythme"
+    scenario: str = ""                          # Couche 2 : "concentré"|"traversée"|"traversée_contrastée"|"standard"
 
 
 # French descriptions for ISOM 2017 codes — displayed to the traceur for each suggested control
@@ -440,6 +441,7 @@ class AIGenerator:
             )
 
             _labels, _title = _cp.describe(LABEL_THRESHOLDS) if _cp is not None else ([], "Standard")
+            _scenario = getattr(self._last_ga, "_scenario", "standard") if hasattr(self, "_last_ga") else "standard"
             circuits.append(GeneratedCircuit(
                 id=f"genetic_{i + 1}",
                 controls=controls,
@@ -452,6 +454,7 @@ class AIGenerator:
                 leg_route_choices=_leg_choices,
                 label=_labels,
                 profile_title=_title,
+                scenario=_scenario,
             ))
 
         return circuits

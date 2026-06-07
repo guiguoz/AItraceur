@@ -204,6 +204,40 @@ def _haversine_batch(
     return R * 2.0 * np.arctan2(np.sqrt(a), np.sqrt(1.0 - a))
 
 
+def _detect_scenario(heatmap_cache) -> "tuple[str, set]":
+    """Analyse zone_labels (Couche 0) → (scenario, rich_sectors).
+
+    Scenarios :
+      "concentré"           — 1 secteur riche : exploiter le cœur de carte
+      "traversée"           — 2 secteurs riches : parcourir deux zones
+      "traversée_contrastée"— 3-4 secteurs riches : traversée multi-zones
+      "standard"            — aucune zone riche détectée, pas de contrainte
+
+    rich_sectors : set[(si, sj)] des secteurs 2×2 ayant zone_label mean > 1.5.
+    """
+    if (heatmap_cache is None
+            or getattr(heatmap_cache, "n_zones", 0) < 3
+            or getattr(heatmap_cache, "zone_labels", None) is None):
+        return "standard", set()
+    zl = heatmap_cache.zone_labels
+    H, W = zl.shape
+    rich: set = set()
+    for si in range(2):
+        for sj in range(2):
+            blk = zl[si * (H // 2):(si + 1) * (H // 2),
+                     sj * (W // 2):(sj + 1) * (W // 2)]
+            if blk.size > 0 and float(blk.mean()) > 1.5:
+                rich.add((si, sj))
+    n = len(rich)
+    if n == 0:
+        return "standard", set()
+    if n == 1:
+        return "concentré", rich
+    if n == 2:
+        return "traversée", rich
+    return "traversée_contrastée", rich
+
+
 # =============================================
 # Algorithme génétique
 # =============================================
@@ -313,6 +347,12 @@ class GeneticAlgorithm:
             self._seg_index = _build_seg_idx(config.ocad_line_segments, self._isom_sem, _center_lat)
         else:
             self._seg_index = None
+
+        # ── Couche 2 — Scénario pré-génération ────────────────────────────────────
+        self._scenario, self._scenario_rich_sectors = _detect_scenario(self.config.heatmap_cache)
+        if self._scenario != "standard":
+            print(f"[GA] Scénario Couche 2 : {self._scenario} "
+                  f"({len(self._scenario_rich_sectors)} secteurs riches)", flush=True)
 
         # ── TD1 preferred features (postes sur éléments évidents) ──────────────
         # Actif uniquement pour technical_level == 1. Charge depuis placement_rules.json
@@ -2170,6 +2210,9 @@ class GeneticAlgorithm:
         shape_score = self._compute_shape_score(controls, config.bounding_box,
                                                 heatmap_cache=config.heatmap_cache)
 
+        # ── S. Scénario Couche 2 ──────────────────────────────────────────────
+        scenario_score = self._compute_scenario_score(controls, config.heatmap_cache)
+
         # ── I. Qualité point d'attaque ─────────────────────────────────────────
         # ── J. Ligne d'arrêt ──────────────────────────────────────────────────
         # ── K. Main courante ──────────────────────────────────────────────────
@@ -2518,6 +2561,7 @@ class GeneticAlgorithm:
             W_AI *= 0.5  # signal CNN absent → réduire poids terme A
         W_SHAPE = 15.0  # forme géométrique — anti-Z/spirale/accordéon (H5 actif)
         W_LEG_PROFILE = 8.0  # conformité longueur jambes au profil format IOF
+        W_SCENARIO = 6.0  # Couche 2 : scénario pré-génération (concentré/traversée)
 
         # Pénalité quadratique si trop peu de postes par rapport à la cible
         n_postes = len(controls) - 2  # hors départ et arrivée
@@ -2531,6 +2575,7 @@ class GeneticAlgorithm:
             + W_RHYTHM * rhythm
             + W_LEG_PROFILE * _leg_conformity
             + W_SHAPE * shape_score
+            + W_SCENARIO * scenario_score
             - density_penalty
             + diversity_bonus
             - forbidden_penalty
@@ -2591,6 +2636,54 @@ class GeneticAlgorithm:
                     })
 
         return _total_fitness
+
+    def _compute_scenario_score(
+        self,
+        controls: List[Tuple[float, float]],
+        heatmap_cache,
+    ) -> float:
+        """Terme S — Couche 2 : score scénario pré-génération [0-1].
+
+        Mesure dans quelle mesure le circuit réalise le scénario détecté :
+        - concentré           : fraction des postes internes en zone 2 (riche)
+        - traversée / contrastée : fraction des secteurs riches visités
+        - standard            : 0.5 (neutre)
+        """
+        if (heatmap_cache is None
+                or getattr(heatmap_cache, "n_zones", 0) < 3
+                or getattr(heatmap_cache, "zone_labels", None) is None
+                or self._scenario == "standard"):
+            return 0.5
+        inner = controls[1:-1]
+        if not inner:
+            return 0.5
+        zl = heatmap_cache.zone_labels
+        zh, zw = zl.shape
+        min_lng, min_lat, max_lng, max_lat = heatmap_cache.bbox
+        bw = max(max_lng - min_lng, 1e-9)
+        bh = max(max_lat - min_lat, 1e-9)
+
+        def _grid(p):
+            col = max(0, min(zw - 1, int((p[0] - min_lng) / bw * (zw - 1))))
+            row = max(0, min(zh - 1, int((1.0 - (p[1] - min_lat) / bh) * (zh - 1))))
+            return row, col
+
+        if self._scenario == "concentré":
+            in_rich = sum(1 for p in inner if int(zl[_grid(p)]) == 2)
+            return in_rich / len(inner)
+
+        # traversée / traversée_contrastée
+        rich = self._scenario_rich_sectors
+        if not rich:
+            return 0.5
+        visited: set = set()
+        for p in inner:
+            r, c = _grid(p)
+            si = min(r // max(zh // 2, 1), 1)
+            sj = min(c // max(zw // 2, 1), 1)
+            if (si, sj) in rich:
+                visited.add((si, sj))
+        return len(visited) / len(rich)
 
     def _compute_shape_score(
         self,

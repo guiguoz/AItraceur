@@ -3,6 +3,10 @@
 # Import KMZ/XML & Affichage Carte
 # =============================================
 
+import sys
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 from typing import List, Any, Dict, Optional
 from pathlib import Path
 import uuid
@@ -4009,7 +4013,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
     import time as _time
     _t0 = _time.time()
     _tag = f"[sprint {task_id[:8]}]"
-    print(f"{_tag} 🚀 début pipeline", flush=True)
+    print(f"{_tag} [START] debut pipeline", flush=True)
 
     from src.services.generation.ai_generator import AIGenerator, GenerationRequest
     from src.services.terrain.osm_fetcher import extract_sprint_features
@@ -4071,9 +4075,9 @@ def _sprint_impl(task_id: str, body: dict) -> None:
             if _ocad_fz:
                 oob_polygons = _ocad_fz  # remplace les zones frontend (plus précis)
                 ocad_oob_fetched = True
-                print(f"{_tag} ✅ OCAD forbidden zones: {len(oob_polygons)} polygones (vecteurs)", flush=True)
+                print(f"{_tag} [OK] OCAD forbidden zones: {len(oob_polygons)} polygones (vecteurs)", flush=True)
         except Exception as _fz_err:
-            print(f"{_tag} ⚠️ OCAD forbidden zones ÉCHEC: {_fz_err}", flush=True)
+            print(f"{_tag} [WARN] OCAD forbidden zones ECHEC: {_fz_err}", flush=True)
 
     # ── Étape 1b : Enrichissement OSM — toujours (fusion OCAD + OSM) ──────────
     # Les candidats OCAD arrivent via body["candidate_points"] ; on fusionne
@@ -4150,7 +4154,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
     heatmap_cache = None
     if bounding_box or map_id:
         try:
-            print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ chargement scorer V2...", flush=True)
+            print(f"{_tag} {_time.time()-_t0:.1f}s [...] chargement scorer V2...", flush=True)
             from src.services.learning.ocad_patch_scorer import OcadPatchScorer as _OPS, CnnPatchScorer as _CPS
             _scorer_v2 = _OPS.load()
             _cnn_scorer = _CPS.load()
@@ -4163,7 +4167,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                 if map_id and ocad_sw and ocad_ne:
                     # ── Branche OCAD : PNG tile service → normalize ──────────────
                     try:
-                        print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ fetch OCAD PNG...", flush=True)
+                        print(f"{_tag} {_time.time()-_t0:.1f}s [...] fetch OCAD PNG...", flush=True)
                         from src.services.learning.ocad_pipeline import fetch_ocad_image as _fetch_ocad
                         import math as _math
                         _map_img = _fetch_ocad(map_id, timeout=10)
@@ -4177,13 +4181,13 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                         _width_m = _m2.radians(_lng_delta) * 6371000 * _m2.cos(_m2.radians(_lat_c))
                         _mpp = _width_m / _map_img.width if _map_img.width > 0 else 0.5
                         _mapant_result = (_map_img, _bbox_wgs84, _mpp)
-                        print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ✅ OCAD PNG ({_map_img.width}×{_map_img.height}px, mpp={_mpp:.2f}m)", flush=True)
+                        print(f"{_tag} {_time.time()-_t0:.1f}s [OK] OCAD PNG ({_map_img.width}x{_map_img.height}px, mpp={_mpp:.2f}m)", flush=True)
                     except Exception as _ocad_err:
-                        print(f"{_tag} ⚠️ OCAD PNG ÉCHEC: {_ocad_err} → fallback MapAnt", flush=True)
+                        print(f"{_tag} [WARN] OCAD PNG ECHEC: {_ocad_err} -> fallback MapAnt", flush=True)
 
                 if _mapant_result is None and bounding_box:
                     # ── Branche MapAnt (fallback) ────────────────────────────────
-                    print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ fetch MapAnt tiles...", flush=True)
+                    print(f"{_tag} {_time.time()-_t0:.1f}s [...] fetch MapAnt tiles...", flush=True)
                     import concurrent.futures as _cfs
                     with _cfs.ThreadPoolExecutor(max_workers=1) as _mex:
                         _mapant_fut = _mex.submit(_fetch_mapant_bbox_image, bounding_box, 15)
@@ -4193,7 +4197,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                             import logging as _log
                             _log.getLogger(__name__).warning("MapAnt fetch timeout (>30s) — skipping heatmap cache")
                             _mapant_result = None
-                    print(f"{_tag} ⏱{_time.time()-_t0:.1f}s {'✅ MapAnt OK' if _mapant_result else '⚠️ MapAnt None/timeout'}", flush=True)
+                    print(f"{_tag} {_time.time()-_t0:.1f}s {'[OK] MapAnt OK' if _mapant_result else '[WARN] MapAnt None/timeout'}", flush=True)
 
                 if _mapant_result is not None:
                     _map_img, _bbox_wgs84, _mpp = _mapant_result
@@ -4206,9 +4210,9 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                     if _hmc_path.with_suffix(".npz").exists():
                         from src.services.learning.ocad_patch_scorer import HeatmapCache as _HMC
                         heatmap_cache = _HMC.load(_hmc_path)
-                        print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ✅ HeatmapCache cache hit {heatmap_cache.scores.shape}", flush=True)
+                        print(f"{_tag} {_time.time()-_t0:.1f}s [OK] HeatmapCache cache hit {heatmap_cache.scores.shape}", flush=True)
                     else:
-                        print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ build_heatmap_cache step_px={_step_px} (mpp={_mpp:.2f}m, budget={_MAX_PATCHES}px)...", flush=True)
+                        print(f"{_tag} {_time.time()-_t0:.1f}s [...] build_heatmap_cache step_px={_step_px} (mpp={_mpp:.2f}m, budget={_MAX_PATCHES}px)...", flush=True)
                         heatmap_cache = _scorer_v2.build_heatmap_cache(
                             map_img=_map_img,
                             bbox=_bbox_wgs84,
@@ -4219,7 +4223,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                             cnn_scorer=_cnn_scorer,
                         )
                         heatmap_cache.save(_hmc_path)
-                        print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ✅ HeatmapCache OK {heatmap_cache.scores.shape}", flush=True)
+                        print(f"{_tag} {_time.time()-_t0:.1f}s [OK] HeatmapCache OK {heatmap_cache.scores.shape}", flush=True)
                     # ── OOBMask : rasterisation des polygones OOB OSM ──────────────────
                     _apply_oob_mask(heatmap_cache, oob_polygons, _mpp)
                     # ────────────────────────────────────────────────────────────────────
@@ -4232,7 +4236,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                         )
                     })
         except Exception as _hm_err:
-            print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⚠️ HeatmapCache exception: {_hm_err}", flush=True)
+            print(f"{_tag} {_time.time()-_t0:.1f}s [WARN] HeatmapCache exception: {_hm_err}", flush=True)
             dialogue.append({
                 "role": "system", "step": 0,
                 "message": f"HeatmapCache indisponible (fallback ISOM) : {_hm_err}"
@@ -4244,7 +4248,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
         from src.services.rules.ffco_rules_engine import get_engine as _get_engine
         _rules_engine = _get_engine()
     except Exception as _re_err:
-        print(f"{_tag} ⚠️ FFCORulesEngine non chargé : {_re_err}", flush=True)
+        print(f"{_tag} [WARN] FFCORulesEngine non charge : {_re_err}", flush=True)
         _rules_engine = None
 
     # ElevationCache (SRTM/IGN — terme G fitness D+)
@@ -4254,7 +4258,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
             from src.services.terrain.lidar_manager import build_elevation_cache as _build_elev_s
             _elevation_cache = _build_elev_s(bounding_box, n_cols=30, n_rows=30, timeout=20)
         except Exception as _elev_err:
-            print(f"{_tag} ElevationCache exception: {_elev_err} → terme G désactivé", flush=True)
+            print(f"{_tag} ElevationCache exception: {_elev_err} -> terme G desactive", flush=True)
 
     # ── DEM Enrichissement candidate_points (skip TD1) ───────────────────────
     _td_level_s = int(str(technical_level).replace("TD", "")) if technical_level else 0
@@ -4304,12 +4308,12 @@ def _sprint_impl(task_id: str, body: dict) -> None:
         latent_regime=str(body.get("latent_regime")).strip() if body.get("latent_regime") else None,
     )
 
-    print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ GA generate ({len(candidate_points)} candidats)...", flush=True)
+    print(f"{_tag} {_time.time()-_t0:.1f}s [...] GA generate ({len(candidate_points)} candidats)...", flush=True)
     try:
         gen_result = generator.generate(gen_request)
-        print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ✅ GA OK ({len(gen_result[0].controls) if gen_result else 0} controls)", flush=True)
+        print(f"{_tag} {_time.time()-_t0:.1f}s [OK] GA OK ({len(gen_result[0].controls) if gen_result else 0} controls)", flush=True)
     except Exception as e:
-        print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ❌ GA exception: {e}", flush=True)
+        print(f"{_tag} {_time.time()-_t0:.1f}s [ERR] GA exception: {e}", flush=True)
         return {"error": f"Génération initiale échouée : {e}", "dialogue": dialogue}
 
     # Convertir les postes générés (x/y → lat/lng pour le contrôleur)
@@ -4357,13 +4361,14 @@ def _sprint_impl(task_id: str, body: dict) -> None:
 
         if best_circuit.score < -5000:
             # Toutes les positions sont en zones interdites — bbox trop petite ou mal configurée
+            _err_msg = (
+                f"Circuit impossible : la zone est trop petite ou entièrement en zone interdite "
+                f"pour générer un circuit de {target_length_m:.0f}m. "
+                f"Réduisez la distance cible ou agrandissez la zone."
+            )
             _sprint_tasks[task_id] = {
                 "status": "error",
-                "message": (
-                    f"Circuit impossible : la zone est trop petite ou entièrement en zone interdite "
-                    f"pour générer un circuit de {target_length_m:.0f}m. "
-                    f"Réduisez la distance cible ou agrandissez la zone."
-                ),
+                "result": {"error": _err_msg, "dialogue": [], "controls": []},
             }
             return
         elif _distance_ratio < 0.70:
@@ -4372,7 +4377,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                 f"demandés ({_distance_ratio*100:.0f}%). "
                 f"Zone géographique probablement insuffisante pour cette catégorie."
             )
-            print(f"{_tag} ⚠️ {_generation_warning}", flush=True)
+            print(f"{_tag} [WARN] {_generation_warning}", flush=True)
     # ────────────────────────────────────────────────────────────────────────────
 
     best_latlng = _to_latlng(best_controls)
@@ -4440,7 +4445,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
     final_report = None
 
     for iteration in range(1, max_iterations + 1):
-        print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ⏳ contrôleur iter {iteration}/{max_iterations}...", flush=True)
+        print(f"{_tag} {_time.time()-_t0:.1f}s [...] controleur iter {iteration}/{max_iterations}...", flush=True)
         report = controleur.validate(
             current_controls,
             oob_polygons=oob_polygons,
@@ -4666,6 +4671,37 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                     "profile_title": getattr(_dc_circ, "profile_title", ""),
                     "scenario": getattr(_dc_circ, "scenario", "standard"),
                 })
+                try:
+                    _dbg_ctrls = [(c["x"], c["y"]) for c in _dc_circ.controls]
+                    _dbg_inner = _dbg_ctrls[1:-1]
+                    _dbg_ncross = _ga._count_leg_crossings(_dbg_ctrls) if _ga else 0
+                    if _dbg_inner and heatmap_cache is not None:
+                        _dbg_ai = [heatmap_cache.query(p[0], p[1]) for p in _dbg_inner]
+                        _dbg_ai_mean = sum(_dbg_ai) / len(_dbg_ai)
+                        _dbg_ai_max = max(_dbg_ai)
+                    else:
+                        _dbg_ai_mean = _dbg_ai_max = 0.0
+                    if len(_dbg_inner) >= 2:
+                        import numpy as _np_dbg
+                        _bw = max(_bbox_t.get("max_x", 0) - _bbox_t.get("min_x", 0), 1e-9)
+                        _bh = max(_bbox_t.get("max_y", 0) - _bbox_t.get("min_y", 0), 1e-9)
+                        _dbg_spread = (
+                            float(_np_dbg.std([p[0] for p in _dbg_inner])) / _bw
+                            + float(_np_dbg.std([p[1] for p in _dbg_inner])) / _bh
+                        ) / 2
+                    else:
+                        _dbg_spread = 0.0
+                    _dbg_shape = _ga._compute_shape_score(_dbg_ctrls, _bbox_t, heatmap_cache) if _ga else 0.0
+                    print(
+                        f"[fitness-debug] label={getattr(_dc_circ, 'label', [])!r} "
+                        f"score={_dc_circ.score:.1f} crossings={_dbg_ncross} "
+                        f"geo_spread={_dbg_spread:.3f} "
+                        f"ai_mean={_dbg_ai_mean:.3f} ai_max={_dbg_ai_max:.3f} "
+                        f"shape={_dbg_shape:.3f}",
+                        flush=True,
+                    )
+                except Exception as _dbg_err:
+                    print(f"[fitness-debug] ERR {_dbg_err}", flush=True)
         except Exception as _div_err:
             print(f"{_tag} WARN diversification: {_div_err}", flush=True)
 
@@ -4673,7 +4709,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
     final_report_dict = controleur.to_dict(final_report) if final_report else {}
     final_report_dict["iterations_used"] = len([d for d in dialogue if d["role"] == "traceur"])
 
-    print(f"{_tag} ⏱{_time.time()-_t0:.1f}s ✅ DONE is_valid={final_report.is_valid if final_report else False} score={final_report.global_score if final_report else 0:.3f}", flush=True)
+    print(f"{_tag} {_time.time()-_t0:.1f}s [OK] DONE is_valid={final_report.is_valid if final_report else False} score={final_report.global_score if final_report else 0:.3f}", flush=True)
     _sprint_tasks[task_id] = {
         "status": "completed",
         "result": {
@@ -4734,7 +4770,8 @@ def get_sprint_status(task_id: str):
         raise HTTPException(status_code=404, detail="Task not found")
     if task["status"] == "processing":
         return {"task_id": task_id, "status": "processing"}
-    return {"task_id": task_id, "status": task["status"], **task["result"]}
+    _result = task.get("result") or {}
+    return {"task_id": task_id, "status": task["status"], **_result}
 
 
 # ── Étape 10f — Itinéraires entre deux postes ──────────────────────────────

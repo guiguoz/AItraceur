@@ -218,6 +218,9 @@ def compute_metrics(circuits: List, bb_info: dict, caches: dict) -> dict:
             "length_m": float(c.total_length_m),
             "map_coverage": float(cp.map_coverage),
             "rcd": float(cp.route_choice_density),
+            "geo_spread_x": float(cp.geo_spread_x),
+            "geo_spread_y": float(cp.geo_spread_y),
+            "geo_spread": float((cp.geo_spread_x + cp.geo_spread_y) / 2.0),
             "zone_coverage": float(cp.zone_coverage),
             "zone_diversity": float(cp.zone_diversity),
             "labels": "|".join(c.label) if c.label else "Standard",
@@ -295,6 +298,7 @@ def process_map(map_id: int, entry: dict, force_rebuild: bool = False) -> Option
         if i < len(metrics["variants"]):
             v = metrics["variants"][i]
             for field in ("fitness", "length_m", "map_coverage", "rcd",
+                          "geo_spread_x", "geo_spread_y", "geo_spread",
                           "zone_coverage", "zone_diversity",
                           "labels", "profile_title", "scenario"):
                 row[f"{field}_{label}"] = v[field]
@@ -311,6 +315,9 @@ _METRIC_FIELDS = [
     "length_m_A", "length_m_B", "length_m_C",
     "map_coverage_A", "map_coverage_B", "map_coverage_C",
     "rcd_A", "rcd_B", "rcd_C",
+    "geo_spread_x_A", "geo_spread_x_B", "geo_spread_x_C",
+    "geo_spread_y_A", "geo_spread_y_B", "geo_spread_y_C",
+    "geo_spread_A", "geo_spread_B", "geo_spread_C",
     "zone_coverage_A", "zone_coverage_B", "zone_coverage_C",
     "zone_diversity_A", "zone_diversity_B", "zone_diversity_C",
     "labels_A", "labels_B", "labels_C",

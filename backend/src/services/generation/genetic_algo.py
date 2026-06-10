@@ -2558,11 +2558,15 @@ class GeneticAlgorithm:
             W_AI *= 0.5  # signal CNN absent → réduire poids terme A
         W_SHAPE = 15.0  # forme géométrique — anti-Z/spirale/accordéon (H5 actif)
         W_LEG_PROFILE = 8.0  # conformité longueur jambes au profil format IOF
+        W_CROSSING = 25.0  # pénalité croisement géométrique de jambes — à calibrer
 
         # Pénalité quadratique si trop peu de postes par rapport à la cible
         n_postes = len(controls) - 2  # hors départ et arrivée
         deficit = max(0, config.target_controls - 2 - n_postes)
         density_penalty = deficit ** 2 * _density_mult if deficit > 0 else 0.0
+
+        _n_crossings = self._count_leg_crossings(controls)
+        leg_crossing_penalty = float(_n_crossings) * W_CROSSING
 
         _total_fitness = (
             W_AI * ai_score
@@ -2583,6 +2587,7 @@ class GeneticAlgorithm:
             + line_crossing_bonus
             + exit_clarity_bonus
             + leg_diversity_bonus
+            - leg_crossing_penalty
         )
 
         import csv as _csv2, pathlib as _pl2
@@ -2679,6 +2684,36 @@ class GeneticAlgorithm:
             if (si, sj) in rich:
                 visited.add((si, sj))
         return len(visited) / len(rich)
+
+    @staticmethod
+    def _segments_cross(
+        p1: Tuple[float, float], p2: Tuple[float, float],
+        p3: Tuple[float, float], p4: Tuple[float, float],
+    ) -> bool:
+        """True si p1→p2 et p3→p4 se croisent strictement (pas de faux positif sur extrémités partagées)."""
+        def _cross(o, a, b):
+            return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+        d1 = _cross(p3, p4, p1)
+        d2 = _cross(p3, p4, p2)
+        d3 = _cross(p1, p2, p3)
+        d4 = _cross(p1, p2, p4)
+        return (
+            ((d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)) and
+            ((d3 > 0 and d4 < 0) or (d3 < 0 and d4 > 0))
+        )
+
+    def _count_leg_crossings(self, controls: List[Tuple[float, float]]) -> int:
+        """Nombre de paires de jambes non-adjacentes qui se croisent géométriquement."""
+        n = len(controls)
+        count = 0
+        for i in range(n - 1):
+            for j in range(i + 2, n - 1):
+                if self._segments_cross(
+                    controls[i], controls[i + 1],
+                    controls[j], controls[j + 1],
+                ):
+                    count += 1
+        return count
 
     def _compute_shape_score(
         self,

@@ -20,6 +20,10 @@ Usage :
 
 from __future__ import annotations
 
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
+
 import argparse
 import csv
 import hashlib
@@ -199,6 +203,7 @@ def compute_metrics(circuits: List, bb_info: dict, caches: dict) -> dict:
 
     bbox_tuple = (bb_info["min_x"], bb_info["min_y"], bb_info["max_x"], bb_info["max_y"])
     hmc = caches.get("heatmap_cache")
+    ra = caches.get("route_analyzer")
 
     profiles: list[np.ndarray] = []
     per_variant: list[dict] = []
@@ -210,6 +215,7 @@ def compute_metrics(circuits: List, bb_info: dict, caches: dict) -> dict:
         cp = compute_course_profile(
             controls=pts, legs_m=legs_m, bbox=bbox_tuple,
             heatmap_cache=hmc,
+            route_analyzer=ra,
         )
         pv = course_profile_vector(cp)
         profiles.append(pv)

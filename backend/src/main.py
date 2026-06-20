@@ -219,13 +219,22 @@ def _purge_old_heatmap_caches(max_age_s: float = 86400.0) -> None:
             pass
 
 
-def _apply_oob_mask(heatmap_cache: "object", oob_polygons: list, mpp: float) -> None:
+def _apply_oob_mask(heatmap_cache: "object", oob_polygons: list, mpp: float, dilation_m: float = 5.0) -> None:
     """
-    Rasterise les polygones OOB OSM sur heatmap_cache.forbidden_mask (in-place).
+    Rasterise les polygones OOB sur heatmap_cache.forbidden_mask (in-place).
     Utilisé par _circuit_impl et _sprint_impl pour uniformiser la logique OOB.
+    dilation_m : buffer physique en mètres (5m en sprint, plus en forêt si besoin).
     """
     if not oob_polygons or heatmap_cache is None:
         return
+    # Diagnostic input avant traitement
+    _p0 = oob_polygons[0][0] if oob_polygons and oob_polygons[0] else None
+    print(
+        f"[oob-mask-input] polygons={len(oob_polygons)} bbox={heatmap_cache.bbox} "
+        f"map_w={heatmap_cache.map_w} map_h={heatmap_cache.map_h} "
+        f"first_pt={_p0}",
+        flush=True,
+    )
     try:
         import numpy as _np_oob
         from PIL import Image as _PILImg, ImageDraw as _PILDraw
@@ -245,20 +254,22 @@ def _apply_oob_mask(heatmap_cache: "object", oob_polygons: list, mpp: float) -> 
             if len(_pts) >= 3:
                 _draw.polygon(_pts, fill=255)
         _oob_arr = _np_oob.array(_mask_img, dtype=bool)
-        _kpx = max(10, min(40, int(15.0 / max(mpp, 0.1))))
+        _kpx = max(3, min(20, int(dilation_m / max(mpp, 0.1))))
         _oob_dil = _bd_oob(_oob_arr, structure=_np_oob.ones((_kpx, _kpx), dtype=bool)).astype(bool)
         if heatmap_cache.forbidden_mask is not None:
             heatmap_cache.forbidden_mask = heatmap_cache.forbidden_mask | _oob_dil
         else:
             heatmap_cache.forbidden_mask = _oob_dil
-        import logging as _log_oob
-        _log_oob.getLogger(__name__).info(
-            "OOBMask: %.1f%% via %d polygones OSM (kernel=%dpx)",
-            float(_oob_dil.mean()) * 100, len(oob_polygons), _kpx,
+        print(
+            f"[oob-mask] dilation={dilation_m}m kernel={_kpx}px "
+            f"polygons={len(oob_polygons)} "
+            f"mask_fraction={float(heatmap_cache.forbidden_mask.mean()):.3f}",
+            flush=True,
         )
     except Exception as _oob_err:
-        import logging as _log_oob
-        _log_oob.getLogger(__name__).warning("OOBMask ÉCHEC: %s", _oob_err)
+        import traceback as _tb_oob
+        print(f"[oob-mask-error] {repr(_oob_err)}", flush=True)
+        _tb_oob.print_exc()
 
 
 # =============================================
@@ -2290,6 +2301,7 @@ def _circuit_impl(body: dict) -> dict:
                             force_mode=force_mode,
                             candidate_points=candidate_points or [],
                             cnn_scorer=_cnn_scorer,
+                            ocad_forbidden_mode=(map_id is not None),
                         )
                         heatmap_cache.save(_hmc_path)
                         print(f"[circuit] HeatmapCache CNN {heatmap_cache.scores.shape}", flush=True)
@@ -4221,6 +4233,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                             force_mode=force_mode,
                             candidate_points=candidate_points or [],
                             cnn_scorer=_cnn_scorer,
+                            ocad_forbidden_mode=ocad_oob_fetched,
                         )
                         heatmap_cache.save(_hmc_path)
                         print(f"{_tag} {_time.time()-_t0:.1f}s [OK] HeatmapCache OK {heatmap_cache.scores.shape}", flush=True)
@@ -4359,18 +4372,42 @@ def _sprint_impl(task_id: str, body: dict) -> None:
         ) if len(best_controls) >= 2 else 0.0
         _distance_ratio = round(_actual_len / target_length_m, 3)
 
-        if best_circuit.score < -5000:
-            # Toutes les positions sont en zones interdites — bbox trop petite ou mal configurée
-            _err_msg = (
-                f"Circuit impossible : la zone est trop petite ou entièrement en zone interdite "
-                f"pour générer un circuit de {target_length_m:.0f}m. "
-                f"Réduisez la distance cible ou agrandissez la zone."
+        _inner_controls = best_controls[1:-1] if len(best_controls) > 2 else []
+        _forbidden_count = 0
+        if heatmap_cache is not None and _inner_controls:
+            _forbidden_count = sum(
+                1 for c in _inner_controls
+                if heatmap_cache.is_forbidden(
+                    c.get("x", 0) if isinstance(c, dict) else getattr(c, "x", 0),
+                    c.get("y", 0) if isinstance(c, dict) else getattr(c, "y", 0),
+                )
             )
-            _sprint_tasks[task_id] = {
-                "status": "error",
-                "result": {"error": _err_msg, "dialogue": [], "controls": []},
-            }
-            return
+        _forbidden_fraction = _forbidden_count / len(_inner_controls) if _inner_controls else 0.0
+
+        # Maillon 2 : test géométrique _is_in_forbidden_zone() sur le circuit final
+        _oob_hits = 0
+        _ga_diag = getattr(generator, "_last_ga", None)
+        if _ga_diag is not None and oob_polygons and _inner_controls:
+            def _get_lng(c):
+                return c.get("lng", c.get("x", 0)) if isinstance(c, dict) else getattr(c, "lng", getattr(c, "x", 0))
+            def _get_lat(c):
+                return c.get("lat", c.get("y", 0)) if isinstance(c, dict) else getattr(c, "lat", getattr(c, "y", 0))
+            _oob_hits = sum(
+                1 for c in _inner_controls
+                if _ga_diag._is_in_forbidden_zone(_get_lng(c), _get_lat(c), oob_polygons)
+            )
+        print(
+            f"[forbidden-debug] inner={len(_inner_controls)} "
+            f"mask={_forbidden_count} fraction={_forbidden_fraction:.2f} "
+            f"| oob_polygons={len(oob_polygons)} oob_hits={_oob_hits}",
+            flush=True,
+        )
+        if _forbidden_fraction >= 0.9:
+            # Avertissement (pas d'erreur) — forbidden_mask trop agressive sur carte urbaine
+            _generation_warning = (
+                f"Avertissement : {_forbidden_count}/{len(_inner_controls)} postes en zone potentiellement interdite "
+                f"(espaces verts/eau). Circuit généré mais à vérifier."
+            )
         elif _distance_ratio < 0.70:
             _generation_warning = (
                 f"Distance partielle : {_actual_len:.0f}m générés sur {target_length_m:.0f}m "
@@ -4433,6 +4470,38 @@ def _sprint_impl(task_id: str, body: dict) -> None:
         for i in range(len(best_latlng) - 1)
     ) if len(best_latlng) > 1 else 0
 
+    if len(best_latlng) >= 3:
+        _gaw_inner = best_latlng[1:-1]
+        _gaw_lngs = [c["lng"] for c in _gaw_inner]
+        _gaw_lats = [c["lat"] for c in _gaw_inner]
+        _gaw_mean_lat = sum(_gaw_lats) / len(_gaw_lats)
+        _gaw_cos = math.cos(math.radians(_gaw_mean_lat))
+        _gaw_mean_lng = sum(_gaw_lngs) / len(_gaw_lngs)
+        _gaw_std_x_m = math.sqrt(sum((x - _gaw_mean_lng)**2 for x in _gaw_lngs) / len(_gaw_lngs)) * 111111 * _gaw_cos
+        _gaw_std_y_m = math.sqrt(sum((y - _gaw_mean_lat)**2 for y in _gaw_lats) / len(_gaw_lats)) * 111111
+        print(
+            f"[ga-winner] controls={len(best_latlng)} dist={total_dist_m:.0f}m "
+            f"std=({_gaw_std_x_m:.0f}m,{_gaw_std_y_m:.0f}m)",
+            flush=True,
+        )
+
+    _ga_for_comp = getattr(generator, "_last_ga", None)
+    if _ga_for_comp is not None and gen_result:
+        for _rank, _gr in enumerate(gen_result[:min(5, len(gen_result))]):
+            try:
+                _gc_ctrl = [(c["x"], c["y"]) for c in _gr.controls]
+                _comp = _ga_for_comp.fitness_components(_gc_ctrl)
+                print(
+                    f"[ga-components] rank={_rank} total={_gr.score:.1f} "
+                    f"terrain={_comp['terrain']:.0f} length={_comp['length']:.0f} "
+                    f"coverage={_comp['coverage']:.0f} variety={_comp['variety']:.0f} "
+                    f"td={_comp['td']:.0f} equity={_comp['equity']:.0f} "
+                    f"alternation={_comp['alternation']:.0f}",
+                    flush=True,
+                )
+            except Exception as _gce:
+                print(f"[ga-components] ERR rank={_rank}: {_gce}", flush=True)
+
     dialogue.append({
         "role": "traceur",
         "step": 1,
@@ -4445,6 +4514,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
     final_report = None
 
     for iteration in range(1, max_iterations + 1):
+        _ctrl_n_before = len(current_controls)
         print(f"{_tag} {_time.time()-_t0:.1f}s [...] controleur iter {iteration}/{max_iterations}...", flush=True)
         report = controleur.validate(
             current_controls,
@@ -4461,6 +4531,11 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                 "step": iteration,
                 "message": f"✅ Aucune issue — Score {report.global_score:.0f}/100. Circuit conforme IOF + FFCO."
             })
+            print(
+                f"[controller-debug] iter={iteration} VALID "
+                f"errors=0 warnings=0 infos={report.info_count} score={report.global_score:.1f}",
+                flush=True,
+            )
             break
         else:
             error_codes = " | ".join(
@@ -4482,6 +4557,11 @@ def _sprint_impl(task_id: str, body: dict) -> None:
 
         # Arrêter si plus d'erreurs (warnings tolérés)
         if report.error_count == 0:
+            print(
+                f"[controller-debug] iter={iteration} VALID "
+                f"errors=0 warnings={report.warning_count} infos={report.info_count} score={report.global_score:.1f}",
+                flush=True,
+            )
             break
 
         # Appliquer les corrections
@@ -4491,6 +4571,16 @@ def _sprint_impl(task_id: str, body: dict) -> None:
             candidate_points,
             oob_polygons=oob_polygons,
             bounding_box=bounding_box,
+        )
+
+        _ctrl_n_after = len(corrected)
+        _err_codes = [i.code for i in report.issues if i.severity == "ERROR"]
+        print(
+            f"[controller-debug] iter={iteration} "
+            f"controls_before={_ctrl_n_before} controls_after={_ctrl_n_after} "
+            f"removed={_ctrl_n_before - _ctrl_n_after} "
+            f"errors={_err_codes} warnings={report.warning_count}",
+            flush=True,
         )
 
         if corr_messages:
@@ -4533,6 +4623,17 @@ def _sprint_impl(task_id: str, body: dict) -> None:
             })
             current_controls = filtered
 
+        # Sécurité : si le clip a trop vidé les postes intérieurs, restaurer le circuit initial
+        _inner_after_clip = [c for c in current_controls if c.get("type") not in ("start", "finish")]
+        _inner_original = [c for c in best_latlng if c.get("type") not in ("start", "finish")] if best_latlng else []
+        _min_inner = max(3, len(_inner_original) // 2)
+        if best_latlng and len(_inner_after_clip) < _min_inner:
+            current_controls = best_latlng
+            dialogue.append({
+                "role": "system", "step": 99,
+                "message": f"Clip bbox : {len(_inner_after_clip)}/{len(_inner_original)} postes conservés — circuit initial restauré (qualité dégradée)."
+            })
+
     # ── Navigation quality (post-corrections, sur circuit final) ─────────────
     # Calcul nav_scores une seule fois sur le circuit final — utilise la même GA
     # avec son KDTree ISOM déjà initialisé. Neutre (vide) si KDTree absent.
@@ -4574,12 +4675,14 @@ def _sprint_impl(task_id: str, body: dict) -> None:
         if _td1_path_dist:
             _circuit_cfg["td1_path_distances"] = _td1_path_dist
         if final_report is not None:
+            _loop_score = final_report.global_score
             _final_report_with_nav = controleur.validate(
                 current_controls,
                 oob_polygons=oob_polygons,
                 circuit_config=_circuit_cfg,
                 route_analyzer=route_analyzer,
             )
+            _final_report_with_nav.global_score = _loop_score
             final_report = _final_report_with_nav
 
     # ── Profiling parcours ────────────────────────────────────────────────────
@@ -4672,32 +4775,67 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                     "scenario": getattr(_dc_circ, "scenario", "standard"),
                 })
                 try:
+                    import math as _math_dbg, numpy as _np_dbg
                     _dbg_ctrls = [(c["x"], c["y"]) for c in _dc_circ.controls]
                     _dbg_inner = _dbg_ctrls[1:-1]
                     _dbg_ncross = _ga._count_leg_crossings(_dbg_ctrls) if _ga else 0
+                    _W_CROSS = 2.0
+                    _cross_contrib = _dbg_ncross * _W_CROSS
+
                     if _dbg_inner and heatmap_cache is not None:
-                        _dbg_ai = [heatmap_cache.query(p[0], p[1]) for p in _dbg_inner]
-                        _dbg_ai_mean = sum(_dbg_ai) / len(_dbg_ai)
-                        _dbg_ai_max = max(_dbg_ai)
+                        _dbg_ai_vals = [heatmap_cache.query(p[0], p[1]) for p in _dbg_inner]
+                        _dbg_ai_mean = sum(_dbg_ai_vals) / len(_dbg_ai_vals)
+                        _W_AI = 15.0 if getattr(heatmap_cache, 'is_flat_signal', False) else 30.0
+                        _ai_contrib = _W_AI * _dbg_ai_mean
                     else:
-                        _dbg_ai_mean = _dbg_ai_max = 0.0
+                        _dbg_ai_mean = _ai_contrib = 0.0
+                        _W_AI = 0.0
+
+                    # Terme B : pénalité distance — le plus dominant (W_DIST=40)
+                    _dbg_legs_m = [
+                        _math_dbg.sqrt(
+                            ((_dbg_ctrls[i+1][0]-_dbg_ctrls[i][0])*72600)**2 +
+                            ((_dbg_ctrls[i+1][1]-_dbg_ctrls[i][1])*111000)**2
+                        )
+                        for i in range(len(_dbg_ctrls)-1)
+                    ]
+                    _dbg_total_m = sum(_dbg_legs_m)
+                    _dbg_ratio = _dbg_total_m / max(float(target_length_m), 1)
+                    _dist_contrib = 40.0 * abs(1.0 - _dbg_ratio)
+
                     if len(_dbg_inner) >= 2:
-                        import numpy as _np_dbg
-                        _bw = max(_bbox_t.get("max_x", 0) - _bbox_t.get("min_x", 0), 1e-9)
-                        _bh = max(_bbox_t.get("max_y", 0) - _bbox_t.get("min_y", 0), 1e-9)
+                        _bw = max(_bbox_t[2] - _bbox_t[0], 1e-9)
+                        _bh = max(_bbox_t[3] - _bbox_t[1], 1e-9)
                         _dbg_spread = (
                             float(_np_dbg.std([p[0] for p in _dbg_inner])) / _bw
                             + float(_np_dbg.std([p[1] for p in _dbg_inner])) / _bh
                         ) / 2
                     else:
                         _dbg_spread = 0.0
-                    _dbg_shape = _ga._compute_shape_score(_dbg_ctrls, _bbox_t, heatmap_cache) if _ga else 0.0
+
+                    _dbg_bbox_d = {"min_x": _bbox_t[0], "min_y": _bbox_t[1], "max_x": _bbox_t[2], "max_y": _bbox_t[3]}
+                    _dbg_shape_raw = _ga._compute_shape_score(_dbg_ctrls, _dbg_bbox_d, heatmap_cache) if _ga else 0.0
+                    _W_SHAPE = 15.0
+                    _shape_contrib = _W_SHAPE * _dbg_shape_raw
+
                     print(
-                        f"[fitness-debug] label={getattr(_dc_circ, 'label', [])!r} "
-                        f"score={_dc_circ.score:.1f} crossings={_dbg_ncross} "
-                        f"geo_spread={_dbg_spread:.3f} "
-                        f"ai_mean={_dbg_ai_mean:.3f} ai_max={_dbg_ai_max:.3f} "
-                        f"shape={_dbg_shape:.3f}",
+                        f"[fitness-debug] score={_dc_circ.score:.1f} dist={_dbg_total_m:.0f}m "
+                        f"| A(ai)={_ai_contrib:.1f} "
+                        f"| B(dist)=-{_dist_contrib:.1f} "
+                        f"| H(shape)={_shape_contrib:.1f} "
+                        f"| cross=-{_cross_contrib:.1f} "
+                        f"| geo_spread={_dbg_spread:.3f} "
+                        f"| label={getattr(_dc_circ, 'label', [])!r}",
+                        flush=True,
+                    )
+                    _cos_lat = _math_dbg.cos(_math_dbg.radians((_bbox_t[1] + _bbox_t[3]) / 2))
+                    _bbox_w_m = int(max(_bbox_t[2] - _bbox_t[0], 1e-9) * 111111 * _cos_lat)
+                    _bbox_h_m = int(max(_bbox_t[3] - _bbox_t[1], 1e-9) * 111111)
+                    _std_x_m = int(float(_np_dbg.std([p[0] for p in _dbg_inner])) * 111111 * _cos_lat) if len(_dbg_inner) >= 2 else 0
+                    _std_y_m = int(float(_np_dbg.std([p[1] for p in _dbg_inner])) * 111111) if len(_dbg_inner) >= 2 else 0
+                    print(
+                        f"[coverage-debug] bbox={_bbox_w_m}m x {_bbox_h_m}m "
+                        f"std=({_std_x_m}m,{_std_y_m}m) geo_spread={_dbg_spread:.3f}",
                         flush=True,
                     )
                 except Exception as _dbg_err:
@@ -4709,6 +4847,23 @@ def _sprint_impl(task_id: str, body: dict) -> None:
     final_report_dict = controleur.to_dict(final_report) if final_report else {}
     final_report_dict["iterations_used"] = len([d for d in dialogue if d["role"] == "traceur"])
 
+    _fc_inner = [c for c in current_controls if c.get("type") not in ("start", "finish")]
+    _fc_start = next((c for c in current_controls if c.get("type") == "start"), None)
+    _fc_finish = next((c for c in current_controls if c.get("type") == "finish"), None)
+    _fc_dist = sum(
+        math.sqrt(
+            ((current_controls[i + 1]["lng"] - current_controls[i]["lng"]) * 72600 * math.cos(math.radians(current_controls[i]["lat"]))) ** 2
+            + ((current_controls[i + 1]["lat"] - current_controls[i]["lat"]) * 110540) ** 2
+        )
+        for i in range(len(current_controls) - 1)
+    ) if len(current_controls) > 1 else 0
+    _fc_s = f"({_fc_start['lat']:.5f},{_fc_start['lng']:.5f})" if _fc_start else "None"
+    _fc_f = f"({_fc_finish['lat']:.5f},{_fc_finish['lng']:.5f})" if _fc_finish else "None"
+    print(
+        f"[final-circuit] controls={len(current_controls)} inner={len(_fc_inner)} "
+        f"distance={_fc_dist:.0f}m start={_fc_s} finish={_fc_f}",
+        flush=True,
+    )
     print(f"{_tag} {_time.time()-_t0:.1f}s [OK] DONE is_valid={final_report.is_valid if final_report else False} score={final_report.global_score if final_report else 0:.3f}", flush=True)
     _sprint_tasks[task_id] = {
         "status": "completed",

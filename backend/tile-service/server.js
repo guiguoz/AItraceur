@@ -85,9 +85,27 @@ app.use('/renders', express.static(RENDER_DIR, {
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }))
 
-// OOB symbols : 520 = zone interdite (ISOM + ISSprOM) ; 709 = OOB sprint additionnel (ISSprOM)
-// symNum format in ocad2geojson: integer × 1000 (e.g. sym 709 → 709000)
-const OOB_SYMS = [520000, 520001, 520002, 709000, 709001, 709002]
+// Vraies zones interdites (hors-limites, dangereuses, végétation impassable) — dilatées côté backend
+// Les bâtiments (521/522/527/528/529) sont exclus : coins/angles = postes valides en sprint
+// format ocad2geojson : symNum × 1000
+const FORBIDDEN_SYMS = [
+  520000, 520001, 520002,  // Out of bounds (ISOM/ISSprOM)
+  526000, 526001, 526002,  // Out of bounds passage (ISOM)
+  709000, 709001, 709002,  // Do-not-enter sprint (ISSprOM)
+  714000, 714001, 714002,  // Dangerous area (ISSprOM)
+  715000, 715001, 715002,  // Out of bounds variant
+  406000, 406001, 406002,  // Rough open land (olive, lent — pas de postes)
+  407000, 407001, 407002,  // Rough open land with trees (olive)
+  410000, 410001, 410002,  // Vegetation: fight / impassable (ISOM/ISSprOM)
+  411000, 411001, 411002,  // Vegetation: impassable (ISSprOM)
+]
+const BUILDING_SYMS = [    // pour diagnostic — exclus du masque dur
+  521000, 521001, 521002,
+  522000, 522001, 522002,
+  527000, 527001, 527002,
+  528000, 528001, 528002,
+  529000, 529001, 529002,
+]
 
 app.get('/map/:mapId/forbidden-zones', async (req, res) => {
   const { mapId } = req.params
@@ -100,17 +118,68 @@ app.get('/map/:mapId/forbidden-zones', async (req, res) => {
     proj4.defs('EPSG:2154', '+proj=lcc +lat_0=46.5 +lon_0=3 +lat_1=49 +lat_2=44 +x_0=700000 +y_0=6600000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs +type=crs')
     const ocadFile = await readOcad(ocdPath)
     const geojson = ocadToGeoJson(ocadFile, {
-      includeSymbols: OOB_SYMS,
+      includeSymbols: FORBIDDEN_SYMS,
       applyCrs: true,
       generateSymbolElements: false,
     })
-    console.log(`[forbidden-zones] ${mapId}: ${geojson.features.length} OOB features`)
-    res.json(geojson)
+    // Diagnostic : compter OOB / végétation / bâtiments
+    const allSyms = [...FORBIDDEN_SYMS, ...BUILDING_SYMS]
+    const geojsonAll = ocadToGeoJson(ocadFile, { includeSymbols: allSyms, applyCrs: true, generateSymbolElements: false })
+    const oobSymNums = new Set([520, 526, 709, 714, 715])
+    const vegSymNums = new Set([406, 407, 410, 411])
+    const buildingSymNums = new Set([521, 522, 527, 528, 529])
+    const symOf = f => Math.floor((f.properties?.sym || 0) / 1000)
+    const trueOob = geojsonAll.features.filter(f => oobSymNums.has(symOf(f))).length
+    const vegForbidden = geojsonAll.features.filter(f => vegSymNums.has(symOf(f))).length
+    const buildings = geojsonAll.features.filter(f => buildingSymNums.has(symOf(f))).length
+    const polyCount = geojson.features.filter(f => f.geometry?.type === 'Polygon' || f.geometry?.type === 'MultiPolygon').length
+    console.log(`[forbidden-zones] ${mapId}: returned=${geojson.features.length} (oob=${trueOob} veg=${vegForbidden} buildings=${buildings} excluded) polygones=${polyCount}`)
+
+    // Convert all feature coordinates from native CRS (e.g. Lambert-93) to WGS84
+    const crs = ocadFile.getCrs()
+    const sourceCrs = (crs?.catalog === 'EPSG' || crs?.code) ? `EPSG:${crs.code}` : 'EPSG:2154'
+    const geojsonWgs84 = transformGeoJsonCrs(geojson, sourceCrs)
+    res.json(geojsonWgs84)
   } catch (err) {
     console.error('[forbidden-zones] Error:', err.message)
     res.status(500).json({ error: err.message })
   }
 })
+
+function transformGeoJsonCrs(geojson, sourceCrsCode) {
+  const converter = proj4(sourceCrsCode, 'EPSG:4326')
+
+  function transformCoord(coord) {
+    return converter.forward(coord)
+  }
+
+  function transformRing(ring) {
+    return ring.map(transformCoord)
+  }
+
+  function transformGeometry(geom) {
+    if (!geom) return geom
+    switch (geom.type) {
+      case 'Point':
+        return { ...geom, coordinates: transformCoord(geom.coordinates) }
+      case 'LineString':
+        return { ...geom, coordinates: transformRing(geom.coordinates) }
+      case 'MultiLineString':
+        return { ...geom, coordinates: geom.coordinates.map(transformRing) }
+      case 'Polygon':
+        return { ...geom, coordinates: geom.coordinates.map(transformRing) }
+      case 'MultiPolygon':
+        return { ...geom, coordinates: geom.coordinates.map(rings => rings.map(transformRing)) }
+      default:
+        return geom
+    }
+  }
+
+  return {
+    ...geojson,
+    features: geojson.features.map(f => ({ ...f, geometry: transformGeometry(f.geometry) })),
+  }
+}
 
 function convertBoundsToWgs84(extent, crs) {
   // extent = [minX, minY, maxX, maxY] in native CRS

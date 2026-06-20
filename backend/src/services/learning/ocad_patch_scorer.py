@@ -116,16 +116,19 @@ class HeatmapCache:
         return bool(self.forbidden_mask[py, px])
 
     def get_top_candidates(
-        self, top_percent: float = 0.20
+        self, top_percent: float = 0.20, n_zones: int = 4
     ) -> list[tuple[float, float]]:
         """
-        Retourne les coordonnées WGS84 (lng, lat) des top_percent% meilleurs pixels.
+        Retourne les coordonnées WGS84 (lng, lat) des top_percent% meilleurs pixels,
+        avec garantie de couverture spatiale (n_zones × n_zones quadrants).
 
-        Utilisé par le GA pour le Smart Seeding : tirer les postes initiaux
-        parmi les zones visuellement attractives plutôt qu'au hasard.
+        Pour chaque quadrant sans candidat dans le top global, ajoute le meilleur
+        point disponible de ce quadrant — évite que le Smart Seeding reste bloqué
+        dans un cluster CNN dominant même si la carte a des zones valides ailleurs.
 
         Args:
-            top_percent: Fraction de la grille à conserver (0.20 = top 20%).
+            top_percent: Fraction de la grille à conserver (0.40 = top 40%).
+            n_zones: Divisions spatiales par axe (4 → grille 4×4 = 16 quadrants).
 
         Returns:
             Liste de (lng, lat) — peut être grande, le GA échantillonne dedans.
@@ -134,14 +137,61 @@ class HeatmapCache:
         H, W = self.scores.shape
         threshold = float(np.percentile(self.scores, 100.0 * (1.0 - top_percent)))
         grid_ys, grid_xs = np.where(self.scores >= threshold)
-        candidates = []
+
+        lng_step = max((max_lng - min_lng) / n_zones, 1e-9)
+        lat_step = max((max_lat - min_lat) / n_zones, 1e-9)
+
+        candidates: list = []
+        occupied_zones: set = set()
+
         for gy, gx in zip(grid_ys.tolist(), grid_xs.tolist()):
             lng = min_lng + (gx / max(W - 1, 1)) * (max_lng - min_lng)
             lat = max_lat - (gy / max(H - 1, 1)) * (max_lat - min_lat)
-            # Exclure les positions en zone interdite (vert olive, eau, bâtiments)
             if self.forbidden_mask is not None and self.is_forbidden(lng, lat):
                 continue
             candidates.append((lng, lat))
+            zi = min(int((lng - min_lng) / lng_step), n_zones - 1)
+            zj = min(int((max_lat - lat) / lat_step), n_zones - 1)
+            occupied_zones.add((zi, zj))
+
+        if n_zones <= 1:
+            return candidates
+
+        # Quadrants vides : collecter toutes les cellules valides (O(H×W) ≈ 1645 itérations)
+        zone_cells: dict = {}   # (zi, zj) → [(score, lng, lat), ...]
+        for gy in range(H):
+            for gx in range(W):
+                lng = min_lng + (gx / max(W - 1, 1)) * (max_lng - min_lng)
+                lat = max_lat - (gy / max(H - 1, 1)) * (max_lat - min_lat)
+                if self.forbidden_mask is not None and self.is_forbidden(lng, lat):
+                    continue
+                zi = min(int((lng - min_lng) / lng_step), n_zones - 1)
+                zj = min(int((max_lat - lat) / lat_step), n_zones - 1)
+                if (zi, zj) in occupied_zones:
+                    continue
+                score = float(self.scores[gy, gx])
+                key = (zi, zj)
+                if key not in zone_cells:
+                    zone_cells[key] = []
+                zone_cells[key].append((score, lng, lat))
+
+        # Ajouter le top-5% de chaque zone vide (min 1) pour un seeding diversifié
+        extra_count = 0
+        for cells in zone_cells.values():
+            cells.sort(reverse=True)
+            n_keep = max(1, len(cells) // 20)
+            for _, lng, lat in cells[:n_keep]:
+                candidates.append((lng, lat))
+                extra_count += 1
+
+        if extra_count:
+            print(
+                f"[top-candidates] n={len(candidates)} "
+                f"(extra_zones={len(zone_cells)} zones={len(occupied_zones) + len(zone_cells)}/{n_zones * n_zones} "
+                f"extra_pts={extra_count})",
+                flush=True,
+            )
+
         return candidates
 
     def save(self, path: "Path") -> None:
@@ -417,6 +467,7 @@ class OcadPatchScorer:
         force_mode: Optional[str] = None,
         candidate_points: Optional[list] = None,
         cnn_scorer: Optional["CnnPatchScorer"] = None,
+        ocad_forbidden_mode: bool = False,
     ) -> "HeatmapCache":
         """
         Précompute une grille de scores sur l'image carte entière.
@@ -486,28 +537,65 @@ class OcadPatchScorer:
         _elapsed = _time.monotonic() - _t0
         scores_grid = scores_flat.reshape(len(ys), len(xs))
         # ── Forbidden mask : vert olive + eau + dilatation → absorbe bâtiments enclavés ──
+        # En mode OCAD, la détection raster génère des faux positifs (lignes Nord = eau,
+        # zones vertes passables = olive) → _apply_oob_mask fournit le masque depuis vecteurs.
         _forbidden_mask = None
-        try:
-            from scipy.ndimage import binary_dilation
-            _img_arr = np.array(map_img.convert("RGB"), dtype=np.float32)
-            _r_ch, _g_ch, _b_ch = _img_arr[:, :, 0], _img_arr[:, :, 1], _img_arr[:, :, 2]
-            _olive_px = (
-                (_r_ch >= 120) & (_r_ch <= 210) &
-                (_g_ch >= 150) & (_g_ch <= 220) &
-                (_b_ch < 80) & (_g_ch > _r_ch)
-            )
-            _water_px = (_b_ch > 160) & (_r_ch < 130) & (_g_ch < 160)
-            _raw_mask = _olive_px | _water_px
-            _kernel_px = max(15, min(60, int(30.0 / mpp)))  # cap 60px max (~30m à mpp≥0.5)
-            _struct = np.ones((_kernel_px, _kernel_px), dtype=bool)
-            _forbidden_mask = binary_dilation(_raw_mask, structure=_struct).astype(bool)
-        except Exception as _fm_err:
-            log.warning("ForbiddenMask ÉCHEC scipy: %s — masque désactivé", _fm_err)
-            _forbidden_mask = None
+        if ocad_forbidden_mode:
+            print("[heatmap] ocad_forbidden_mode=True — détection raster désactivée (vecteurs OCAD utilisés)", flush=True)
+        else:
+            try:
+                from scipy.ndimage import binary_dilation
+                _img_arr = np.array(map_img.convert("RGB"), dtype=np.float32)
+                _r_ch, _g_ch, _b_ch = _img_arr[:, :, 0], _img_arr[:, :, 1], _img_arr[:, :, 2]
+                _olive_px = (
+                    (_r_ch >= 120) & (_r_ch <= 215) &
+                    (_g_ch >= 150) & (_g_ch <= 225) &
+                    (_b_ch < 120) & (_g_ch > _r_ch)  # seuil B relevé : olive sprint B~80-100
+                )
+                _water_px = (_b_ch > 160) & (_r_ch < 130) & (_g_ch < 160)
+                # Bâtiments OCAD sprint : gris achromate moyen (R≈G≈B, ni blanc ni noir)
+                # Exclut blanc (routes >215), noir (contours <60), et couleurs saturées
+                _sat_px = (
+                    np.maximum(np.maximum(_r_ch, _g_ch), _b_ch) -
+                    np.minimum(np.minimum(_r_ch, _g_ch), _b_ch)
+                )
+                _building_px = (
+                    (_r_ch >= 130) & (_r_ch <= 215) &
+                    (_g_ch >= 120) & (_g_ch <= 210) &
+                    (_b_ch >= 110) & (_b_ch <= 205) &
+                    (_sat_px < 50)  # achromate : pas de couleur dominante
+                )
+                _raw_mask = _olive_px | _water_px
+                _kernel_px = max(3, min(30, int(8.0 / mpp)))  # ~8m physique — évite de boucher les rues en sprint
+                _struct = np.ones((_kernel_px, _kernel_px), dtype=bool)
+                # Olive+eau dilatés (buffer ~15m) ; bâtiments sans dilation (corners accessibles)
+                _forbidden_mask = (
+                    binary_dilation(_raw_mask, structure=_struct).astype(bool) | _building_px
+                )
+            except Exception as _fm_err:
+                log.warning("ForbiddenMask ÉCHEC scipy: %s — masque désactivé", _fm_err)
+                _forbidden_mask = None
         # ─────────────────────────────────────────────────────────────────────────────────
         _pct_forbidden = float(_forbidden_mask.mean()) * 100 if _forbidden_mask is not None else 0.0
+        # Debug PNG : superpose la carte + le masque rouge (toujours enregistré en mode OCAD)
+        if _forbidden_mask is not None and map_img is not None:
+            try:
+                import os as _os
+                _debug_dir = _os.path.join(_os.path.dirname(__file__), "..", "..", "..", "debug")
+                _os.makedirs(_debug_dir, exist_ok=True)
+                _base = np.array(map_img.convert("RGB"), dtype=np.uint8).copy()
+                _base[_forbidden_mask, 0] = 220  # R
+                _base[_forbidden_mask, 1] = 50   # G  → rouge vif sur zones interdites
+                _base[_forbidden_mask, 2] = 50   # B
+                Image.fromarray(_base).save(_os.path.join(_debug_dir, "forbidden_mask_debug.png"))
+            except Exception as _dbg_err:
+                log.debug("ForbiddenMask debug PNG ÉCHEC: %s", _dbg_err)
         _scores_std = float(scores_grid.std())
         _is_flat = _scores_std < 0.05
+        print(
+            f"[heatmap-debug] forbidden={_pct_forbidden:.1f}% std={_scores_std:.4f} flat={_is_flat}",
+            flush=True,
+        )
         log.info(
             "HeatmapCache: %s | grid=%dx%d step=%dpx mpp=%.2fm | "
             "mean=%.3f p50=%.3f p90=%.3f p99=%.3f std=%.4f | forbidden=%.1f%% | %.0f patches/s (%.2fs)",

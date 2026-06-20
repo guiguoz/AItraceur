@@ -140,6 +140,11 @@ class GenerationConfig:
     # Utilisé uniquement par benchmark_lri.py — n'affecte pas le comportement du GA.
     benchmark_mode: bool = False
 
+    # C6 — Seeding géographique diversifié : sous-ensemble spatial de top_candidates
+    # assigné à ce run pour forcer l'exploration d'une zone distincte.
+    # None = comportement standard (tous les top_candidates disponibles).
+    zone_seed_candidates: Optional[List[Tuple[float, float]]] = field(default=None, repr=False)
+
 
 @dataclass
 class GenerationResult:
@@ -186,6 +191,11 @@ def scale_min_separation(
     ref = _SCALE_REF.get(ct, 10000)
     return int(max(lo, min(hi, math.ceil(base_m * map_scale / ref))))
 
+
+
+# Facteur max de dépassement de la longueur cible avant rejet de mutation.
+# Au-delà de 1.5× la cible, la mutation est annulée (le circuit garde son état antérieur).
+_MAX_CIRCUIT_OVERSHOOT: float = 1.5
 
 
 def _haversine_batch(
@@ -270,6 +280,9 @@ class GeneticAlgorithm:
         self.population: List[Circuit] = []
         self.best_solution: Optional[Circuit] = None
         self.generation = 0
+        self._death_penalty_logged = False  # throttle oob/cnn : 1 log par run GA
+        self._dp_counts: dict = {"oob_vector": 0, "cnn_low": 0, "raster_forbidden": 0}
+        self._raster_logged_coords: set = set()  # coords uniques logguées (cap 10)
 
         # Pour le graphe de navigation
         self.graph = None
@@ -1008,6 +1021,16 @@ class GeneticAlgorithm:
             if best_lri is not None:
                 self.best_solution = best_lri
 
+        _dp_total = sum(self._dp_counts.values())
+        if _dp_total > 0:
+            print(
+                f"[death-summary] total={_dp_total} "
+                f"oob_vector={self._dp_counts['oob_vector']} "
+                f"cnn_low={self._dp_counts['cnn_low']} "
+                f"raster_forbidden={self._dp_counts['raster_forbidden']}",
+                flush=True,
+            )
+
         return GenerationResult(
             circuits=self.population[:10],  # Top 10
             best_circuit=self.best_solution,
@@ -1165,8 +1188,12 @@ class GeneticAlgorithm:
         de positions visuellement attractives pour biaiser l'initialisation.
         """
         # Précomputer les top candidats pour le Smart Seeding V2
+        # C6 : si une zone spatiale est assignée à ce run, l'utiliser en priorité
         self._top_candidates: List[Tuple[float, float]] = []
-        if self.config.heatmap_cache is not None:
+        zone_cands = self.config.zone_seed_candidates
+        if zone_cands and len(zone_cands) >= 3:
+            self._top_candidates = zone_cands
+        elif self.config.heatmap_cache is not None:
             self._top_candidates = self.config.heatmap_cache.get_top_candidates(
                 top_percent=0.40
             )
@@ -1240,10 +1267,17 @@ class GeneticAlgorithm:
                 ny = max(bb["min_y"], min(bb["max_y"], ny))
 
             # Smart Seeding V2 (40% des cas si HeatmapCache disponible) :
-            # tire le poste depuis les top-40% de la carte plutôt qu'au hasard.
-            # → la population initiale démarre déjà sur des terrains attractifs.
+            # tire le poste depuis les top-40% proches du contrôle courant (±2×target_leg_m).
+            # Contrainte locale : évite les sauts inter-zones qui gonflent la longueur initiale.
             if self._top_candidates and random.random() < 0.40:
-                nx, ny = random.choice(self._top_candidates)
+                _max_step_m = target_leg_m * 2.0
+                _near = [c for c in self._top_candidates
+                         if self._haversine_m(current, c) <= _max_step_m]
+                if not _near:
+                    # Aucun candidat proche → garder la position angle-based (nx, ny déjà calculé)
+                    pass
+                else:
+                    nx, ny = random.choice(_near)
                 # Chaîner avec KDTree : ancre le candidat CNN sur la feature ISOM la plus attractive
                 if self._ocad_tree is not None:
                     _cp, _d = self._best_att_ocad(nx, ny, 40,
@@ -1712,10 +1746,14 @@ class GeneticAlgorithm:
 
         Supporte 2 formats :
           - Cercle : {x, y, radius}
-          - Polygone WGS84 : {coordinates: [[lat, lng], ...]}
+          - Polygone WGS84 : {coordinates: [[lng, lat], ...]}
         """
         for zone in forbidden_zones:
-            if "coordinates" in zone:
+            if isinstance(zone, list):
+                # Format brut [[lng,lat],...] (OCAD pipeline)
+                if self._point_in_polygon(x, y, zone):
+                    return True
+            elif "coordinates" in zone:
                 if self._point_in_polygon(x, y, zone["coordinates"]):
                     return True
             elif "radius" in zone:
@@ -1723,6 +1761,19 @@ class GeneticAlgorithm:
                 if dist < zone.get("radius", 0):
                     return True
         return False
+
+    def _is_raster_forbidden(self, x: float, y: float) -> bool:
+        """Renvoie True si (x, y) tombe sur un pixel olive/bâtiment (mode OCAD uniquement).
+
+        Plus utilisé comme filtre mutation (retiré C8 — trop de faux positifs sur zones pavées).
+        Conservé pour usage ponctuel (debug, scoring futur).
+        """
+        hc = self.config.heatmap_cache
+        if hc is None:
+            return False
+        if getattr(hc, "is_flat_signal", False):
+            return False  # mode OSM — pas de masque OCAD
+        return bool(hc.is_forbidden(x, y))
 
     def _point_in_polygon(self, x: float, y: float, polygon: List) -> bool:
         """Ray casting algorithm — point dans polygone [[lat, lng], ...]."""
@@ -1928,8 +1979,16 @@ class GeneticAlgorithm:
                 prefer_isom=self._td1_prefer_isom, prefer_max_dist_m=self._td1_prefer_max_dist_m)
             if _cp:
                 x, y = _cp["x"], _cp["y"]
-        if not self._is_in_forbidden_zone(x, y, forbidden_zones):
+        if (not self._is_in_forbidden_zone(x, y, forbidden_zones)
+):
+            _orig = controls[idx]
+            _curr_len = self._calculate_total_length(controls)
             controls[idx] = (x, y)
+            _new_len = self._calculate_total_length(controls)
+            if (self.config.target_length_m
+                    and _new_len > _MAX_CIRCUIT_OVERSHOOT * self.config.target_length_m
+                    and _new_len > _curr_len):
+                controls[idx] = _orig
         return controls
 
     def _mutate_leg_improvement(
@@ -1995,7 +2054,14 @@ class GeneticAlgorithm:
                 new_x, new_y = _cp["x"], _cp["y"]
 
         if not self._is_in_forbidden_zone(new_x, new_y, forbidden_zones):
+            _orig = controls[worst_idx]
+            _curr_len = self._calculate_total_length(controls)
             controls[worst_idx] = (new_x, new_y)
+            _new_len = self._calculate_total_length(controls)
+            if (self.config.target_length_m
+                    and _new_len > _MAX_CIRCUIT_OVERSHOOT * self.config.target_length_m
+                    and _new_len > _curr_len):
+                controls[worst_idx] = _orig
         return controls
 
     def _mutate_perturbation(
@@ -2028,8 +2094,16 @@ class GeneticAlgorithm:
             cp = self._find_nearest_cp(x, y, leg_m * 2.0)
             if cp:
                 x, y = cp
-        if not self._is_in_forbidden_zone(x, y, forbidden_zones):
+        if (not self._is_in_forbidden_zone(x, y, forbidden_zones)
+):
+            _orig = controls[idx]
+            _curr_len = self._calculate_total_length(controls)
             controls[idx] = (x, y)
+            _new_len = self._calculate_total_length(controls)
+            if (self.config.target_length_m
+                    and _new_len > _MAX_CIRCUIT_OVERSHOOT * self.config.target_length_m
+                    and _new_len > _curr_len):
+                controls[idx] = _orig
         return controls
 
     def evaluate_fitness(
@@ -2183,10 +2257,17 @@ class GeneticAlgorithm:
         # ── F. Pénalité zones interdites (HeatmapCache.is_forbidden) ─────────
         # Pénalise les postes qui tombent dans le forbidden_mask (vert olive, eau,
         # bâtiments dilatés) même si forbidden_zones JSON ne les couvre pas.
+        # Désactivé si is_flat_signal : masque basé sur couleurs OSM (vert = parc
+        # navigable), non sur OCAD olive — marquerait tout le périmètre forbidden.
         forbidden_penalty = 0.0
-        if config.heatmap_cache is not None and config.heatmap_cache.forbidden_mask is not None:
+        _hc = config.heatmap_cache
+        if (
+            _hc is not None
+            and _hc.forbidden_mask is not None
+            and not getattr(_hc, "is_flat_signal", False)
+        ):
             for lng, lat in controls[1:-1]:  # hors départ et arrivée
-                if config.heatmap_cache.is_forbidden(lng, lat):
+                if _hc.is_forbidden(lng, lat):
                     forbidden_penalty += 50.0
 
         # ── G. Pénalité dénivelé (D+/distance > seuil IOF) ───────────────────
@@ -2556,9 +2637,9 @@ class GeneticAlgorithm:
             W_DIST = config.w_dist_override
         if _heatmap_flat:
             W_AI *= 0.5  # signal CNN absent → réduire poids terme A
-        W_SHAPE = 15.0  # forme géométrique — anti-Z/spirale/accordéon (H5 actif)
+        W_SHAPE = 20.0  # forme géométrique — anti-Z/spirale/accordéon (H5 actif)
         W_LEG_PROFILE = 8.0  # conformité longueur jambes au profil format IOF
-        W_CROSSING = 25.0  # pénalité croisement géométrique de jambes — à calibrer
+        W_CROSSING = 50.0  # pénalité croisement géométrique de jambes
 
         # Pénalité quadratique si trop peu de postes par rapport à la cible
         n_postes = len(controls) - 2  # hors départ et arrivée
@@ -2567,6 +2648,26 @@ class GeneticAlgorithm:
 
         _n_crossings = self._count_leg_crossings(controls)
         leg_crossing_penalty = float(_n_crossings) * W_CROSSING
+
+        # ── Coverage bonus : récompense la dispersion géographique des postes ──
+        # Corrige le clustering (geo_spread ≈ 0 mesuré sur cartes OCAD/OSM).
+        # W_COVERAGE=20 > H4_max(3.0) → signal directeur sans écraser terme B.
+        W_COVERAGE = 10.0
+        _TARGET_SPREAD = 0.25  # 25% de la bbox = dispersion satisfaisante
+        coverage_bonus = 0.0
+        if config.bounding_box and len(controls) > 3:
+            _inner_c = controls[1:-1]
+            _bw = max(
+                config.bounding_box.get("max_x", 0) - config.bounding_box.get("min_x", 0), 1e-9
+            )
+            _bh = max(
+                config.bounding_box.get("max_y", 0) - config.bounding_box.get("min_y", 0), 1e-9
+            )
+            _geo_spread_c = (
+                float(np.std([c[0] for c in _inner_c])) / _bw
+                + float(np.std([c[1] for c in _inner_c])) / _bh
+            ) / 2
+            coverage_bonus = W_COVERAGE * min(_geo_spread_c / _TARGET_SPREAD, 1.0)
 
         _total_fitness = (
             W_AI * ai_score
@@ -2588,6 +2689,7 @@ class GeneticAlgorithm:
             + exit_clarity_bonus
             + leg_diversity_bonus
             - leg_crossing_penalty
+            + coverage_bonus
         )
 
         import csv as _csv2, pathlib as _pl2
@@ -2951,10 +3053,16 @@ class GeneticAlgorithm:
         alternations = sum(1 for i in range(len(cl_types) - 1) if cl_types[i] != cl_types[i + 1])
         return (alternations / (len(cl_types) - 1)) * 100.0
 
+    def fitness_components(self, controls_lnglat: list) -> dict:
+        """Retourne le détail des composantes fitness (diagnostic) — valeurs brutes 0-100."""
+        circuit = Circuit(controls=controls_lnglat)
+        return self._default_scoring(circuit, self.config, return_components=True)
+
     def _default_scoring(
         self,
         circuit: Circuit,
         config: GenerationConfig,
+        return_components: bool = False,
     ) -> float:
         """
         Fitness multi-objectifs IOF (9 critères pondérés).
@@ -2964,20 +3072,44 @@ class GeneticAlgorithm:
         if len(controls) < 2:
             return 0.0
 
-        # ── OOB : pénalité éliminatoire ────────────────────────────────────
+        # ── OOB : pénalité éliminatoire (postes intérieurs seulement) ────────
+        # Start/finish exclus : placés par l'utilisateur, corrigés par le contrôleur.
+        # Cohérent avec le check HeatmapCache ci-dessous (controls[1:-1]).
         _forbidden = getattr(self, "_current_forbidden_zones", [])
         if _forbidden:
-            for _ctrl in controls:
+            for _ctrl in controls[1:-1]:
                 if self._is_in_forbidden_zone(_ctrl[0], _ctrl[1], _forbidden):
+                    self._dp_counts["oob_vector"] += 1
+                    if not self._death_penalty_logged:
+                        print(f"[death-penalty] reason=oob_vector ctrl=({_ctrl[1]:.5f},{_ctrl[0]:.5f})", flush=True)
+                        self._death_penalty_logged = True
                     return -10000.0
-        # ── HeatmapCache : éliminer les postes en zones non-attractives ───
-        # Score ≤ 0.01 = forêt lente (vert olive), eau, zone privée → interdit
-        # O(1) par poste via lookup grille (remplace vérification polygonale lente)
+        # ── HeatmapCache : death penalty uniquement pour terrain infranchissable absolu ──
+        # Score ≤ 0.01 = hors carte totalement (eau profonde, bord image) → death penalty.
+        # is_forbidden() (olive+bâtiments raster) : pénalité douce −20/poste ci-dessous.
+        # Sur OSM (is_flat_signal=True) : _ocad_mode=False → section raster ignorée.
+        _ocad_mode = False
         if config.heatmap_cache is not None:
-            for _ctrl in controls[1:-1]:  # hors départ et arrivée
-                if (config.heatmap_cache.query(_ctrl[0], _ctrl[1]) <= 0.01
-                        or config.heatmap_cache.is_forbidden(_ctrl[0], _ctrl[1])):
+            _hc_dp = config.heatmap_cache
+            _ocad_mode = not getattr(_hc_dp, "is_flat_signal", False)
+            for _ctrl in controls[1:-1]:
+                if _hc_dp.query(_ctrl[0], _ctrl[1]) <= 0.01:
+                    self._dp_counts["cnn_low"] += 1
+                    if not self._death_penalty_logged:
+                        print(f"[death-penalty] reason=cnn_low score={_hc_dp.query(_ctrl[0], _ctrl[1]):.4f} ctrl=({_ctrl[1]:.5f},{_ctrl[0]:.5f})", flush=True)
+                        self._death_penalty_logged = True
                     return -10000.0
+        # raster_forbidden : pénalité douce (pas death penalty — mask insuffisamment fiable)
+        _raster_count = 0
+        if _ocad_mode and config.heatmap_cache is not None:
+            for _ctrl in controls[1:-1]:
+                if config.heatmap_cache.is_forbidden(_ctrl[0], _ctrl[1]):
+                    _raster_count += 1
+                    self._dp_counts["raster_forbidden"] += 1
+                    _key = (round(_ctrl[0], 5), round(_ctrl[1], 5))
+                    if _key not in self._raster_logged_coords and len(self._raster_logged_coords) < 10:
+                        self._raster_logged_coords.add(_key)
+                        print(f"[mask-debug] ctrl=({_ctrl[1]:.5f},{_ctrl[0]:.5f})", flush=True)
         # ──────────────────────────────────────────────────────────────────
 
         self._pair_cache = None  # partagé entre equity et cluster dans cet appel
@@ -3099,15 +3231,20 @@ class GeneticAlgorithm:
         # --- 9. Alternance court/long ---
         alternation_score = self._leg_alternation_score(controls, leg_m=_leg_m)
 
-        # --- M. Couverture carte : bbox controls / bbox map ---
+        # --- M. Couverture carte : std dev géographique des postes intérieurs ---
+        # Normalisation en mètres absolus — bbox OCAD (4+ km) trop grande par rapport
+        # aux circuits sprint (~800m std max), ce qui écrasait le signal (coverage≈18-40).
+        # Cible : 10% de target_length_m (ex: sprint 2800m → 280m std = 100 pts).
         _bb = config.bounding_box
         if _bb and len(controls) >= 3:
-            _lngs = [c[0] for c in controls]
-            _lats = [c[1] for c in controls]
-            _map_w = max(_bb.get("max_x", 0) - _bb.get("min_x", 0), 1e-8)
-            _map_h = max(_bb.get("max_y", 0) - _bb.get("min_y", 0), 1e-8)
-            _coverage = (max(_lngs) - min(_lngs)) / _map_w * (max(_lats) - min(_lats)) / _map_h
-            coverage_score = min(100.0, _coverage / 0.30 * 100.0)
+            _inner = controls[1:-1]
+            _mean_lat = sum(c[1] for c in _inner) / len(_inner)
+            _cos_lat = math.cos(math.radians(_mean_lat))
+            _std_x_m = float(np.std([c[0] for c in _inner])) * 111111 * _cos_lat
+            _std_y_m = float(np.std([c[1] for c in _inner])) * 111111
+            _std_m = (_std_x_m + _std_y_m) / 2
+            _target_std_m = max(config.target_length_m * 0.10, 50.0)
+            coverage_score = min(100.0, _std_m / _target_std_m * 100.0)
         else:
             coverage_score = 50.0
 
@@ -3123,6 +3260,25 @@ class GeneticAlgorithm:
             variety_score = min(100.0, float(_mid_cnn.std()) / 0.15 * 100.0)
         else:
             variety_score = 50.0
+
+        # Pénalité croisements géométriques de jambes (applicable sprint et forêt)
+        _n_crossings = self._count_leg_crossings(controls)
+
+        if return_components:
+            return {  # type: ignore[return-value]
+                "terrain": terrain_score,
+                "length": length_score,
+                "coverage": coverage_score,
+                "td": td_score,
+                "angle": angle_score,
+                "equity": equity_score,
+                "alternation": alternation_score,
+                "variety": variety_score,
+                "monotony": monotony_score,
+                "safety": safety_score,
+                "raster_count": _raster_count,
+                "crossings": _n_crossings,
+            }
 
         # --- Sprint : pénaliser les jambes > max_leg_m (seuil dynamique) ---
         if config.sprint_mode and len(leg_lengths) > 0:
@@ -3177,8 +3333,8 @@ class GeneticAlgorithm:
                     + coverage_score    * _w.w_coverage
                     + variety_score     * _w.w_variety) * base_weight_adj
                     + cluster_bonus * cluster_weight
-                )
-            return (
+                ) - _raster_count * 20.0 - _n_crossings * 2.0
+            _raw = (
                 (length_score       * 0.20
                 + sprint_leg_score  * 0.13
                 + td_score          * 0.10
@@ -3187,11 +3343,12 @@ class GeneticAlgorithm:
                 + safety_score      * 0.05
                 + terrain_score     * 0.09
                 + monotony_score    * 0.07
-                + alternation_score * 0.06
-                + coverage_score    * 0.05
-                + variety_score     * 0.03) * base_weight_adj
+                + alternation_score * 0.02
+                + coverage_score    * 0.20
+                + variety_score     * 0.01) * base_weight_adj
                 + cluster_bonus * cluster_weight
             )
+            return _raw - _raster_count * 20.0 - _n_crossings * 2.0
 
         _w = self._ga_weights
         if _w is not None:
@@ -3207,7 +3364,7 @@ class GeneticAlgorithm:
                 + alternation_score * _w.w_alternation
                 + coverage_score   * _w.w_coverage
                 + variety_score    * _w.w_variety
-            )
+            ) - _raster_count * 20.0 - _n_crossings * 2.0
         return (
             length_score       * 0.17
             + climb_score      * 0.09
@@ -3217,10 +3374,10 @@ class GeneticAlgorithm:
             + safety_score     * 0.07
             + terrain_score    * 0.09
             + monotony_score   * 0.07
-            + alternation_score * 0.07
-            + coverage_score   * 0.05
-            + variety_score    * 0.04
-        )
+            + alternation_score * 0.05
+            + coverage_score   * 0.09
+            + variety_score    * 0.02
+        ) - _raster_count * 20.0 - _n_crossings * 2.0
 
     def _calculate_total_length(self, controls: List[Tuple[float, float]]) -> float:
         """Calcule la longueur totale en mètres (haversine WGS84)."""

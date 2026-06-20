@@ -5,6 +5,48 @@
 
 ---
 
+## État du développement — Juin 2026
+
+### Bugs connus
+
+| Priorité | Symptôme | Cause identifiée | Statut |
+|----------|----------|-----------------|--------|
+| **Haute** | Circuits sprint 2× trop longs (5–6 km pour cible 2 800 m) | GA converge vers ~5 800 m — discipline distance défaillante, terrain GA restreint | Fix C8 en cours — résultat post-fix à valider après le prochain run |
+| **Haute** | Raster forbidden mask sur-agressif | `_building_px` détecte les zones pavées comme bâtiments → 91 % des circuits mouraient en death penalty → espace GA quasi-nul sur cartes sprint | Fix 2026-06-14 : passage à pénalité douce −20 pts/poste, mutations libres sur tout le terrain |
+| **Moyenne** | Départ utilisateur "déplacé" dans les suggestions | La 2e suggestion affiche un départ différent du départ posé par l'utilisateur | Cause non identifiée (frontend/backend) — investigation en attente |
+| **Basse** | Durée génération sprint ~360 s | GA 100 gen × 30 chromosomes, `_calculate_total_length` 2×O(N) par mutation | Non adressé |
+
+### Diagnostic disponible dans la console backend
+
+```
+[heatmap-debug] forbidden=X%          → % de la carte marquée interdite
+[mask-debug] ctrl=(lat,lng)           → 10 premières positions pénalisées par le mask raster
+[death-summary] total=N oob_vector=X cnn_low=Y raster_forbidden=Z  → causes de mort GA
+[diversity-distance] dist=[a..b]m mean=Xm target=Ym                → longueur des circuits sortants
+```
+
+`backend/debug/forbidden_mask_debug.png` — carte OCAD avec zones interdites en rouge (généré automatiquement à chaque build HeatmapCache). Doit couvrir uniquement les bâtiments (gris OCAD) et les zones olive hors-limites.
+
+### Fixes récents (sessions 2026-06-13/14)
+
+| Fix | Fichier(s) | Description |
+|-----|-----------|-------------|
+| A5 CRS forbidden zones | `tile-service/server.js` | Polygones Lambert-93 → WGS84 via `transformGeoJsonCrs` |
+| A6 Fallback postes clippés | `main.py` | Restaure `best_latlng` si < `max(3, n//2)` postes intérieurs survivent |
+| C1 Crossing penalty | `genetic_algo.py` | `W_CROSSING=50` — pénalité croisement de jambes actif |
+| C8a Target sprint | `frontend/src/App.jsx` | Cible sprint 2 200 m → **2 800 m** (FFCO H21E correct) |
+| C8b Overshoot mutation | `genetic_algo.py` | Rejet si `new_len > 1.5×target AND new_len > curr_len` |
+| C8 Smart seeding local | `genetic_algo.py` | Candidats CNN limités à ±2×target_leg_m (≈350 m) du poste courant |
+| C8 Raster mask → douce | `genetic_algo.py` | `is_forbidden()` : pénalité −20 pts/poste (plus death penalty) |
+| OOB start/finish fix | `genetic_algo.py` | Death penalty OOB vectoriel sur `controls[1:-1]` (départ/arrivée exclus) |
+| PNG debug mask | `ocad_patch_scorer.py` | `forbidden_mask_debug.png` généré à chaque sprint dans `backend/debug/` |
+
+### Règle de stabilité des poids GA
+
+> Ne pas modifier `W_AI`, `W_DIST`, `W_SHAPE`, `H4`, `W_SCENARIO`, seuil CNN death penalty (0.01), ni les polygones OOB vectoriels sans mesures préalables (`[fitness-debug]` + `[death-summary]`). Le raster forbidden mask est désormais une pénalité douce — calibration en cours.
+
+---
+
 ## Fonctionnalités
 
 - **Génération automatique** de circuits sprint (urbain) et forêt via algorithme génétique multi-objectifs
@@ -36,19 +78,32 @@
 
 ---
 
-## Roadmap — Conscience globale de la carte
+## Roadmap
 
-**Constat (Sprint 4.3, juin 2026)** : AItraceur est localement intelligent, globalement aveugle. Le GA place les postes un à un et mesure le résultat global *après*. Un traceur humain lit la carte, identifie les zones riches, conçoit un scénario, puis place les postes. Ce gap est adressé par couches :
+### Priorité immédiate — C8 Discipline distance (en cours)
+
+Le GA sprint produit des circuits à 5–6 km pour une cible de 2 800 m. Trois correctifs appliqués en session 2026-06-14 (voir tableau fixes ci-dessus) — validation du prochain run en attente.
+
+**Hypothèse post-fix :** avec le raster mask en pénalité douce, le GA peut désormais explorer les zones pavées (trottoirs, intersections) qui étaient faussement classées "bâtiment". Le smart seeding local (±350 m) devrait contraindre l'initialisation près de la longueur cible.
+
+**Indicateurs de succès :** `[diversity-distance] dist=[2400..3500]m mean≈2800m err_mean<400m`
+
+### Conscience globale de la carte (backlog)
+
+**Constat** : AItraceur est localement intelligent, globalement aveugle. Le GA place les postes un à un et mesure le résultat global *après*. Un traceur humain lit la carte, identifie les zones riches, conçoit un scénario, puis place les postes. Ce gap est adressé par couches :
 
 | Couche | Statut | Contenu |
 |--------|--------|---------|
-| **0 — Segmentation de carte** | En cours | k-means (k=3) sur `scores_grid` HeatmapCache → zones riches/modérées/pauvres ; nouveaux champs `zone_coverage`, `zone_diversity` dans `CourseProfile` ; fallback KDTree ISOM si CNN plat |
-| **1 — Descripteurs mixtes** | Backlog | Labels absolus calibrés Atlas (p75 Vikazimut) + labels carte-relatifs (zone_coverage > 0.6 → "Exploite la carte") — titre automatique "Exploratoire, multi-zone" etc. |
+| **0 — Segmentation de carte** | Implémenté (validation en attente) | k-means (k=3) sur `scores_grid` HeatmapCache → zones riches/modérées/pauvres ; `zone_coverage`, `zone_diversity` dans `CourseProfile` |
+| **1 — Descripteurs mixtes** | Backlog | Labels absolus calibrés Atlas (p75 Vikazimut) + labels carte-relatifs — titre automatique "Exploratoire, multi-zone" etc. |
 | **2 — Scénario pré-génération** | Backlog long terme | Avant GA : choisir un scénario narratif adapté aux zones détectées → soft constraint GA |
 
-**H4 adaptatif** (après validation Couche 0) : remplacer le critère "couvrir la bbox" par "couvrir les zones riches" — H4 actuel pénalise la concentration sans tenir compte de la richesse des zones.
+### Autres backlog
 
-**Autres backlog** : boucles papillon LD (terme fitness figure-8 + contrôleur), déploiement prod.
+- **C6 Seeding géographique diversifié** : zones spatiales par run (implémenté, non validé — bloqué par C8)
+- **Boucles papillon LD** : terme fitness figure-8 + check contrôleur (prérequis Segment Crossover ✅)
+- **Déploiement prod**
+- **Départ déplacé dans les suggestions** : investigation frontend/backend en attente
 
 ---
 

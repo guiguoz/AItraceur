@@ -142,12 +142,13 @@ def apply_corrections(
             i_from = issue.leg_from
             i_to = issue.leg_to
             if 0 <= i_from < len(new_controls) and 0 <= i_to < len(new_controls):
+                from .controleur import _point_in_polygon
                 prev, nxt = new_controls[i_from], new_controls[i_to]
                 bearing_seg = _bearing_deg(prev["lat"], prev["lng"], nxt["lat"], nxt["lng"])
                 R = 6_371_000
                 dlat = math.degrees(45.0 / R)
                 dlng = math.degrees(45.0 / (R * math.cos(math.radians(ctrl["lat"]))))
-                # Essayer les deux côtés perpendiculaires, privilégier celui dans la bbox
+                # Essayer les deux côtés perpendiculaires, éviter bbox et zones interdites
                 chosen = None
                 for side in [90, -90]:
                     perp = (bearing_seg + side) % 360
@@ -155,14 +156,35 @@ def apply_corrections(
                         "lat": ctrl["lat"] + dlat * math.cos(math.radians(perp)),
                         "lng": ctrl["lng"] + dlng * math.sin(math.radians(perp)),
                     }
-                    if _in_bbox(new_pos["lat"], new_pos["lng"], bounding_box):
-                        chosen = new_pos
-                        break
+                    if not _in_bbox(new_pos["lat"], new_pos["lng"], bounding_box):
+                        continue
+                    if oob_polygons and any(
+                        _point_in_polygon(new_pos["lat"], new_pos["lng"], poly)
+                        for poly in oob_polygons
+                    ):
+                        continue
+                    chosen = new_pos
+                    break
                 if chosen:
                     new_controls[idx]["lat"] = chosen["lat"]
                     new_controls[idx]["lng"] = chosen["lng"]
                     corrected_indices.add(idx)
                     messages.append(f"Correction C01 P{idx + 1} → déplacement perpendiculaire 45m")
+                elif candidates:
+                    # Fallback : candidat OSM hors zone, priorité ceux qui cassent l'alignement
+                    other_positions = [c for i, c in enumerate(new_controls) if i != idx]
+                    new_pos = _move_toward_candidate(
+                        ctrl, candidates,
+                        min_dist_m=35.0,
+                        forbidden_positions=other_positions,
+                        oob_polygons=oob_polygons,
+                        bounding_box=bounding_box,
+                    )
+                    if new_pos:
+                        new_controls[idx]["lat"] = new_pos["lat"]
+                        new_controls[idx]["lng"] = new_pos["lng"]
+                        corrected_indices.add(idx)
+                        messages.append(f"Correction C01 P{idx + 1} → candidat OSM (fallback perp. bloqué)")
 
         elif issue.code == "C02":
             # Trop proches : trouver un candidat OSM à bonne distance

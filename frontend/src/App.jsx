@@ -14,7 +14,7 @@ import { OcadAnalysisPanel } from './components/OcadAnalysisPanel'
 
 // IOF/FFCO reference params — fallback hardcodé (remplacé par API au démarrage)
 const _FALLBACK_BASE = {
-  sprint: { target_length_m: 2200, winning_time_minutes: 12, technical_level: 'TD3', target_controls: 12 },
+  sprint: { target_length_m: 2800, winning_time_minutes: 12, technical_level: 'TD3', target_controls: 12 },
   md:     { target_length_m: 8000, winning_time_minutes: 30, technical_level: 'TD4', target_controls: 18 },
   ld:     { target_length_m: 14000, winning_time_minutes: 60, technical_level: 'TD4', target_controls: 25 },
 }
@@ -449,10 +449,41 @@ function extractCandidatePoints(geojson, max = 600, sprintMode = false) {
 
 const LINE_SEG_CODES = new Set([101, 102, 103, 201, 215, 305, 306, 501, 502, 503, 504, 505, 506, 507, 508, 516])
 
+// Lignes nord magnétique ISOM/ISSOM — même couleur bleue que les ruisseaux (301-303)
+// mais strictement droites et régulièrement espacées. Exclues de tout traitement feature.
+const NORTH_LINE_SYMS = new Set([601, 602, 603, 604, 605])
+
+// Retourne vrai si tous les points sont colinéaires (ligne parfaitement droite = nord magnétique)
+function isStrictlyLinear(coords) {
+  if (coords.length < 3) return false
+  const [p0, p1] = [coords[0], coords[1]]
+  const dx = p1[0] - p0[0], dy = p1[1] - p0[1]
+  const len2 = dx * dx + dy * dy
+  if (len2 === 0) return false
+  for (let i = 2; i < coords.length; i++) {
+    const t = ((coords[i][0] - p0[0]) * dx + (coords[i][1] - p0[1]) * dy) / len2
+    const d2 = (coords[i][0] - (p0[0] + t * dx)) ** 2 + (coords[i][1] - (p0[1] + t * dy)) ** 2
+    if (d2 > 1e-12) return false
+  }
+  return true
+}
+
+function isNorthLine(feature) {
+  const raw = feature.properties?.sym ?? 0
+  const code = raw > 10000 ? Math.floor(raw / 1000) : Math.floor(raw)
+  if (NORTH_LINE_SYMS.has(code)) return true
+  // Fallback géométrique : sym absent mais ligne parfaitement droite sur ≥3 points
+  if (!raw && feature.geometry?.type === 'LineString') {
+    return isStrictlyLinear(feature.geometry.coordinates)
+  }
+  return false
+}
+
 function filterOcadLineFeatures(geojson) {
   const features = []
   for (const f of geojson?.features ?? []) {
     if (f.geometry?.type !== 'LineString') continue
+    if (isNorthLine(f)) continue
     const sym = f.properties?.sym
     if (!sym) continue
     const isom = sym > 10000 ? Math.floor(sym / 1000) : Math.floor(sym)
@@ -1812,8 +1843,6 @@ function App() {
           onAddForbiddenZone={handleAddForbiddenZone}
           onUpdateSuggestion={handleUpdateSuggestion}
           onMapReady={(map) => { mapRef.current = map }}
-          routeDisplay={routeDisplay}
-          legRoutesMap={legRoutesMap}
           navigationQuality={navigationQuality}
           navContext={navContext}
           ocadMode={mapMode === 'ocad' && !!imageData}

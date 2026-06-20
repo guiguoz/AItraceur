@@ -183,21 +183,9 @@ const ControlsList = ({ controls, onDelete, totalDistance, controlCount, onShowR
                   </svg>
                 </button>
               </div>
-              {/* Séparateur de jambe avec bouton Route Analyzer */}
-              {index < ordered.length - 1 && onShowRoutes && (
+              {/* Séparateur de jambe */}
+              {index < ordered.length - 1 && (
                 <div className="flex items-center gap-1 py-0.5 px-2">
-                  <div className="flex-1 h-px bg-gray-700/60" />
-                  <button
-                    onClick={() => onShowRoutes(index, control, ordered[index + 1])}
-                    title="Voir les itinéraires possibles"
-                    className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
-                      activeRouteLegIdx === index
-                        ? 'bg-blue-600 text-white'
-                        : 'text-gray-600 hover:text-blue-400 hover:bg-gray-700'
-                    }`}
-                  >
-                    🔍
-                  </button>
                   <div className="flex-1 h-px bg-gray-700/60" />
                 </div>
               )}

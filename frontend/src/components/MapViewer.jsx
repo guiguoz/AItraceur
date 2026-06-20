@@ -143,8 +143,6 @@ export function MapViewer({
   onAddForbiddenZone,
   onUpdateSuggestion,
   onMapReady = null,
-  routeDisplay = null,
-  legRoutesMap = {},  // {legIdx: {routes, choiceScore}} — choix auto post-sprint
   navigationQuality = [],  // [{from_idx, to_idx, nav_score, ...}] — coloration par jambe
   navContext = null,  // {attack_point, catching_feature, handrail_samples, optimal_route, decision_points}
   ocadMode = false,  // true → masque OSM, affiche uniquement PNG OCAD
@@ -359,57 +357,6 @@ export function MapViewer({
           </Marker>
         ))}
 
-        {/* Route Analyzer — k best routes as colored polylines */}
-        {routeDisplay?.routes?.map((route, i) => {
-          const style = ROUTE_STYLES[i] || ROUTE_STYLES[ROUTE_STYLES.length - 1];
-          const positions = route.waypoints.map(([lng, lat]) => [lat, lng]);
-          return (
-            <Polyline
-              key={`route-${i}`}
-              positions={positions}
-              pathOptions={{
-                color: style.color,
-                weight: style.weight,
-                opacity: style.opacity,
-                ...(style.dashArray ? { dashArray: style.dashArray } : {}),
-              }}
-            >
-              <Popup>
-                <div className="text-xs">
-                  <strong>Itinéraire #{route.rank}</strong><br />
-                  {Math.round(route.distance_m)} m
-                </div>
-              </Popup>
-            </Polyline>
-          );
-        })}
-
-        {/* Choix d'itinéraires automatiques post-sprint (polylines pointillées par jambe) */}
-        {Object.entries(legRoutesMap).map(([legIdxStr, legDisplay]) =>
-          legDisplay.routes?.map((route, i) => {
-            const style = ROUTE_STYLES[i] || ROUTE_STYLES[ROUTE_STYLES.length - 1];
-            const positions = route.waypoints.map(([lng, lat]) => [lat, lng]);
-            return (
-              <Polyline
-                key={`choice-leg${legIdxStr}-r${i}`}
-                positions={positions}
-                pathOptions={{
-                  color: style.color,
-                  weight: style.weight,
-                  opacity: style.opacity * 0.8,
-                  ...(style.dashArray ? { dashArray: style.dashArray } : {}),
-                }}
-              >
-                <Popup>
-                  <div className="text-xs">
-                    <strong>Jambe {+legIdxStr + 1} — Route #{route.rank}</strong><br />
-                    {Math.round(route.distance_m)} m
-                  </div>
-                </Popup>
-              </Polyline>
-            );
-          })
-        )}
 
         {/* ── Nav Context overlays (Phase 5) ──────────────────────────────── */}
 

@@ -35,6 +35,31 @@ DIVERSITY_FITNESS_RATIO = 0.95       # filtre qualité : fitness >= ratio × bes
 DIVERSITY_DUPLICATE_THRESHOLD = 0.0002  # seuil dédoublonnage cosinus (intra-run ≈0.0001, inter-run ≈0.001+)
 
 
+def _spatial_cluster_candidates(
+    candidates: list[tuple[float, float]],
+    n_clusters: int,
+) -> list[list[tuple[float, float]]]:
+    """Partition spatiale selon l'axe de plus grande variance (lng ou lat).
+
+    Chaque run GA reçoit une zone géographique distincte pour le seeding,
+    forçant la diversité spatiale sans toucher à la fitness.
+    Fallback : si pas assez de candidats, tous les runs reçoivent la liste complète.
+    """
+    if len(candidates) < n_clusters * 3:
+        return [candidates] * n_clusters
+    lngs = [c[0] for c in candidates]
+    lats = [c[1] for c in candidates]
+    lng_range = max(lngs) - min(lngs)
+    lat_range = max(lats) - min(lats)
+    axis = 0 if lng_range >= lat_range else 1  # 0=lng, 1=lat
+    sorted_c = sorted(candidates, key=lambda c: c[axis])
+    size = max(1, len(sorted_c) // n_clusters)
+    return [
+        sorted_c[i * size:(i + 1) * size if i < n_clusters - 1 else len(sorted_c)]
+        for i in range(n_clusters)
+    ]
+
+
 # =============================================
 # Types de données
 # =============================================
@@ -272,11 +297,30 @@ class AIGenerator:
         )
         end = request.end_position or start
 
+        # ── A8 : mesure espace libre exploitable (diagnostic convergence) ────────
+        if base_config.heatmap_cache is not None:
+            _all_free = base_config.heatmap_cache.get_top_candidates(top_percent=1.0)
+            _h_grid, _w_grid = base_config.heatmap_cache.scores.shape
+            _grid_total = _h_grid * _w_grid
+            print(
+                f"[candidate-space] free={len(_all_free)} grid_total={_grid_total} "
+                f"free_ratio={len(_all_free) / max(1, _grid_total):.3f}",
+                flush=True,
+            )
+
+        # ── C6 : seeding géographique diversifié par run ──────────────────────
+        _tcs = base_config.heatmap_cache.get_top_candidates(top_percent=0.40) if base_config.heatmap_cache else []
+        _zones = _spatial_cluster_candidates(_tcs, request.n_runs)
+        print(
+            f"[diversity-seed] zones={request.n_runs} total={len(_tcs)} sizes={[len(z) for z in _zones]}",
+            flush=True,
+        )
+
         # ── N runs GA → pool inter-runs ──────────────────────────────────────
         all_circuits: list = []
         for run_idx in range(request.n_runs):
             run_seed = (request.ga_seed + run_idx) if request.ga_seed is not None else None
-            run_config = _dc_replace(base_config, ga_seed=run_seed)
+            run_config = _dc_replace(base_config, ga_seed=run_seed, zone_seed_candidates=_zones[run_idx])
             ga = GeneticAlgorithm(config=run_config)
             ga.set_graph(graph)
             result = ga.generate(start, end, request.forbidden_zones)
@@ -292,6 +336,25 @@ class AIGenerator:
                 filtered = all_circuits
         else:
             filtered = []
+
+        # ── A9 : diagnostic distances circuits filtrés (test hypothèse terme B) ─
+        if filtered:
+            _a9_dists = []
+            for _c9 in filtered:
+                _a9_arr = np.array(_c9.controls)
+                _a9_legs = _haversine_batch(
+                    _a9_arr[:-1, 0], _a9_arr[:-1, 1], _a9_arr[1:, 0], _a9_arr[1:, 1]
+                )
+                _a9_dists.append(float(np.sum(_a9_legs)))
+            _a9_target = float(getattr(request, "target_length_m", 0) or 0)
+            _a9_min, _a9_max = min(_a9_dists), max(_a9_dists)
+            _a9_mean = sum(_a9_dists) / len(_a9_dists)
+            print(
+                f"[diversity-distance] n={len(_a9_dists)} "
+                f"dist=[{_a9_min:.0f}..{_a9_max:.0f}]m mean={_a9_mean:.0f}m "
+                f"target={_a9_target:.0f}m err_mean={abs(_a9_mean - _a9_target):.0f}m",
+                flush=True,
+            )
 
         # ── CourseProfile + déduplication légère ─────────────────────────────
         _prof_t0 = _time_mod.time()
@@ -314,14 +377,29 @@ class AIGenerator:
             except Exception:
                 pass
 
+        # Diagnostic diversité brute AVANT deduplication
+        if len(circuits_with_profiles) > 1:
+            _raw_vecs = [course_profile_vector(cp) for _, cp in circuits_with_profiles]
+            _raw_dists = [cosine_distance(_raw_vecs[i], _raw_vecs[j])
+                          for i in range(len(_raw_vecs))
+                          for j in range(i + 1, len(_raw_vecs))]
+            _raw_mean = sum(_raw_dists) / len(_raw_dists)
+        else:
+            _raw_mean = 0.0
+        print(f"[pool-diversity] n={len(circuits_with_profiles)} mean_cosine_raw={_raw_mean:.4f}", flush=True)
+
         # Dédoublonnage : conserver le meilleur fitness si cosinus < seuil
         deduped: list = []
         deduped_vecs: list = []
+        _removed_cos: list = []
         for item in circuits_with_profiles:
             v = course_profile_vector(item[1])
-            if not any(cosine_distance(v, dv) < DIVERSITY_DUPLICATE_THRESHOLD for dv in deduped_vecs):
+            min_dist = min((cosine_distance(v, dv) for dv in deduped_vecs), default=None)
+            if min_dist is None or min_dist >= DIVERSITY_DUPLICATE_THRESHOLD:
                 deduped.append(item)
                 deduped_vecs.append(v)
+            else:
+                _removed_cos.append(min_dist)
 
         # Sélection greedy cosinus
         selected = select_diverse_circuits(deduped, n_select=num_variants)
@@ -359,9 +437,15 @@ class AIGenerator:
             mean_cos = sum(dists) / len(dists)
         else:
             mean_cos = 0.0
+        _dedup_removed = len(circuits_with_profiles) - len(deduped)
+        _cos_removed_info = (
+            f" cos_removed=[{min(_removed_cos):.4f}..{max(_removed_cos):.4f}]"
+            if _removed_cos else ""
+        )
         print(
             f"[diversity] runs={request.n_runs} pool={len(all_circuits)} filtered={len(filtered)} "
-            f"deduped={len(deduped)} selected={len(selected)} mean_cosine={mean_cos:.4f} "
+            f"deduped={len(deduped)} dedup_removed={_dedup_removed}{_cos_removed_info} "
+            f"selected={len(selected)} mean_cosine={mean_cos:.4f} "
             f"profiling={_prof_elapsed:.2f}s",
             flush=True,
         )

@@ -62,6 +62,7 @@ def fetch_ocad_forbidden_zones(map_id: str, timeout: int = 10) -> list:
                 for poly in coords:
                     for ring in poly:
                         polygons.append([[p[0], p[1]] for p in ring])
+        log.info("fetch_ocad_forbidden_zones %s → %d polygones", map_id, len(polygons))
         return polygons
     except Exception as exc:
         log.warning("OCAD forbidden-zones fetch failed: %s", exc)

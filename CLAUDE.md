@@ -190,7 +190,6 @@ Le notebook Kaggle embarque le script inline (`%%writefile train_cnn.py`) pour �
 
 | Priorité | Tâche |
 |----------|-------|
-| Haute | Déploiement prod (CORS, API_BASE, build frontend, rate limiting, clé admin) |
 | ~~Moyenne~~ | ~~Segment Crossover spatial (remplacer OX TSP)~~ — ✅ `_segment_crossover()` implémenté 2026-04-27 |
 | ~~Moyenne~~ | ~~Décalage cercles CO sur carte OCAD~~ — ✅ `applyGrivation: true` dans `server.js` (2026-04-29) |
 | Basse | Mode Compétition (plusieurs circuits partagent des balises) |

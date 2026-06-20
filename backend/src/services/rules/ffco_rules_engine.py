@@ -63,7 +63,7 @@ class GAWeights:
     w_terrain: float    = 0.09
     w_monotony: float   = 0.07
     w_alternation: float = 0.07
-    w_coverage: float   = 0.05   # couverture carte (bbox controls / bbox map)
+    w_coverage: float   = 0.05   # couverture carte (std dev postes / bbox map)
     w_variety: float    = 0.04   # variété terrain CNN par jambe (std midpoints)
     # Sprint uniquement
     w_sprint_leg: float = 0.00   # remplace w_climb en sprint
@@ -202,9 +202,9 @@ class FFCORulesEngine:
                 w_safety=0.05,
                 w_terrain=0.09,
                 w_monotony=0.07,
-                w_alternation=0.06,
-                w_coverage=0.05,
-                w_variety=0.03,
+                w_alternation=0.02,
+                w_coverage=0.20,
+                w_variety=0.01,
                 w_sprint_leg=0.13,
                 w_cluster=0.08,
             )
@@ -218,9 +218,9 @@ class FFCORulesEngine:
             w_safety=0.07,
             w_terrain=0.09,
             w_monotony=0.07,
-            w_alternation=0.07,
-            w_coverage=0.05,
-            w_variety=0.04,
+            w_alternation=0.05,
+            w_coverage=0.09,
+            w_variety=0.02,
         )
 
     # ------------------------------------------------------------------

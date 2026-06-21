@@ -4036,7 +4036,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
     target_controls = int(body.get("target_controls", 15))
     winning_time_minutes = int(body.get("winning_time_minutes", 12))
     technical_level = body.get("technical_level", "TD2")
-    max_iterations = min(int(body.get("max_iterations", 5)), 8)
+    max_iterations = min(int(body.get("max_iterations", 8)), 8)
     candidate_points = body.get("candidate_points", [])
     forbidden_zones = body.get("forbidden_zones_polygons", [])
     start_position = body.get("start_position", None)
@@ -4493,10 +4493,10 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                 _comp = _ga_for_comp.fitness_components(_gc_ctrl)
                 print(
                     f"[ga-components] rank={_rank} total={_gr.score:.1f} "
-                    f"terrain={_comp['terrain']:.0f} length={_comp['length']:.0f} "
-                    f"coverage={_comp['coverage']:.0f} variety={_comp['variety']:.0f} "
+                    f"terrain={_comp['terrain']:.0f} sprint_leg={_comp['sprint_leg']:.0f} "
+                    f"length={_comp['length']:.0f} coverage={_comp['coverage']:.0f} "
                     f"td={_comp['td']:.0f} equity={_comp['equity']:.0f} "
-                    f"alternation={_comp['alternation']:.0f}",
+                    f"alternation={_comp['alternation']:.0f} variety={_comp['variety']:.0f}",
                     flush=True,
                 )
             except Exception as _gce:
@@ -4512,6 +4512,8 @@ def _sprint_impl(task_id: str, body: dict) -> None:
     controleur = ControleurSprint(circuit_type="sprint")
     current_controls = best_latlng
     final_report = None
+    _prev_error_count = None
+    _stagnation_streak = 0
 
     for iteration in range(1, max_iterations + 1):
         _ctrl_n_before = len(current_controls)
@@ -4555,11 +4557,31 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                 "message": f"Score {report.global_score:.0f}/100 — {' | '.join(msg_parts)}"
             })
 
+        # Détecter l'oscillation C01 : si error_count stagne 3 itérations, inutile de continuer
+        if report.error_count > 0:
+            if report.error_count == _prev_error_count:
+                _stagnation_streak += 1
+            else:
+                _stagnation_streak = 0
+            _prev_error_count = report.error_count
+            if _stagnation_streak >= 3:
+                print(
+                    f"[controller-debug] iter={iteration} STAGNANT errors={report.error_count} "
+                    f"streak={_stagnation_streak} — arrêt anticipé",
+                    flush=True,
+                )
+                break
+
         # Arrêter si plus d'erreurs (warnings tolérés)
         if report.error_count == 0:
+            _warn_codes = [i.code for i in report.issues if i.severity == "WARNING"]
+            _warn_dist = {}
+            for _wc in _warn_codes:
+                _warn_dist[_wc] = _warn_dist.get(_wc, 0) + 1
             print(
                 f"[controller-debug] iter={iteration} VALID "
-                f"errors=0 warnings={report.warning_count} infos={report.info_count} score={report.global_score:.1f}",
+                f"errors=0 warnings={report.warning_count} infos={report.info_count} score={report.global_score:.1f} "
+                f"warn_codes={_warn_dist}",
                 flush=True,
             )
             break
@@ -4852,7 +4874,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
     _fc_finish = next((c for c in current_controls if c.get("type") == "finish"), None)
     _fc_dist = sum(
         math.sqrt(
-            ((current_controls[i + 1]["lng"] - current_controls[i]["lng"]) * 72600 * math.cos(math.radians(current_controls[i]["lat"]))) ** 2
+            ((current_controls[i + 1]["lng"] - current_controls[i]["lng"]) * 111320 * math.cos(math.radians(current_controls[i]["lat"]))) ** 2
             + ((current_controls[i + 1]["lat"] - current_controls[i]["lat"]) * 110540) ** 2
         )
         for i in range(len(current_controls) - 1)

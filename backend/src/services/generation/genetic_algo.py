@@ -3126,7 +3126,7 @@ class GeneticAlgorithm:
                 length_score = 100.0
             else:
                 deviation = abs(ratio - 1.0) - 0.15
-                length_score = 100.0 - deviation * 200  # Peut être négatif → gradient préservé
+                length_score = 100.0 - deviation * 400  # Pente double — circuits hors ±15% fortement pénalisés
         else:
             length_score = 75.0
 
@@ -3265,6 +3265,13 @@ class GeneticAlgorithm:
         _n_crossings = self._count_leg_crossings(controls)
 
         if return_components:
+            # sprint_leg_score calculé ici pour les logs (non disponible avant la branche sprint)
+            _sls = 100.0
+            if config.sprint_mode and len(leg_lengths) > 0:
+                _rules_rc = self._placement_rules
+                _max_leg = float(_rules_rc.get("max_leg_m", 200))
+                _long = sum(1 for l in leg_lengths if l > _max_leg)
+                _sls = max(0.0, 100.0 - _long * 25)
             return {  # type: ignore[return-value]
                 "terrain": terrain_score,
                 "length": length_score,
@@ -3276,6 +3283,7 @@ class GeneticAlgorithm:
                 "variety": variety_score,
                 "monotony": monotony_score,
                 "safety": safety_score,
+                "sprint_leg": _sls,
                 "raster_count": _raster_count,
                 "crossings": _n_crossings,
             }
@@ -3336,7 +3344,7 @@ class GeneticAlgorithm:
                 ) - _raster_count * 20.0 - _n_crossings * 2.0
             _raw = (
                 (length_score       * 0.20
-                + sprint_leg_score  * 0.13
+                + sprint_leg_score  * 0.20
                 + td_score          * 0.10
                 + angle_score       * 0.15
                 + equity_score      * 0.07

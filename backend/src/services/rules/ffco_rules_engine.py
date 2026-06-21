@@ -205,7 +205,7 @@ class FFCORulesEngine:
                 w_alternation=0.02,
                 w_coverage=0.20,
                 w_variety=0.01,
-                w_sprint_leg=0.13,
+                w_sprint_leg=0.20,
                 w_cluster=0.08,
             )
         # Forêt, MD, LD, Couleur — pondérations standard

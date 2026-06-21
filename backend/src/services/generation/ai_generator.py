@@ -590,6 +590,10 @@ class AIGenerator:
         if best is None:
             return "Position libre"
 
+        # Description pré-calculée côté frontend (ex: 'Coude (11.1)', 'Extrémité de chemin (7)')
+        if best.get("description"):
+            return best["description"]
+
         isom = best.get("isom")
         # Feature spéciale intersection (marquée dans extractCandidatePoints)
         if best.get("_intersection"):

@@ -1973,8 +1973,8 @@ class GeneticAlgorithm:
             bb = self.config.bounding_box
             x = max(bb["min_x"], min(bb["max_x"], x))
             y = max(bb["min_y"], min(bb["max_y"], y))
-        # 60% snap vers la feature OCAD ISOM la plus attractive dans ≤50m
-        if self._ocad_tree is not None and random.random() < 0.60:
+        # 90% snap vers la feature OCAD ISOM la plus attractive dans ≤50m (cohérent avec seeding)
+        if self._ocad_tree is not None and random.random() < 0.90:
             _cp, _d = self._best_att_ocad(x, y, 50,
                 prefer_isom=self._td1_prefer_isom, prefer_max_dist_m=self._td1_prefer_max_dist_m)
             if _cp:

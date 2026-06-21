@@ -407,12 +407,12 @@ function extractCandidatePoints(geojson, max = 600, sprintMode = false) {
       for (let i = 1; i < coords.length - 1; i++) {
         const angle = computeAngleDeg(coords[i-1], coords[i], coords[i+1])
         if (angle < 150) {
-          pts.push({ x: coords[i][0], y: coords[i][1], isom, attractiveness: att })
+          pts.push({ x: coords[i][0], y: coords[i][1], isom, attractiveness: att, description: 'Coude (11.1)' })
         }
       }
       // Endpoints (potential T-junctions, dead-ends)
-      pts.push({ x: coords[0][0], y: coords[0][1], isom, attractiveness: att })
-      pts.push({ x: coords[coords.length-1][0], y: coords[coords.length-1][1], isom, attractiveness: att })
+      pts.push({ x: coords[0][0], y: coords[0][1], isom, attractiveness: att, description: 'Extrémité de chemin (7)' })
+      pts.push({ x: coords[coords.length-1][0], y: coords[coords.length-1][1], isom, attractiveness: att, description: 'Extrémité de chemin (7)' })
 
     } else {
       // Skip contour lines (101-105) only — their centroid is meaningless.

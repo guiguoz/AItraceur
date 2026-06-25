@@ -3126,7 +3126,7 @@ class GeneticAlgorithm:
                 length_score = 100.0
             else:
                 deviation = abs(ratio - 1.0) - 0.15
-                length_score = 100.0 - deviation * 400  # Pente double — circuits hors ±15% fortement pénalisés
+                length_score = 100.0 - deviation * 300  # Pente 300 (test diversité : 400 → trop restrictif)
         else:
             length_score = 75.0
 

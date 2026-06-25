@@ -4487,10 +4487,12 @@ def _sprint_impl(task_id: str, body: dict) -> None:
 
     _ga_for_comp = getattr(generator, "_last_ga", None)
     if _ga_for_comp is not None and gen_result:
+        _pop_comps: list = []
         for _rank, _gr in enumerate(gen_result[:min(5, len(gen_result))]):
             try:
                 _gc_ctrl = [(c["x"], c["y"]) for c in _gr.controls]
                 _comp = _ga_for_comp.fitness_components(_gc_ctrl)
+                _pop_comps.append(_comp)
                 print(
                     f"[ga-components] rank={_rank} total={_gr.score:.1f} "
                     f"terrain={_comp['terrain']:.0f} sprint_leg={_comp['sprint_leg']:.0f} "
@@ -4502,6 +4504,14 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                 )
             except Exception as _gce:
                 print(f"[ga-components] ERR rank={_rank}: {_gce}", flush=True)
+        # [ga-pop] : range de chaque composante sur le top-N — révèle quels termes discriminent réellement
+        if len(_pop_comps) >= 2:
+            _keys = ["terrain", "sprint_leg", "length", "coverage", "cluster", "equity", "alternation"]
+            _range_parts = []
+            for _k in _keys:
+                _vals = [c.get(_k, 0) for c in _pop_comps]
+                _range_parts.append(f"{_k}=[{min(_vals):.0f}..{max(_vals):.0f}]")
+            print(f"[ga-pop] n={len(_pop_comps)} " + " ".join(_range_parts), flush=True)
 
     dialogue.append({
         "role": "traceur",

@@ -3272,6 +3272,25 @@ class GeneticAlgorithm:
                 _max_leg = float(_rules_rc.get("max_leg_m", 200))
                 _long = sum(1 for l in leg_lengths if l > _max_leg)
                 _sls = max(0.0, 100.0 - _long * 25)
+            # cluster_bonus preview (pré-calcul pour le log)
+            _cb = 0.0
+            if config.sprint_mode:
+                _cr = float(self._placement_rules.get("disorientation_cluster_radius_m", 0))
+                _cs = int(self._placement_rules.get("disorientation_cluster_size", 0))
+                _cc = int(self._placement_rules.get("disorientation_cluster_count", 0))
+                if _cr > 0 and _cs >= 3 and _cc > 0:
+                    _arr2 = np.asarray(controls, dtype=np.float64)
+                    _pm = _haversine_batch(_arr2[:, 0:1], _arr2[:, 1:2], _arr2[:, 0], _arr2[:, 1])
+                    _fc = 0
+                    _seen: set = set()
+                    for _ii in range(len(controls)):
+                        if _ii in _seen:
+                            continue
+                        _nb = [_ii] + [_jj for _jj in range(len(controls)) if _jj != _ii and _jj not in _seen and _pm[_ii, _jj] <= _cr]
+                        if len(_nb) >= _cs:
+                            _fc += 1
+                            _seen.update(_nb[:_cs])
+                    _cb = min(100.0, (_fc / _cc) * 100.0)
             return {  # type: ignore[return-value]
                 "terrain": terrain_score,
                 "length": length_score,
@@ -3284,6 +3303,7 @@ class GeneticAlgorithm:
                 "monotony": monotony_score,
                 "safety": safety_score,
                 "sprint_leg": _sls,
+                "cluster": _cb,
                 "raster_count": _raster_count,
                 "crossings": _n_crossings,
             }
@@ -3324,7 +3344,8 @@ class GeneticAlgorithm:
                     cluster_bonus = min(100.0, (found_clusters / cluster_target_count) * 100.0)
 
             # Pondération sprint : dénivelé remplacé par jambe_sprint + terrain_quality + cluster
-            cluster_weight = 0.08 if cluster_radius > 0 else 0.0
+            # cluster_weight=0.15 > coverage antiforce (0.20) : cluster vaut plus que 75% de couverture
+            cluster_weight = 0.15 if cluster_radius > 0 else 0.0
             base_weight_adj = 1.0 - cluster_weight
             _w = self._ga_weights
             if _w is not None:

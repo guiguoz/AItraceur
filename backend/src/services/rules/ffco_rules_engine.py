@@ -206,7 +206,7 @@ class FFCORulesEngine:
                 w_coverage=0.20,
                 w_variety=0.01,
                 w_sprint_leg=0.20,
-                w_cluster=0.08,
+                w_cluster=0.15,
             )
         # Forêt, MD, LD, Couleur — pondérations standard
         return GAWeights(

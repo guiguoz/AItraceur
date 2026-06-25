@@ -4495,6 +4495,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                     f"[ga-components] rank={_rank} total={_gr.score:.1f} "
                     f"terrain={_comp['terrain']:.0f} sprint_leg={_comp['sprint_leg']:.0f} "
                     f"length={_comp['length']:.0f} coverage={_comp['coverage']:.0f} "
+                    f"cluster={_comp.get('cluster', 0):.0f} "
                     f"td={_comp['td']:.0f} equity={_comp['equity']:.0f} "
                     f"alternation={_comp['alternation']:.0f} variety={_comp['variety']:.0f}",
                     flush=True,

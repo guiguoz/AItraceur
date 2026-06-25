@@ -3279,17 +3279,19 @@ class GeneticAlgorithm:
                 _cs = int(self._placement_rules.get("disorientation_cluster_size", 0))
                 _cc = int(self._placement_rules.get("disorientation_cluster_count", 0))
                 if _cr > 0 and _cs >= 3 and _cc > 0:
-                    _arr2 = np.asarray(controls, dtype=np.float64)
-                    _pm = _haversine_batch(_arr2[:, 0:1], _arr2[:, 1:2], _arr2[:, 0], _arr2[:, 1])
+                    _inner2 = controls[1:-1] if len(controls) > 2 else controls
                     _fc = 0
                     _seen: set = set()
-                    for _ii in range(len(controls)):
-                        if _ii in _seen:
-                            continue
-                        _nb = [_ii] + [_jj for _jj in range(len(controls)) if _jj != _ii and _jj not in _seen and _pm[_ii, _jj] <= _cr]
-                        if len(_nb) >= _cs:
-                            _fc += 1
-                            _seen.update(_nb[:_cs])
+                    if len(_inner2) >= _cs:
+                        _arr2 = np.asarray(_inner2, dtype=np.float64)
+                        _pm = _haversine_batch(_arr2[:, 0:1], _arr2[:, 1:2], _arr2[:, 0], _arr2[:, 1])
+                        for _ii in range(len(_inner2)):
+                            if _ii in _seen:
+                                continue
+                            _nb = [_ii] + [_jj for _jj in range(len(_inner2)) if _jj != _ii and _jj not in _seen and _pm[_ii, _jj] <= _cr]
+                            if len(_nb) >= _cs:
+                                _fc += 1
+                                _seen.update(_nb[:_cs])
                     _cb = min(100.0, (_fc / _cc) * 100.0)
             return {  # type: ignore[return-value]
                 "terrain": terrain_score,
@@ -3320,26 +3322,29 @@ class GeneticAlgorithm:
             cluster_target_size = int(_rules.get("disorientation_cluster_size", 0))
             cluster_target_count = int(_rules.get("disorientation_cluster_count", 0))
             if cluster_radius > 0 and cluster_target_size >= 3:
-                n = len(controls)
+                # Utiliser uniquement les contrôles intermédiaires (pas start[0] ni finish[-1])
+                # — cohérent avec _check_c16_disorientation_clusters() du contrôleur
+                _inner = controls[1:-1] if len(controls) > 2 else controls
+                _n_inner = len(_inner)
                 found_clusters = 0
                 counted_in_cluster = set()
-                for i in range(n):
-                    if i in counted_in_cluster:
-                        continue
-                    if self._pair_cache is None:
-                        _arr = np.asarray(controls, dtype=np.float64)
-                        _lon, _lat = _arr[:, 0], _arr[:, 1]
-                        self._pair_cache = _haversine_batch(
-                            _lon[:, None], _lat[:, None], _lon[None, :], _lat[None, :]
-                        )
-                    nearby = [i] + [
-                        j for j in range(n)
-                        if j != i and j not in counted_in_cluster
-                        and self._pair_cache[i, j] <= cluster_radius
-                    ]
-                    if len(nearby) >= cluster_target_size:
-                        found_clusters += 1
-                        counted_in_cluster.update(nearby[:cluster_target_size])
+                if _n_inner >= cluster_target_size:
+                    _arr_inner = np.asarray(_inner, dtype=np.float64)
+                    _pm_inner = _haversine_batch(
+                        _arr_inner[:, 0:1], _arr_inner[:, 1:2],
+                        _arr_inner[:, 0], _arr_inner[:, 1],
+                    )
+                    for i in range(_n_inner):
+                        if i in counted_in_cluster:
+                            continue
+                        nearby = [i] + [
+                            j for j in range(_n_inner)
+                            if j != i and j not in counted_in_cluster
+                            and _pm_inner[i, j] <= cluster_radius
+                        ]
+                        if len(nearby) >= cluster_target_size:
+                            found_clusters += 1
+                            counted_in_cluster.update(nearby[:cluster_target_size])
                 if cluster_target_count > 0:
                     cluster_bonus = min(100.0, (found_clusters / cluster_target_count) * 100.0)
 

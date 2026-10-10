@@ -125,6 +125,32 @@ function PanToSuggestion({ suggestion }) {
   return null;
 }
 
+// Highlight overlay for OCAD diagnostic feature selection
+function HighlightLayer({ geojson }) {
+  const map = useMap();
+  const layerRef = useRef(null);
+  useEffect(() => {
+    if (layerRef.current) {
+      layerRef.current.remove();
+      layerRef.current = null;
+    }
+    if (!geojson?.features?.length) return;
+    const layer = L.geoJSON(geojson, {
+      style: { color: '#f59e0b', weight: 3, opacity: 0.95, fillOpacity: 0.35, fillColor: '#f59e0b' },
+      pointToLayer: (_f, latlng) =>
+        L.circleMarker(latlng, { radius: 9, color: '#f59e0b', weight: 3, fillOpacity: 0.45 }),
+    });
+    layer.addTo(map);
+    layerRef.current = layer;
+    try {
+      const bounds = layer.getBounds();
+      if (bounds.isValid()) map.fitBounds(bounds, { padding: [60, 60], maxZoom: 17 });
+    } catch (_) {}
+    return () => { layer.remove(); };
+  }, [map, geojson]);
+  return null;
+}
+
 // Route display colors — rank 1 blue, rank 2 orange, rank 3 red
 const ROUTE_STYLES = [
   { color: '#3b82f6', weight: 4, opacity: 0.9, dashArray: null },
@@ -147,6 +173,7 @@ export function MapViewer({
   navContext = null,  // {attack_point, catching_feature, handrail_samples, optimal_route, decision_points}
   ocadMode = false,  // true → masque OSM, affiche uniquement PNG OCAD
   backgroundControls = [],  // mode compétition — postes des autres circuits
+  highlightGeoJson = null,  // FeatureCollection WGS84 à surbrillance (diagnostic OCAD)
 }) {
   // Polygon drawing — local intermediate state
   const [drawingVertices, setDrawingVertices] = useState([]);
@@ -244,6 +271,7 @@ export function MapViewer({
 
         <FitBounds bounds={imageData ? imageData.bounds : finalBounds} />
         <PanToSuggestion suggestion={currentSuggestion} />
+        <HighlightLayer geojson={highlightGeoJson} />
 
         {/* OCAD map as georeferenced PNG — fond principal en mode OCAD */}
         {imageData && (

@@ -70,8 +70,25 @@ const OcadUploader = ({ onOcadLoaded, onLoading, onError }) => {
           const rawGeojson = ocad2geojson.ocadToGeoJson(ocadMap);
           console.log(`[OCAD] Conversion GeoJSON : ${rawGeojson.features.length} éléments trouvés`);
 
-          const { geojson, crsInfo } = reprojectToWgs84(rawGeojson, ocadMap.getCrs());
+          // GeoJSON objets uniquement (sans primitives graphiques) — pour le diagnostic
+          const rawObjectsGeojson = ocad2geojson.ocadToGeoJson(ocadMap, { generateSymbolElements: false });
+
+          const crs = ocadMap.getCrs();
+          const { geojson, crsInfo } = reprojectToWgs84(rawGeojson, crs);
+          const { geojson: objectsGeoJson } = reprojectToWgs84(rawObjectsGeojson, crs);
           console.log(`[OCAD] Projection: ${crsInfo}`);
+
+          // Comptes : total avec primitives, objets seuls, primitives, sans sym
+          const featuresTotal = rawGeojson.features.length;
+          const featuresObjects = rawObjectsGeojson.features.length;
+          const featuresPrimitives = featuresTotal - featuresObjects;
+          const featuresNoSym = rawObjectsGeojson.features.filter(
+            f => f?.properties?.sym == null
+          ).length;
+
+          // Échelle depuis le CRS (source distincte du setup)
+          const crsScale = crs?.scale != null ? Math.round(crs.scale) : null;
+          const crsCode = crs?.code ?? null;
 
           const symbols = ocadMap.symbols || {};
 
@@ -104,9 +121,16 @@ const OcadUploader = ({ onOcadLoaded, onLoading, onError }) => {
               crsInfo,
               rawOcad: ocadMap,
               geojson,
+              objectsGeoJson,   // objets seuls (generateSymbolElements:false) — pour diagnostic
               symbols,
               rawFile: file,
-              scale,
+              scale,            // depuis setup — utilisé pour map_scale dans la génération
+              crsScale,         // depuis getCrs().scale — pour affichage diagnostic
+              crsCode,          // EPSG code — pour l'empreinte
+              featuresTotal,
+              featuresObjects,
+              featuresPrimitives,
+              featuresNoSym,
             });
           }
         } catch (err) {

@@ -11,6 +11,9 @@ import CompetitionLoadModal from './components/CompetitionLoadModal'
 import DialogueLog from './components/DialogueLog'
 import { buildMapContext } from './services/mapContext'
 import { OcadAnalysisPanel } from './components/OcadAnalysisPanel'
+import { OcadDiagPanel } from './components/OcadDiagPanel'
+import { TerrainAuditPanel } from './components/TerrainAuditPanel'
+import { buildSymbolInventory, computeMapFingerprint } from './services/ocadInventory'
 
 // IOF/FFCO reference params — fallback hardcodé (remplacé par API au démarrage)
 const _FALLBACK_BASE = {
@@ -612,6 +615,12 @@ function App() {
   const [ocadScale, setOcadScale] = useState(null)   // échelle OCAD (ex: 4000 pour 1:4000)
   const [segmentCacheId, setSegmentCacheId] = useState(null) // UUID retourné par preprocess-ocad
 
+  // Diagnostic OCAD (Étapes 14a-14b)
+  const [ocadInventory, setOcadInventory] = useState(null)    // InventoryResult
+  const [auditFingerprint, setAuditFingerprint] = useState(null) // empreinte carte
+  const [selectedSymNum, setSelectedSymNum] = useState(null)  // sym sélectionné dans OcadDiagPanel
+  const [highlightGeoJson, setHighlightGeoJson] = useState(null) // features à surbrillance
+
   const getAllExistingControls = () =>
     circuits
       .filter(c => c.id !== activeCircuitId)
@@ -640,6 +649,21 @@ function App() {
     setImageData(null)
     setMapMode('osm')
     setOcadAnalysis(null)
+    setSelectedSymNum(null)
+    setHighlightGeoJson(null)
+
+    // Inventaire symboles et empreinte (diagnostic 14a)
+    if (data.objectsGeoJson) {
+      const inv = buildSymbolInventory(data.rawOcad, data.objectsGeoJson)
+      setOcadInventory(inv)
+    }
+    const fp = computeMapFingerprint({
+      version: data.version,
+      crsCode: data.crsCode,
+      featuresObjects: data.featuresObjects,
+      fileName: data.fileName,
+    })
+    setAuditFingerprint(fp)
 
     if (data.rawFile) {
       setRenderLoading(true)
@@ -1492,7 +1516,7 @@ function App() {
                       </button>
                     )}
                     <button
-                      onClick={() => { setOcadData(null); setOcadScale(null); setCircuits([]); setActiveCircuitId(null); setImageData(null); setMapMode('osm') }}
+                      onClick={() => { setOcadData(null); setOcadScale(null); setCircuits([]); setActiveCircuitId(null); setImageData(null); setMapMode('osm'); setOcadInventory(null); setAuditFingerprint(null); setSelectedSymNum(null); setHighlightGeoJson(null) }}
                       className="text-xs text-gray-400 hover:text-red-400 transition-colors"
                     >
                       Fermer
@@ -1507,7 +1531,7 @@ function App() {
                 </div>
                 <div className="mt-2 text-xs text-gray-500 flex justify-between">
                   <span>OCAD v{ocadData.version}</span>
-                  <span>{ocadData.geojson?.features?.length || 0} objets</span>
+                  <span>{ocadData.featuresObjects ?? ocadData.geojson?.features?.length ?? 0} objets</span>
                 </div>
                 <div className="mt-2 text-xs flex items-center gap-1.5">
                   {renderLoading ? (
@@ -1532,6 +1556,51 @@ function App() {
 
               {/* OCAD Analysis Panel (13c) */}
               {ocadAnalysis && <OcadAnalysisPanel analysis={ocadAnalysis} />}
+
+              {/* OCAD Diagnostic Panel (14a) — inventaire factuel symboles */}
+              {ocadData && (
+                <OcadDiagPanel
+                  diagInfo={{
+                    version: ocadData.version,
+                    crsInfo: ocadData.crsInfo,
+                    crsCode: ocadData.crsCode,
+                    scale: ocadData.scale,
+                    crsScale: ocadData.crsScale,
+                    featuresTotal: ocadData.featuresTotal,
+                    featuresObjects: ocadData.featuresObjects,
+                    featuresPrimitives: ocadData.featuresPrimitives,
+                    featuresNoSym: ocadData.featuresNoSym,
+                  }}
+                  inventory={ocadInventory}
+                  selectedSymNum={selectedSymNum}
+                  onSelectSymbol={(symNum) => {
+                    setSelectedSymNum(symNum)
+                    if (symNum == null || !ocadData?.objectsGeoJson) {
+                      setHighlightGeoJson(null)
+                      return
+                    }
+                    const entry = ocadInventory?.entries?.find(e => e.symNum === symNum)
+                    if (!entry) { setHighlightGeoJson(null); return }
+                    const features = entry.featureIndices.map(
+                      i => ocadData.objectsGeoJson.features[i]
+                    ).filter(Boolean)
+                    setHighlightGeoJson({ type: 'FeatureCollection', features })
+                  }}
+                />
+              )}
+
+              {/* Audit terrain (14b) — observations hors circuit */}
+              {auditFingerprint && (
+                <TerrainAuditPanel
+                  fingerprint={auditFingerprint}
+                  selectedFeatureIndex={
+                    selectedSymNum != null && ocadInventory
+                      ? (ocadInventory.entries.find(e => e.symNum === selectedSymNum)?.featureIndices[0] ?? null)
+                      : null
+                  }
+                  selectedSymNum={selectedSymNum}
+                />
+              )}
 
               {/* Contexte terrain — widget global permanent */}
               <div className="bg-gray-700/50 p-4 rounded-xl border border-gray-700">
@@ -1847,6 +1916,7 @@ function App() {
           navContext={navContext}
           ocadMode={mapMode === 'ocad' && !!imageData}
           backgroundControls={competitionMode ? getAllExistingControls() : []}
+          highlightGeoJson={highlightGeoJson}
         />
       </main>
 

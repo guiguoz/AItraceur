@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildSymbolInventory, computeFileFingerprint } from '../services/ocadInventory.js'
+import { buildSymbolInventory, computeFileFingerprint, resolveHighlightFeatures } from '../services/ocadInventory.js'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -149,6 +149,66 @@ describe('buildSymbolInventory', () => {
     expect(e201.featureIndices).toEqual([0, 2])
     const e501 = entries.find(e => e.symNum === 501000)
     expect(e501.featureIndices).toEqual([1])
+  })
+})
+
+// ── resolveHighlightFeatures ──────────────────────────────────────────────────
+
+describe('resolveHighlightFeatures', () => {
+  const f0 = makeFeature(201000)
+  const f1 = makeFeature(201000, 'LineString')
+  const f2 = makeFeature(501000)
+  const geojson = {
+    type: 'FeatureCollection',
+    features: [f0, f1, f2],
+  }
+
+  function makeInventory() {
+    return buildSymbolInventory(makeOcad(), geojson)
+  }
+
+  it('sans sym ni featureIndex → FeatureCollection vide', () => {
+    const { features } = resolveHighlightFeatures(makeInventory(), geojson, null, null)
+    expect(features).toHaveLength(0)
+  })
+
+  it('sym sélectionné sans featureIndex → toutes les features du sym', () => {
+    const { features } = resolveHighlightFeatures(makeInventory(), geojson, 201000, null)
+    expect(features).toHaveLength(2)
+    expect(features).toContain(f0)
+    expect(features).toContain(f1)
+  })
+
+  it('featureIndex sélectionné → uniquement cette feature', () => {
+    const { features } = resolveHighlightFeatures(makeInventory(), geojson, 201000, 1)
+    expect(features).toHaveLength(1)
+    expect(features[0]).toBe(f1)
+  })
+
+  it('featureIndex prend le dessus — sym seul non retourné', () => {
+    const { features } = resolveHighlightFeatures(makeInventory(), geojson, 201000, 0)
+    expect(features).toHaveLength(1)
+    expect(features[0]).toBe(f0)
+  })
+
+  it('sym inconnu dans inventaire → features vide', () => {
+    const { features } = resolveHighlightFeatures(makeInventory(), geojson, 999000, null)
+    expect(features).toHaveLength(0)
+  })
+
+  it('featureIndex hors-limites → features vide', () => {
+    const { features } = resolveHighlightFeatures(makeInventory(), geojson, 201000, 99)
+    expect(features).toHaveLength(0)
+  })
+
+  it('inventory null avec sym → features vide', () => {
+    const { features } = resolveHighlightFeatures(null, geojson, 201000, null)
+    expect(features).toHaveLength(0)
+  })
+
+  it('objectsGeoJson null avec featureIndex → features vide', () => {
+    const { features } = resolveHighlightFeatures(makeInventory(), null, 201000, 0)
+    expect(features).toHaveLength(0)
   })
 })
 

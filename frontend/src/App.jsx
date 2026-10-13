@@ -13,7 +13,7 @@ import { buildMapContext } from './services/mapContext'
 import { OcadAnalysisPanel } from './components/OcadAnalysisPanel'
 import { OcadDiagPanel } from './components/OcadDiagPanel'
 import { TerrainAuditPanel } from './components/TerrainAuditPanel'
-import { buildSymbolInventory } from './services/ocadInventory'
+import { buildSymbolInventory, resolveHighlightFeatures } from './services/ocadInventory'
 
 // IOF/FFCO reference params — fallback hardcodé (remplacé par API au démarrage)
 const _FALLBACK_BASE = {
@@ -618,8 +618,9 @@ function App() {
   // Diagnostic OCAD (Étapes 14a-14b)
   const [ocadInventory, setOcadInventory] = useState(null)    // InventoryResult
   const [auditFingerprint, setAuditFingerprint] = useState(null) // empreinte carte
-  const [selectedSymNum, setSelectedSymNum] = useState(null)  // sym sélectionné dans OcadDiagPanel
-  const [highlightGeoJson, setHighlightGeoJson] = useState(null) // features à surbrillance
+  const [selectedSymNum, setSelectedSymNum] = useState(null)         // sym sélectionné dans OcadDiagPanel
+  const [selectedFeatureIndex, setSelectedFeatureIndex] = useState(null) // objet individuel sélectionné
+  const [highlightGeoJson, setHighlightGeoJson] = useState(null)    // features à surbrillance
 
   const getAllExistingControls = () =>
     circuits
@@ -650,6 +651,7 @@ function App() {
     setMapMode('osm')
     setOcadAnalysis(null)
     setSelectedSymNum(null)
+    setSelectedFeatureIndex(null)
     setHighlightGeoJson(null)
 
     // Inventaire symboles et empreinte (diagnostic 14a)
@@ -1567,18 +1569,17 @@ function App() {
                   }}
                   inventory={ocadInventory}
                   selectedSymNum={selectedSymNum}
+                  selectedFeatureIndex={selectedFeatureIndex}
                   onSelectSymbol={(symNum) => {
                     setSelectedSymNum(symNum)
-                    if (symNum == null || !ocadData?.objectsGeoJson) {
-                      setHighlightGeoJson(null)
-                      return
-                    }
-                    const entry = ocadInventory?.entries?.find(e => e.symNum === symNum)
-                    if (!entry) { setHighlightGeoJson(null); return }
-                    const features = entry.featureIndices.map(
-                      i => ocadData.objectsGeoJson.features[i]
-                    ).filter(Boolean)
-                    setHighlightGeoJson({ type: 'FeatureCollection', features })
+                    setSelectedFeatureIndex(null)
+                    const hl = resolveHighlightFeatures(ocadInventory, ocadData?.objectsGeoJson, symNum, null)
+                    setHighlightGeoJson(hl.features.length > 0 ? hl : null)
+                  }}
+                  onSelectFeature={(featIdx) => {
+                    setSelectedFeatureIndex(featIdx)
+                    const hl = resolveHighlightFeatures(ocadInventory, ocadData?.objectsGeoJson, selectedSymNum, featIdx)
+                    setHighlightGeoJson(hl.features.length > 0 ? hl : null)
                   }}
                 />
               )}
@@ -1587,11 +1588,7 @@ function App() {
               {auditFingerprint && (
                 <TerrainAuditPanel
                   fingerprint={auditFingerprint}
-                  selectedFeatureIndex={
-                    selectedSymNum != null && ocadInventory
-                      ? (ocadInventory.entries.find(e => e.symNum === selectedSymNum)?.featureIndices[0] ?? null)
-                      : null
-                  }
+                  selectedFeatureIndex={selectedFeatureIndex}
                   selectedSymNum={selectedSymNum}
                 />
               )}

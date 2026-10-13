@@ -100,6 +100,38 @@ function _buildSymbolTable(symbols) {
 }
 
 /**
+ * Résout les features à mettre en surbrillance selon la sélection active.
+ *
+ * Règles :
+ * - selectedFeatureIndex != null → exactement cette feature
+ * - selectedSymNum != null (sans featureIndex) → toutes les features du symbole
+ * - Sinon → FeatureCollection vide
+ *
+ * @param {InventoryResult|null}       inventory
+ * @param {{features: object[]}|null}  objectsGeoJson
+ * @param {number|null}                selectedSymNum
+ * @param {number|null}                selectedFeatureIndex
+ * @returns {{ type: 'FeatureCollection', features: object[] }}
+ */
+export function resolveHighlightFeatures(inventory, objectsGeoJson, selectedSymNum, selectedFeatureIndex) {
+  const features = objectsGeoJson?.features ?? []
+
+  if (selectedFeatureIndex != null) {
+    const feat = features[selectedFeatureIndex]
+    return { type: 'FeatureCollection', features: feat ? [feat] : [] }
+  }
+
+  if (selectedSymNum != null) {
+    const entry = inventory?.entries?.find(e => e.symNum === selectedSymNum)
+    if (!entry) return { type: 'FeatureCollection', features: [] }
+    const selected = entry.featureIndices.map(i => features[i]).filter(Boolean)
+    return { type: 'FeatureCollection', features: selected }
+  }
+
+  return { type: 'FeatureCollection', features: [] }
+}
+
+/**
  * Calcule l'empreinte SHA-256 du contenu brut d'un fichier .ocd.
  *
  * Deux fichiers de même nom mais de contenu différent produisent des

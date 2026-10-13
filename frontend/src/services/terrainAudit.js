@@ -51,6 +51,7 @@ function _storageKey(fingerprint) {
  * @property {string}      date          ISO date YYYY-MM-DD
  * @property {number|null} gpsLat        Position GPS observée (consentement utilisateur)
  * @property {number|null} gpsLng
+ * @property {string|null} parsedWith    Version du parseur OCAD (ex: "ocad2geojson@2.1.20")
  */
 export function loadObservations(fingerprint) {
   if (!fingerprint) return []
@@ -82,6 +83,7 @@ export function addObservation(fingerprint, obs) {
     date: obs.date ?? new Date().toISOString().slice(0, 10),
     gpsLat: obs.gpsLat ?? null,
     gpsLng: obs.gpsLng ?? null,
+    parsedWith: obs.parsedWith ?? null,
   }
   const updated = [...existing, newObs]
   _saveObservations(fingerprint, updated)

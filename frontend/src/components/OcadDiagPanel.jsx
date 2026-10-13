@@ -26,10 +26,12 @@ import { useState, useMemo } from 'react'
  *   },
  *   inventory: import('../services/ocadInventory').InventoryResult,
  *   selectedSymNum: number|null,
+ *   selectedFeatureIndex: number|null,
  *   onSelectSymbol: (symNum: number|null) => void,
+ *   onSelectFeature: (featureIndex: number|null) => void,
  * }} props
  */
-export function OcadDiagPanel({ diagInfo, inventory, selectedSymNum, onSelectSymbol }) {
+export function OcadDiagPanel({ diagInfo, inventory, selectedSymNum, selectedFeatureIndex, onSelectSymbol, onSelectFeature }) {
   const [showInventory, setShowInventory] = useState(false)
   const [filter, setFilter] = useState('')
 
@@ -209,12 +211,12 @@ export function OcadDiagPanel({ diagInfo, inventory, selectedSymNum, onSelectSym
               const entry = inventory?.entries?.find(e => e.symNum === selectedSymNum)
               if (!entry) return null
               return (
-                <div className="mt-1 p-2 bg-blue-900/20 border border-blue-700/40 rounded text-xs">
-                  <div className="flex justify-between mb-0.5">
+                <div className="mt-1 p-2 bg-blue-900/20 border border-blue-700/40 rounded text-xs space-y-1">
+                  <div className="flex justify-between">
                     <span className="text-gray-400">otp :</span>
                     <span className="font-mono">{entry.otp ?? '—'}</span>
                   </div>
-                  <div className="flex justify-between mb-0.5">
+                  <div className="flex justify-between">
                     <span className="text-gray-400">Géométries :</span>
                     <span className="font-mono text-gray-300">{entry.geomTypes.join(', ') || '—'}</span>
                   </div>
@@ -224,11 +226,48 @@ export function OcadDiagPanel({ diagInfo, inventory, selectedSymNum, onSelectSym
                       {entry.hasDef ? 'présente' : 'absente'}
                     </span>
                   </div>
+
+                  {/* Sous-liste des objets individuels */}
+                  <div className="border-t border-blue-700/30 pt-1">
+                    <div className="text-gray-500 mb-0.5">
+                      Choisir un objet individuel <span className="text-gray-600">({entry.count})</span>
+                    </div>
+                    <div className="max-h-28 overflow-y-auto space-y-0.5">
+                      {entry.featureIndices.map((featIdx, i) => {
+                        const isSelected = selectedFeatureIndex === featIdx
+                        return (
+                          <button
+                            key={featIdx}
+                            onClick={() => onSelectFeature?.(isSelected ? null : featIdx)}
+                            className={`w-full text-left px-1.5 py-0.5 rounded font-mono transition-colors ${
+                              isSelected
+                                ? 'bg-amber-800/50 text-amber-200'
+                                : 'hover:bg-gray-700/60 text-gray-400'
+                            }`}
+                          >
+                            #{featIdx}
+                            <span className="ml-1 text-gray-600 font-sans">
+                              obj. {i + 1}/{entry.count}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {selectedFeatureIndex != null && (
+                      <button
+                        onClick={() => onSelectFeature?.(null)}
+                        className="mt-0.5 text-gray-600 hover:text-gray-400"
+                      >
+                        Désélectionner l'objet
+                      </button>
+                    )}
+                  </div>
+
                   <button
-                    onClick={() => onSelectSymbol?.(null)}
-                    className="mt-1 text-gray-600 hover:text-gray-400 text-xs"
+                    onClick={() => { onSelectFeature?.(null); onSelectSymbol?.(null) }}
+                    className="text-gray-600 hover:text-gray-400"
                   >
-                    Désélectionner
+                    Désélectionner le symbole
                   </button>
                 </div>
               )

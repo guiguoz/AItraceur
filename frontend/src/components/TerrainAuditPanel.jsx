@@ -176,9 +176,24 @@ export function TerrainAuditPanel({ fingerprint, selectedFeatureIndex, selectedS
           {showForm && (
             <div className="p-2 bg-gray-900/60 border border-gray-700 rounded space-y-1.5">
               {(selectedFeatureIndex != null || selectedSymNum != null) && (
-                <div className="text-gray-500 text-xs">
-                  {selectedFeatureIndex != null && <span>Feature #{selectedFeatureIndex} </span>}
-                  {selectedSymNum != null && <span className="font-mono">sym {selectedSymNum}</span>}
+                <div className="text-xs">
+                  {selectedFeatureIndex != null
+                    ? (
+                      <span>
+                        <span className="text-amber-400">Objet individuel</span>{' '}
+                        <span className="font-mono text-gray-300">#{selectedFeatureIndex}</span>
+                        {selectedSymNum != null && (
+                          <span className="ml-1 font-mono text-gray-600">sym {selectedSymNum}</span>
+                        )}
+                      </span>
+                    ) : (
+                      <span>
+                        <span className="text-blue-400">Groupe</span>{' '}
+                        <span className="font-mono text-gray-300">sym {selectedSymNum}</span>
+                        <span className="ml-1 text-gray-600">(aucun objet choisi)</span>
+                      </span>
+                    )
+                  }
                 </div>
               )}
 
@@ -271,8 +286,12 @@ export function TerrainAuditPanel({ fingerprint, selectedFeatureIndex, selectedS
 
               <div className="flex gap-3 text-gray-600">
                 <span>{obs.date}</span>
-                {obs.featureIndex != null && <span className="font-mono">feat #{obs.featureIndex}</span>}
-                {obs.symNum != null && <span className="font-mono">sym {obs.symNum}</span>}
+                {obs.featureIndex != null
+                  ? <span className="font-mono text-amber-700">obj #{obs.featureIndex}</span>
+                  : obs.symNum != null
+                    ? <span className="font-mono text-blue-700">groupe sym {obs.symNum}</span>
+                    : null
+                }
                 {obs.gpsLat != null && (
                   <span className="font-mono text-green-800">
                     {obs.gpsLat},{obs.gpsLng}

@@ -6,6 +6,14 @@
  * Ne modifie pas geojson (flux d'affichage/génération) ni ATTRACTIVE_ISOM.
  */
 
+import ocad2geojsonPkg from 'ocad2geojson/package.json'
+
+/**
+ * Identifiant du parseur OCAD actuellement installé.
+ * Utilisé pour détecter si l'index d'un objet enregistré peut encore être fiable.
+ */
+export const OCAD_PARSER_VERSION = `ocad2geojson@${ocad2geojsonPkg.version}`
+
 /**
  * Construit un inventaire consultable par code symbole brut.
  *
@@ -22,6 +30,7 @@
  * @property {string[]} geomTypes   Types de géométrie observés (Point/LineString/Polygon…)
  * @property {number}   count       Nombre de features avec ce symNum
  * @property {number[]} featureIndices Indices dans objectsGeoJson.features
+ * @property {(number|null)[]} ocadObjectIds Identifiants OCAD stables (feat.id) — null si absent
  *
  * @typedef {Object} InventoryResult
  * @property {SymbolEntry[]} entries       Triées par symNum croissant
@@ -61,6 +70,7 @@ export function buildSymbolInventory(rawOcad, objectsGeoJson) {
         _geomTypesSet: new Set(),
         count: 0,
         featureIndices: [],
+        _ocadObjectIdArr: [],
       })
     }
 
@@ -69,11 +79,12 @@ export function buildSymbolInventory(rawOcad, objectsGeoJson) {
     entry._geomTypesSet.add(geomType)
     entry.count++
     entry.featureIndices.push(idx)
+    entry._ocadObjectIdArr.push(feat.id != null ? feat.id : null)
   }
 
   const entries = [...bySymNum.values()].map(e => {
-    const { _geomTypesSet, ...rest } = e
-    return { ...rest, geomTypes: [..._geomTypesSet].sort() }
+    const { _geomTypesSet, _ocadObjectIdArr, ...rest } = e
+    return { ...rest, geomTypes: [..._geomTypesSet].sort(), ocadObjectIds: _ocadObjectIdArr }
   }).sort((a, b) => a.symNum - b.symNum)
 
   const unknownSymNums = entries.filter(e => !e.hasDef).map(e => e.symNum)

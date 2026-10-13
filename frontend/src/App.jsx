@@ -618,9 +618,10 @@ function App() {
   // Diagnostic OCAD (Étapes 14a-14b)
   const [ocadInventory, setOcadInventory] = useState(null)    // InventoryResult
   const [auditFingerprint, setAuditFingerprint] = useState(null) // empreinte carte
-  const [selectedSymNum, setSelectedSymNum] = useState(null)         // sym sélectionné dans OcadDiagPanel
-  const [selectedFeatureIndex, setSelectedFeatureIndex] = useState(null) // objet individuel sélectionné
-  const [highlightGeoJson, setHighlightGeoJson] = useState(null)    // features à surbrillance
+  const [selectedSymNum, setSelectedSymNum] = useState(null)          // sym sélectionné dans OcadDiagPanel
+  const [selectedFeatureIndex, setSelectedFeatureIndex] = useState(null)  // objet individuel sélectionné
+  const [selectedOcadObjectId, setSelectedOcadObjectId] = useState(null)  // id stable OCAD (feat.id)
+  const [highlightGeoJson, setHighlightGeoJson] = useState(null)     // features à surbrillance
 
   const getAllExistingControls = () =>
     circuits
@@ -652,6 +653,7 @@ function App() {
     setOcadAnalysis(null)
     setSelectedSymNum(null)
     setSelectedFeatureIndex(null)
+    setSelectedOcadObjectId(null)
     setHighlightGeoJson(null)
 
     // Inventaire symboles et empreinte (diagnostic 14a)
@@ -1573,11 +1575,22 @@ function App() {
                   onSelectSymbol={(symNum) => {
                     setSelectedSymNum(symNum)
                     setSelectedFeatureIndex(null)
+                    setSelectedOcadObjectId(null)
                     const hl = resolveHighlightFeatures(ocadInventory, ocadData?.objectsGeoJson, symNum, null)
                     setHighlightGeoJson(hl.features.length > 0 ? hl : null)
                   }}
                   onSelectFeature={(featIdx) => {
                     setSelectedFeatureIndex(featIdx)
+                    // Résoudre l'id stable OCAD pour le stocker dans l'observation
+                    let ocadObjId = null
+                    if (featIdx != null) {
+                      const entry = ocadInventory?.entries?.find(e => e.symNum === selectedSymNum)
+                      if (entry) {
+                        const pos = entry.featureIndices.indexOf(featIdx)
+                        if (pos >= 0) ocadObjId = entry.ocadObjectIds?.[pos] ?? null
+                      }
+                    }
+                    setSelectedOcadObjectId(ocadObjId)
                     const hl = resolveHighlightFeatures(ocadInventory, ocadData?.objectsGeoJson, selectedSymNum, featIdx)
                     setHighlightGeoJson(hl.features.length > 0 ? hl : null)
                   }}
@@ -1589,6 +1602,7 @@ function App() {
                 <TerrainAuditPanel
                   fingerprint={auditFingerprint}
                   selectedFeatureIndex={selectedFeatureIndex}
+                  selectedOcadObjectId={selectedOcadObjectId}
                   selectedSymNum={selectedSymNum}
                 />
               )}

@@ -4,6 +4,7 @@ import {
   exportToJson, importFromJson, _saveObservations,
   OBSERVATION_STATUS,
 } from '../services/terrainAudit.js'
+import { OCAD_PARSER_VERSION } from '../services/ocadInventory.js'
 
 // ── Mock localStorage ─────────────────────────────────────────────────────────
 
@@ -141,6 +142,66 @@ describe('exportToJson', () => {
     expect(result._aitraceur_terrain_audit).toBe(true)
     expect(result.fingerprint).toBe(fp)
     expect(result.observations).toEqual(obs)
+  })
+})
+
+// ── parsedWith / ocadObjectId ─────────────────────────────────────────────────
+
+describe('parsedWith et ocadObjectId', () => {
+  it('une nouvelle observation individuelle enregistre parsedWith et ocadObjectId', () => {
+    const fp = 'fp_pw_new'
+    const added = addObservation(fp, {
+      featureIndex: 3,
+      ocadObjectId: 42,
+      symNum: 201000,
+      status: OBSERVATION_STATUS.OK,
+      note: '',
+      date: '2026-10-13',
+      parsedWith: OCAD_PARSER_VERSION,
+    })
+    const obs = added[0]
+    expect(obs.parsedWith).toBe(OCAD_PARSER_VERSION)
+    expect(obs.ocadObjectId).toBe(42)
+    expect(obs.featureIndex).toBe(3)
+  })
+
+  it('une ancienne observation sans parsedWith est préservée intacte', () => {
+    const fp = 'fp_pw_old'
+    const oldObs = [{
+      id: 'obs_old_1',
+      featureIndex: 5,
+      symNum: 201000,
+      status: OBSERVATION_STATUS.TO_VERIFY,
+      note: 'ancienne',
+      date: '2026-01-01',
+      gpsLat: null,
+      gpsLng: null,
+    }]
+    _saveObservations(fp, oldObs)
+    const loaded = loadObservations(fp)
+    expect(loaded).toHaveLength(1)
+    expect(loaded[0].featureIndex).toBe(5)
+    expect(loaded[0].parsedWith).toBeUndefined()
+    expect(loaded[0].ocadObjectId).toBeUndefined()
+  })
+
+  it('une observation créée avec une autre version du parseur est préservée', () => {
+    const fp = 'fp_pw_other'
+    const obs = addObservation(fp, {
+      featureIndex: 2,
+      ocadObjectId: 10,
+      symNum: 501000,
+      status: OBSERVATION_STATUS.OK,
+      note: '',
+      date: '2026-10-13',
+      parsedWith: 'ocad2geojson@2.0.0',
+    })
+    const loaded = loadObservations(fp)
+    expect(loaded).toHaveLength(1)
+    expect(loaded[0].parsedWith).toBe('ocad2geojson@2.0.0')
+    expect(loaded[0].parsedWith).not.toBe(OCAD_PARSER_VERSION)
+    expect(loaded[0].featureIndex).toBe(2)
+    expect(loaded[0].ocadObjectId).toBe(10)
   })
 })
 

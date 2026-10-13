@@ -14,6 +14,7 @@ import {
   exportToJson, importFromJson, _saveObservations,
   OBSERVATION_STATUS, STATUS_LABELS, STATUS_COLORS,
 } from '../services/terrainAudit'
+import { OCAD_PARSER_VERSION } from '../services/ocadInventory'
 
 const STATUS_OPTIONS = Object.entries(STATUS_LABELS)
 
@@ -21,10 +22,11 @@ const STATUS_OPTIONS = Object.entries(STATUS_LABELS)
  * @param {{
  *   fingerprint: string|null,
  *   selectedFeatureIndex: number|null,
+ *   selectedOcadObjectId: number|null,
  *   selectedSymNum: number|null,
  * }} props
  */
-export function TerrainAuditPanel({ fingerprint, selectedFeatureIndex, selectedSymNum }) {
+export function TerrainAuditPanel({ fingerprint, selectedFeatureIndex, selectedOcadObjectId, selectedSymNum }) {
   const [open, setOpen] = useState(false)
   const [observations, setObservations] = useState([])
   const [showForm, setShowForm] = useState(false)
@@ -36,7 +38,9 @@ export function TerrainAuditPanel({ fingerprint, selectedFeatureIndex, selectedS
     gpsLat: null,
     gpsLng: null,
     featureIndex: null,
+    ocadObjectId: null,
     symNum: null,
+    parsedWith: null,
   })
 
   // Recharge les observations quand l'empreinte change
@@ -52,9 +56,12 @@ export function TerrainAuditPanel({ fingerprint, selectedFeatureIndex, selectedS
     setForm(prev => ({
       ...prev,
       featureIndex: selectedFeatureIndex ?? null,
+      ocadObjectId: selectedOcadObjectId ?? null,
       symNum: selectedSymNum ?? null,
+      // parsedWith uniquement si un objet individuel est ciblé
+      parsedWith: selectedFeatureIndex != null ? OCAD_PARSER_VERSION : null,
     }))
-  }, [showForm, selectedFeatureIndex, selectedSymNum])
+  }, [showForm, selectedFeatureIndex, selectedOcadObjectId, selectedSymNum])
 
   const handleAdd = () => {
     if (!fingerprint) return
@@ -66,7 +73,7 @@ export function TerrainAuditPanel({ fingerprint, selectedFeatureIndex, selectedS
       note: '',
       date: new Date().toISOString().slice(0, 10),
       gpsLat: null, gpsLng: null,
-      featureIndex: null, symNum: null,
+      featureIndex: null, ocadObjectId: null, symNum: null, parsedWith: null,
     })
   }
 
@@ -284,13 +291,30 @@ export function TerrainAuditPanel({ fingerprint, selectedFeatureIndex, selectedS
                 <p className="text-gray-400 leading-snug whitespace-pre-wrap">{obs.note}</p>
               )}
 
-              <div className="flex gap-3 text-gray-600">
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-gray-600">
                 <span>{obs.date}</span>
-                {obs.featureIndex != null
-                  ? <span className="font-mono text-amber-700">obj #{obs.featureIndex}</span>
-                  : obs.symNum != null
-                    ? <span className="font-mono text-blue-700">groupe sym {obs.symNum}</span>
-                    : null
+                {obs.featureIndex != null ? (() => {
+                  // Objet individuel — afficher l'id stable si dispo, sinon l'index avec warning
+                  const trusted = obs.parsedWith === OCAD_PARSER_VERSION
+                  if (obs.ocadObjectId != null) {
+                    return <span className="font-mono text-amber-700">id {obs.ocadObjectId}</span>
+                  }
+                  return (
+                    <span className="font-mono text-amber-700">
+                      obj #{obs.featureIndex}
+                      {!trusted && (
+                        <span
+                          className="ml-0.5 text-yellow-600"
+                          title={obs.parsedWith ? `Parseur : ${obs.parsedWith} (actuel : ${OCAD_PARSER_VERSION})` : 'Version du parseur inconnue'}
+                        >
+                          {' '}⚠ n° non vérifié
+                        </span>
+                      )}
+                    </span>
+                  )
+                })() : obs.symNum != null
+                  ? <span className="font-mono text-blue-700">groupe sym {obs.symNum}</span>
+                  : null
                 }
                 {obs.gpsLat != null && (
                   <span className="font-mono text-green-800">

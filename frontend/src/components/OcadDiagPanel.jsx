@@ -235,6 +235,7 @@ export function OcadDiagPanel({ diagInfo, inventory, selectedSymNum, selectedFea
                     <div className="max-h-28 overflow-y-auto space-y-0.5">
                       {entry.featureIndices.map((featIdx, i) => {
                         const isSelected = selectedFeatureIndex === featIdx
+                        const ocadId = entry.ocadObjectIds?.[i]
                         return (
                           <button
                             key={featIdx}
@@ -245,7 +246,10 @@ export function OcadDiagPanel({ diagInfo, inventory, selectedSymNum, selectedFea
                                 : 'hover:bg-gray-700/60 text-gray-400'
                             }`}
                           >
-                            #{featIdx}
+                            {ocadId != null
+                              ? <span>id&nbsp;{ocadId}</span>
+                              : <span>#{featIdx}</span>
+                            }
                             <span className="ml-1 text-gray-600 font-sans">
                               obj. {i + 1}/{entry.count}
                             </span>

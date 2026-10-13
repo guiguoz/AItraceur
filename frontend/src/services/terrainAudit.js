@@ -44,7 +44,8 @@ function _storageKey(fingerprint) {
  *
  * @typedef {Object} Observation
  * @property {string}      id
- * @property {number|null} featureIndex  Index dans objectsGeoJson.features (ou null)
+ * @property {number|null} featureIndex  Index dans objectsGeoJson.features (ou null, non fiable si parsedWith differ)
+ * @property {number|null} ocadObjectId  Identifiant OCAD stable (feat.id de GeoJSON) — préféré à featureIndex
  * @property {number|null} symNum        Valeur brute sym (ou null)
  * @property {string}      status        OBSERVATION_STATUS value
  * @property {string}      note
@@ -77,6 +78,7 @@ export function addObservation(fingerprint, obs) {
   const newObs = {
     id: `obs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     featureIndex: obs.featureIndex ?? null,
+    ocadObjectId: obs.ocadObjectId ?? null,
     symNum: obs.symNum ?? null,
     status: obs.status ?? OBSERVATION_STATUS.TO_VERIFY,
     note: obs.note ?? '',

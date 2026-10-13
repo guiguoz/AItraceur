@@ -294,22 +294,22 @@ export function TerrainAuditPanel({ fingerprint, selectedFeatureIndex, selectedO
               <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-gray-600">
                 <span>{obs.date}</span>
                 {obs.featureIndex != null ? (() => {
-                  // Objet individuel — afficher l'id stable si dispo, sinon l'index avec warning
-                  const trusted = obs.parsedWith === OCAD_PARSER_VERSION
                   if (obs.ocadObjectId != null) {
+                    // Identifiant OCAD issu du fichier — fiable
                     return <span className="font-mono text-amber-700">id {obs.ocadObjectId}</span>
                   }
+                  // Pas d'ocadObjectId : c'est un index de liste, jamais fiable comme id OCAD
                   return (
                     <span className="font-mono text-amber-700">
                       obj #{obs.featureIndex}
-                      {!trusted && (
-                        <span
-                          className="ml-0.5 text-yellow-600"
-                          title={obs.parsedWith ? `Parseur : ${obs.parsedWith} (actuel : ${OCAD_PARSER_VERSION})` : 'Version du parseur inconnue'}
-                        >
-                          {' '}⚠ n° non vérifié
-                        </span>
-                      )}
+                      <span
+                        className="ml-0.5 text-yellow-600"
+                        title={obs.parsedWith
+                          ? `Index de liste (parseur ${obs.parsedWith})`
+                          : 'Index de liste — version du parseur inconnue'}
+                      >
+                        {' '}⚠ index de liste
+                      </span>
                     </span>
                   )
                 })() : obs.symNum != null

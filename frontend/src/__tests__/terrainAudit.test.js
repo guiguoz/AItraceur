@@ -185,6 +185,39 @@ describe('parsedWith et ocadObjectId', () => {
     expect(loaded[0].ocadObjectId).toBeUndefined()
   })
 
+  it('sans ocadObjectId, même parsedWith courant → ocadObjectId null (index de liste seulement)', () => {
+    const fp = 'fp_pw_noocadid'
+    const added = addObservation(fp, {
+      featureIndex: 7,
+      ocadObjectId: null,  // explicitement absent
+      symNum: 201000,
+      status: OBSERVATION_STATUS.OK,
+      note: '',
+      date: '2026-10-13',
+      parsedWith: OCAD_PARSER_VERSION,  // version actuelle, mais pas d'id OCAD
+    })
+    const obs = added[0]
+    expect(obs.ocadObjectId).toBeNull()
+    expect(obs.featureIndex).toBe(7)
+    expect(obs.parsedWith).toBe(OCAD_PARSER_VERSION)
+  })
+
+  it('avec ocadObjectId présent → identifiant fiable conservé tel quel', () => {
+    const fp = 'fp_pw_withocadid'
+    const added = addObservation(fp, {
+      featureIndex: 2,
+      ocadObjectId: 137,
+      symNum: 101000,
+      status: OBSERVATION_STATUS.OK,
+      note: '',
+      date: '2026-10-13',
+      parsedWith: OCAD_PARSER_VERSION,
+    })
+    const obs = added[0]
+    expect(obs.ocadObjectId).toBe(137)
+    expect(obs.featureIndex).toBe(2)
+  })
+
   it('une observation créée avec une autre version du parseur est préservée', () => {
     const fp = 'fp_pw_other'
     const obs = addObservation(fp, {

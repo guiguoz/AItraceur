@@ -30,7 +30,7 @@ export const OCAD_PARSER_VERSION = `ocad2geojson@${ocad2geojsonPkg.version}`
  * @property {string[]} geomTypes   Types de géométrie observés (Point/LineString/Polygon…)
  * @property {number}   count       Nombre de features avec ce symNum
  * @property {number[]} featureIndices Indices dans objectsGeoJson.features
- * @property {(number|null)[]} ocadObjectIds Identifiants OCAD stables (feat.id) — null si absent
+ * @property {(number|null)[]} ocadObjectIds properties.objectIndex du fichier OCAD — null si absent (feat.id non utilisé)
  *
  * @typedef {Object} InventoryResult
  * @property {SymbolEntry[]} entries       Triées par symNum croissant
@@ -79,7 +79,8 @@ export function buildSymbolInventory(rawOcad, objectsGeoJson) {
     entry._geomTypesSet.add(geomType)
     entry.count++
     entry.featureIndices.push(idx)
-    entry._ocadObjectIdArr.push(feat.id != null ? feat.id : null)
+    const objIdx = feat?.properties?.objectIndex
+    entry._ocadObjectIdArr.push(objIdx != null ? objIdx : null)
   }
 
   const entries = [...bySymNum.values()].map(e => {

@@ -139,6 +139,30 @@ describe('buildSymbolInventory', () => {
     expect(nums).toEqual([...nums].sort((a, b) => a - b))
   })
 
+  it('utilise properties.objectIndex comme identifiant OCAD, pas feat.id', () => {
+    const feat = {
+      type: 'Feature',
+      id: 999,  // numéro généré pendant le parcours — ne doit PAS être retenu
+      properties: { sym: 201000, objectIndex: 42 },
+      geometry: { type: 'Point', coordinates: [2.0, 48.0] },
+    }
+    const geojson = { type: 'FeatureCollection', features: [feat] }
+    const { entries } = buildSymbolInventory(makeOcad(), geojson)
+    expect(entries[0].ocadObjectIds[0]).toBe(42)
+  })
+
+  it('si objectIndex absent, ocadObjectId est null — feat.id non utilisé comme fallback', () => {
+    const feat = {
+      type: 'Feature',
+      id: 999,
+      properties: { sym: 201000 },  // pas de objectIndex
+      geometry: { type: 'Point', coordinates: [2.0, 48.0] },
+    }
+    const geojson = { type: 'FeatureCollection', features: [feat] }
+    const { entries } = buildSymbolInventory(makeOcad(), geojson)
+    expect(entries[0].ocadObjectIds[0]).toBeNull()
+  })
+
   it('stocke les featureIndices corrects', () => {
     const geojson = {
       type: 'FeatureCollection',

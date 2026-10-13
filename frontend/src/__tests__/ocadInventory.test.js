@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildSymbolInventory, computeMapFingerprint } from '../services/ocadInventory.js'
+import { buildSymbolInventory, computeFileFingerprint } from '../services/ocadInventory.js'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -152,38 +152,43 @@ describe('buildSymbolInventory', () => {
   })
 })
 
-// ── computeMapFingerprint ─────────────────────────────────────────────────────
+// ── computeFileFingerprint ────────────────────────────────────────────────────
 
-describe('computeMapFingerprint', () => {
-  it('produit une empreinte reproductible avec les mêmes entrées', () => {
-    const info = { version: '12.18.18', crsCode: 2154, featuresObjects: 3504, fileName: 'carte.ocd' }
-    expect(computeMapFingerprint(info)).toBe(computeMapFingerprint(info))
+describe('computeFileFingerprint', () => {
+  it('retourne une chaîne hex SHA-256 de 64 caractères', async () => {
+    const buf = new Uint8Array([1, 2, 3]).buffer
+    const fp = await computeFileFingerprint(buf)
+    expect(fp).toHaveLength(64)
+    expect(fp).toMatch(/^[0-9a-f]{64}$/)
   })
 
-  it('empreintes différentes pour des fichiers distincts', () => {
-    const a = computeMapFingerprint({ version: '12', crsCode: 2154, featuresObjects: 3504, fileName: 'a.ocd' })
-    const b = computeMapFingerprint({ version: '12', crsCode: 2154, featuresObjects: 3504, fileName: 'b.ocd' })
-    expect(a).not.toBe(b)
+  it('est déterministe — même contenu → même empreinte', async () => {
+    const buf = new Uint8Array([10, 20, 30, 40, 50]).buffer
+    expect(await computeFileFingerprint(buf)).toBe(await computeFileFingerprint(buf))
   })
 
-  it('empreintes différentes si featuresObjects diffère', () => {
-    const a = computeMapFingerprint({ version: '12', crsCode: 2154, featuresObjects: 3504, fileName: 'x.ocd' })
-    const b = computeMapFingerprint({ version: '12', crsCode: 2154, featuresObjects: 9999, fileName: 'x.ocd' })
-    expect(a).not.toBe(b)
+  it('deux contenus différents → deux empreintes différentes', async () => {
+    const buf1 = new Uint8Array([1, 2, 3]).buffer
+    const buf2 = new Uint8Array([4, 5, 6]).buffer
+    expect(await computeFileFingerprint(buf1)).not.toBe(await computeFileFingerprint(buf2))
   })
 
-  it('tolère les champs null/undefined', () => {
-    const fp = computeMapFingerprint({ version: null, crsCode: null, featuresObjects: null, fileName: null })
-    expect(typeof fp).toBe('string')
-    expect(fp.length).toBeGreaterThan(0)
+  it('même nom et même nombre d\'objets mais contenu différent → empreintes différentes', async () => {
+    // Simule deux versions d'un fichier portant le même nom et les mêmes métadonnées
+    const versionA = new Uint8Array(new Array(200).fill(0xAA)).buffer
+    const versionB = new Uint8Array(new Array(200).fill(0xBB)).buffer
+    expect(await computeFileFingerprint(versionA)).not.toBe(await computeFileFingerprint(versionB))
   })
 
-  it("extrait le nom de fichier sans chemin complet", () => {
-    const fp = computeMapFingerprint({
-      version: '12', crsCode: 2154, featuresObjects: 100,
-      fileName: 'C:\\Users\\user\\Maps\\carte.ocd',
-    })
-    expect(fp).not.toContain('Users')
-    expect(fp).toContain('carte.ocd')
+  it('un audit lié à une empreinte différente est refusé à l\'import', async () => {
+    // Vérifie que la combinaison hash-based fingerprint + importFromJson rejette bien
+    // un fichier d'audit provenant d'une autre carte
+    const { importFromJson, exportToJson } = await import('../services/terrainAudit.js')
+    const buf1 = new Uint8Array([0x01, 0x02]).buffer
+    const buf2 = new Uint8Array([0x03, 0x04]).buffer
+    const fp1 = await computeFileFingerprint(buf1)
+    const fp2 = await computeFileFingerprint(buf2)
+    const exported = exportToJson(fp1, [{ id: 'o1', note: 'test' }])
+    expect(() => importFromJson(exported, fp2)).toThrow(/incompatible/)
   })
 })

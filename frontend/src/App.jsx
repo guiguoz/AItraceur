@@ -13,7 +13,7 @@ import { buildMapContext } from './services/mapContext'
 import { OcadAnalysisPanel } from './components/OcadAnalysisPanel'
 import { OcadDiagPanel } from './components/OcadDiagPanel'
 import { TerrainAuditPanel } from './components/TerrainAuditPanel'
-import { buildSymbolInventory, computeMapFingerprint } from './services/ocadInventory'
+import { buildSymbolInventory } from './services/ocadInventory'
 
 // IOF/FFCO reference params — fallback hardcodé (remplacé par API au démarrage)
 const _FALLBACK_BASE = {
@@ -657,13 +657,7 @@ function App() {
       const inv = buildSymbolInventory(data.rawOcad, data.objectsGeoJson)
       setOcadInventory(inv)
     }
-    const fp = computeMapFingerprint({
-      version: data.version,
-      crsCode: data.crsCode,
-      featuresObjects: data.featuresObjects,
-      fileName: data.fileName,
-    })
-    setAuditFingerprint(fp)
+    setAuditFingerprint(data.fileHash ?? null)
 
     if (data.rawFile) {
       setRenderLoading(true)

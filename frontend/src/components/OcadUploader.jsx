@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Buffer } from "buffer";
 import ocad2geojson from 'ocad2geojson';
 import { reprojectToWgs84 } from '../services/ocadCrs';
+import { computeFileFingerprint } from '../services/ocadInventory';
 
 /**
  * Composant pour uploader et parser les fichiers OCAD (.ocd)
@@ -59,6 +60,9 @@ const OcadUploader = ({ onOcadLoaded, onLoading, onError }) => {
 
           // FIX 1: use bufferData.byteLength (uint8Array was undefined)
           console.log(`[OCAD] Lecture du fichier ${file.name} (${bufferData.byteLength} octets)...`);
+
+          // SHA-256 du contenu brut — empreinte d'identité indépendante du nom
+          const fileHash = await computeFileFingerprint(buffer);
 
           // FIX 2: readOcad returns a Promise — must await
           const ocadMap = await ocad2geojson.readOcad(bufferData);
@@ -126,11 +130,12 @@ const OcadUploader = ({ onOcadLoaded, onLoading, onError }) => {
               rawFile: file,
               scale,            // depuis setup — utilisé pour map_scale dans la génération
               crsScale,         // depuis getCrs().scale — pour affichage diagnostic
-              crsCode,          // EPSG code — pour l'empreinte
+              crsCode,          // EPSG code — pour l'affichage diagnostic
               featuresTotal,
               featuresObjects,
               featuresPrimitives,
               featuresNoSym,
+              fileHash,         // SHA-256 hex du contenu brut — empreinte d'identité carte
             });
           }
         } catch (err) {

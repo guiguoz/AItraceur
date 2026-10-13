@@ -100,23 +100,21 @@ function _buildSymbolTable(symbols) {
 }
 
 /**
- * Calcule l'empreinte stable d'une carte OCAD chargée.
- * Utilisée pour rattacher les observations terrain au bon fichier.
+ * Calcule l'empreinte SHA-256 du contenu brut d'un fichier .ocd.
  *
- * L'empreinte repose sur des propriétés déterministes du fichier :
- * nom, version OCAD, code CRS, nombre d'objets exportés.
- * Elle n'inclut PAS le chemin complet du fichier (varie selon l'OS/utilisateur).
+ * Deux fichiers de même nom mais de contenu différent produisent des
+ * empreintes différentes. Deux fichiers identiques produisent la même
+ * empreinte, quel que soit leur nom ou leur chemin.
  *
- * @param {{ version: *, crsCode: *, featuresObjects: number, fileName: string }} info
- * @returns {string}
+ * Remplace l'ancienne empreinte basée sur les métadonnées (nom, version,
+ * CRS, nb objets) qui ne détectait pas les modifications de contenu.
+ *
+ * @param {ArrayBuffer} arrayBuffer — octets bruts du fichier .ocd
+ * @returns {Promise<string>} chaîne hexadécimale SHA-256 de 64 caractères
  */
-export function computeMapFingerprint({ version, crsCode, featuresObjects, fileName }) {
-  const v = version != null ? String(version) : '?'
-  const c = crsCode != null ? String(crsCode) : '0'
-  const o = featuresObjects != null ? String(featuresObjects) : '0'
-  // Normalise le nom de fichier (enlève le chemin, garde l'extension)
-  const n = fileName
-    ? String(fileName).replace(/.*[/\\]/, '').replace(/[^\w.-]/g, '_')
-    : ''
-  return `${n}|v${v}|crs${c}|obj${o}`
+export async function computeFileFingerprint(arrayBuffer) {
+  const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer)
+  return Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('')
 }

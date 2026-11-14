@@ -129,3 +129,8 @@ backend/data/rg2/
 backend/output/
 backend/tests/output/
 backend/data/candidates.json
+
+# Plan — données locales non versionnées
+runs/
+captures/
+backend/data/local/

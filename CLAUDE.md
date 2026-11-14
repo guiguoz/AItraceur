@@ -4,6 +4,22 @@ Instructions pour assistants IA travaillant sur ce projet.
 
 ---
 
+## Plan en cours
+
+Le projet suit le plan de `docs/plan/` (lire `00_LISEZ-MOI.md`).
+Règles de travail : `docs/plan/03_REGLES_DE_TRAVAIL.md` — à lire avant toute modification.
+État d'avancement : `docs/plan/comptes-rendus/`. Faits établis ou réfutés : `docs/plan/REGISTRE.md`.
+
+## Deux moteurs
+
+- Moteur v1 (en service) : `backend/src/services/generation/`. Gelé : corrections listées dans le
+  plan uniquement. La sélection est faite par `_default_scoring` ; `evaluate_fitness` n'est qu'une
+  télémétrie.
+- Moteur v2 (en construction) : `backend/src/aitraceur/`. Ne dépend ni de FastAPI ni de `src.services`.
+- `backend/src/aitraceur_proto/` : prototype de mars 2026, gelé, supprimé en phase 6.
+
+---
+
 ## Démarrage rapide
 
 ```bash
@@ -99,22 +115,14 @@ OcadUploader.scale → App.jsx ocadScale → request body map_scale
 - `map_scale` adapte `min_control_separation_m` (equity score) et `min_control_distance` (fallback GA) via `scale_min_separation()` (module-level `genetic_algo.py`) : `ceil(base × scale/ref)`, refs IOF sprint=4000 / md=10000 / ld=15000, clamp [15-80m] sprint / [40-150m] md+ld. LD vétérans 1:10000 → clamp bas 40m. Alias "forest"/"foret" → md.
 - Terme L inchangé — distances IOF (250/600/2000m) indépendantes de l'échelle
 
-### Fitness GA — termes A→L
+### Génération GA — sélection réelle (constat C2)
 
-| Terme | Critère | Poids |
-|-------|---------|-------|
-| A | Score CNN moyen (HeatmapCache) | ×30 |
-| B | Pénalité distance vs cible | ×40 |
-| C | Dog-legs (−20 pts/violation) | ×1 |
-| D | Rythme CV inter-postes (cap 0.8) | ×15 |
-| E | Diversité GPX Vikazimut — gradient `(cv−0.20)×15` | additive |
-| F | Zones interdites forbidden_mask (−50 pts/poste) | additive |
-| G | D+/distance > seuil IOF 4% (ElevationCache) | additive |
-| H | Forme géométrique — anti-Z/spirale/accordéon | ×10 |
-| I | Qualité point d'attaque (KDTree OCAD, si dispo) | ×8 centré 0.5 |
-| J | Ligne d'arrêt (KDTree OCAD, si dispo) | ×6 centré 0.5 |
-| K | Main courante (KDTree OCAD, si dispo) | ×5 |
-| L | Conformité longueur jambes au profil format IOF (Sprint 250m, MD 600m, LD 2000m) | ×8 |
+La sélection des circuits est faite par `_default_scoring` (`genetic_algo.py` l.3061-3414).
+`evaluate_fitness` n'est appelée qu'une fois par génération, sur le meilleur circuit, à titre de
+**télémétrie** ; elle n'a jamais piloté la génération (aucun appelant ne passe `scoring_function`
+depuis le premier commit `bca5db2`, 2026-02-26).
+
+Voir `docs/plan/01_ETAT_DES_LIEUX.md` §C2 et `docs/plan/REGISTRE.md` (E02, X01).
 
 ### GA — Opérateur de croisement : Segment Crossover spatial (2026-04-27)
 

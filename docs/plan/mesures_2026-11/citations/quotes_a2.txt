@@ -1,0 +1,88 @@
+MF|Le parcours doit être tracé sur un terrain comportant des éléments de planimétrie évidents et reliés entre eux
+MF|Les postes sont toujours sur des lignes identiques et aux changements de direction
+MF|Un seul itinéraire possible
+MF|Le point d'attaque est confondu avec le poste
+MF|Choisir des postes faciles : bâtiment, jonction ou croisement de chemins
+MF|seuls seront proposés des changements de lignes au poste
+MF|proposer des changements de lignes durant l'itinéraire
+MF|Ne pas proposer plus de deux changements de lignes durant le circuit
+MF|La difficulté du parcours reste identique au niveau précédent : éléments de planimétrie évidents et reliés entre eux par des chemins, des sentiers, des espaces découverts, bâtiments
+MF|Postes évidents faciles à identifier
+MF|Possibilités d'utiliser des rochers, falaises, clôtures
+MF|Les postes sont à proximité des lignes et du point d'attaque mais parfaitement visibles de celui-ci et faciles à identifier, avec des lignes d'arrêt évidentes derrière le poste
+MF|Des choix d'itinéraires sur des lignes de nature et de "courabilité" identiques peuvent être proposés
+MF|orientation sur diverses lignes de nature et de difficultés différentes
+MF|possibilité de couper (saut) sur des terrains totalement ouverts avec des lignes d'arrêt évidentes
+MF|La visibilité des lignes doit être parfaite
+MF|Saut de lignes, orientation sommaire avec visée vers des lignes d'arrêt sûres
+MF|La visibilité est très bonne et les distances sont inférieures à 200 m
+MF|Le parcours est tracé sur un terrain plus difficile mais la pénétrabilité doit rester bonne
+MF|Le terrain doit être constitué d'un réseau de lignes de nature différente (sentiers, fossés, limite de végétation) et de zones découvertes
+MF|Les postes deviennent plus difficiles (sommet de colline, entre les collines, rocher, butte) mais toujours précédés d'un point d'attaque net
+MF|proposer des choix d'itinéraire et de l'orientation de précision dans l'approche du poste sur des éléments de planimétrie encadrés de lignes d'arrêt évidentes
+MF|orientation à partir de la lecture de relief facile
+MF|Poste au sommet des collines
+MF|Possibilité d'utiliser des lignes de crêtes ou des rentrants bien marqués comme ligne directrice entre 2 postes
+MF|Les tracés doivent se faire sur des terrains très pénétrables moyennement accidentés dans des zones boisées avec de nombreuses parties découvertes
+MF|Éviter les terrains difficilement pénétrables
+MF|Les détails du terrain sont facilement identifiables
+MF|les postes peuvent être des éléments de relief (colline, dépression, avancée bien marquée ou falaise) avec obligatoirement un point d'attaque précis situé à moins de 200 m du poste et une ligne d'arrêt claire
+MF|proposer de l'orientation sommaire avec des points d'appui et des points d'attaque évidents
+MF|proposer de l'orientation de précision en direction de postes au relief assez simple avec des lignes d'arrêt évidentes
+MF|Le traçage, à ce niveau, doit exiger de la part du coureur des capacités à planifier son itinéraire et d'adapter sa vitesse de course
+MF|L'attaque du poste se fait sans ligne d'arrêt évidente derrière le poste
+MF|Utilisation de tous les types de terrain sauf les très difficiles physiquement
+MF|postes sans lignes d'arrêt évidentes
+MF|attaque du poste dans une zone avec peu de détails
+MF|orientation dans les zones de relief difficiles
+MF|utilisation de terrains riches en détails et petits détails
+MF|absence de mains courantes
+MF|visibilité réduite
+MF|proposer des choix d'itinéraire difficiles
+MF|proposer de l'orientation sommaire avec lecture de relief difficile
+MF|Terrain très difficile avec de l'orientation dans les flancs
+MF|proposer de l'orientation fine en terrain détaillé
+MF|les parcours doivent tester et valoriser la capacité des coureurs à planifier et à réaliser des choix d'itinéraire à vitesse élevée sous la pression du temps
+MF|l'enjeu ne réside pas dans la découverte des postes mais bien dans l'itinéraire qui les relie
+MF|Le nombre maximum de changements de direction ou angles entre 2 postes doit être de 3
+MF|la position du poste ne doit pas induire le choix d'itinéraire (poste devant ou derrière un élément infranchissable par exemple)
+MF|les définitions doivent rester simples
+MF|Nombre maximum de changements de direction ou angles entre 2 postes = 5
+MF|Proposer des obstacles, zones interdites sur l'itinéraire et non en approche de poste
+MF|Le tracé peut inclure des dénivelées qui ne doivent pas obliger les coureurs à marcher
+MF|planifier son itinéraire rapidement dans un environnement complexe
+MF|une utilisation optimale du maillage des rues
+MF|des sorties de poste qui doivent générer des problèmes de planification
+MF|l'utilisation de tous les obstacles infranchissables ou non (clôtures, murs), des escaliers, passages souterrains
+MF|La découverte des postes ne doit pas être difficile
+MF|les carrefours de rues
+MF|comportant des angles
+MF|les obstacles ou tout autre élément pouvant provoquer un angle
+TAP|Il est obligatoire de « conduire » le jeune orienteur tout le long du parcours
+TAP|ce saut ne doit jamais dépasser 100m s'il y a recours à la boussole
+TAP|Positionner le premier poste de préférence au changement de direction
+TAP|ces mains courantes ne sont pas seulement des lignes mais aussi des surfaces « non boisées » où la visibilité est importante
+TAP|les lignes les plus familières au pratiquant débutant et très visibles qui guident facilement le déplacement
+TAP|Route forestière, chemin d'exploitation, chemin, sentier, pare feu, clôtures, mur, rivière, ligne électrique, voie ferrée, bâtiment
+TAP|sentier peu visible, talus bien marqué, fossé très visible, ruisseau, muret, lisière de forêt, haie, layon, levée de terre, tour de lac, étang
+TAP|ces lignes séparent des zones différenciées par la couleur sur la carte
+TAP|limite de clairière en forêt, mais aussi des fossés intermittents, murs en ruine
+TP|Parcours partiels courts. Ils ne doivent pas inciter à l'utilisation de la boussole
+TP|Il doit être situé sur la ligne directrice ou visible de celle-ci
+TP|Rechercher des choix d'itinéraire simples, mais conserver un élément d'attaque et d'arrêt à proximité du poste, nettement identifiable
+TP|Un itinéraire comportant une ligne directrice ou un élément d'arrêt trop évident ne doit jamais être l'alternative la plus rapide entre deux postes
+TP|La dénivelée positive ne doit pas excéder 4 % de la longueur totale du parcours par l'itinéraire le plus logique
+TP|poste facile : les surfaces (grande clairière, mare, sommet
+TP|poste moyen : les coudes de lignes (chemin, fossé, ruisseau, limite de végétation
+TP|poste difficile : les points (rocher, trou, butte
+TP|Les parcours entre postes sont les parties les plus importantes d'un parcours d'orientation et déterminent sa qualité
+TP|Les postes ne doivent pas être placés à moins de 30m les uns des autres
+GC|doivent privilégier les choix d'itinéraire
+GC|doivent privilégier la recherche de postes
+GC|les épreuves de sprint doivent privilégier les choix d'itinéraire sous une charge mentale et une pression du temps important
+GC|distances optimum comprenant le dénivelé sur la base de la règle 100 mètres de dénivelé positif = 1 kilomètre en terrain plat
+GC|calculées en distance réelle de course en prenant en compte les itinéraires les plus courts
+RTS|Un poste ne peut pas être situé à moins de 30 mètres à vol d'oiseau d'un autre poste
+RTS|Les postes situés sur des éléments de même nature doivent être situés à plus de 60 mètres
+RTS|25 m en distance de course et 15 m à vol d'oiseau
+ISOM|les passages entre bâtiments doivent être au moins de 0,4 mm

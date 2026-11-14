@@ -1,0 +1,4222 @@
+{
+"ISOM2017-2": [
+[
+"101",
+"L",
+"Contour",
+"Brown 100%"
+],
+[
+"101.1",
+"P",
+"Slope line, contour",
+"Brown 100%"
+],
+[
+"102",
+"L",
+"Index contour",
+"Brown 100%"
+],
+[
+"102.1",
+"T",
+"Contour value",
+null
+],
+[
+"103",
+"L",
+"Form line",
+"Brown 100%"
+],
+[
+"103.1",
+"P",
+"Slope line, formline",
+"Brown 100%"
+],
+[
+"104",
+"L",
+"Earth bank",
+"Brown 100%"
+],
+[
+"104.1",
+"P",
+"Earth bank, minimum size",
+"Brown 100%"
+],
+[
+"104.2",
+"L",
+"Earth bank, top line",
+"Brown 100%"
+],
+[
+"104.3",
+"L",
+"Earth bank, tag line",
+"Brown 100%"
+],
+[
+"104.9",
+"P",
+"Earth bank, minimum size (from ISOM2000)",
+"Brown 100%"
+],
+[
+"105",
+"L",
+"Earth wall",
+"Brown 100%"
+],
+[
+"106",
+"L",
+"Ruined earth wall",
+"Brown 100%"
+],
+[
+"107",
+"L",
+"Erosion gully",
+"Brown 100%"
+],
+[
+"108",
+"L",
+"Small erosion gully",
+"Brown 100%"
+],
+[
+"109",
+"P",
+"Small knoll",
+"Brown 100%"
+],
+[
+"110",
+"P",
+"Small elongated knoll",
+"Brown 100%"
+],
+[
+"111",
+"P",
+"Small depression",
+"Brown 100%"
+],
+[
+"112",
+"P",
+"Pit",
+"Brown 100%"
+],
+[
+"113",
+"A",
+"Broken ground",
+null
+],
+[
+"113.1",
+"P",
+"Broken ground, individual dot",
+"Brown 100%"
+],
+[
+"114",
+"A",
+"Very broken ground",
+null
+],
+[
+"115",
+"P",
+"Prominent landform feature",
+"Brown 100%"
+],
+[
+"201",
+"L",
+"Impassable cliff",
+"Black 100%"
+],
+[
+"201.1",
+"P",
+"Impassable cliff, minimum size",
+"Black 100%"
+],
+[
+"201.2",
+"A",
+"Impassable cliff, plan shape representation (from ISOM2000)",
+"Black 100%"
+],
+[
+"201.3",
+"L",
+"Impassable cliff, top line",
+"Black 100%"
+],
+[
+"201.4",
+"L",
+"Impassable cliff, tag line",
+"Black 100%"
+],
+[
+"201.9",
+"P",
+"Impassable cliff, minimum size (from ISOM2000)",
+"Black 100%"
+],
+[
+"202",
+"L",
+"Cliff",
+"Black 100%"
+],
+[
+"202.1",
+"P",
+"Cliff, minimum size",
+"Black 100%"
+],
+[
+"202.2",
+"L",
+"Cliff, with tags",
+"Black 100%"
+],
+[
+"202.3",
+"P",
+"Cliff, with tags, minimum size",
+"Black 100%"
+],
+[
+"202.9",
+"P",
+"Cliff, with tags, minimum size (from ISOM2000)",
+"Black 100%"
+],
+[
+"203.1",
+"P",
+"Rocky pit or cave (without a distinct entrance)",
+"Black 100%"
+],
+[
+"203.2",
+"P",
+"Cave or rocky pit (with a distinct entrance)",
+"Black 100%"
+],
+[
+"203.9",
+"P",
+"Rocky pit or cave with distinct entrance (from ISOM2000)",
+"Black 100%"
+],
+[
+"204",
+"P",
+"Boulder",
+"Black 100%"
+],
+[
+"204.5",
+"P",
+"Boulder or large boulder, different size",
+"Black 100%"
+],
+[
+"205",
+"P",
+"Large boulder",
+"Black 100%"
+],
+[
+"206",
+"A",
+"Gigantic boulder",
+"Black 100%"
+],
+[
+"207",
+"P",
+"Boulder cluster",
+"Black 100%"
+],
+[
+"207.1",
+"P",
+"Boulder cluster, large",
+"Black 100%"
+],
+[
+"208",
+"A",
+"Boulder field",
+null
+],
+[
+"208.1",
+"P",
+"Boulder field, single triangle",
+"Black 100%"
+],
+[
+"208.2",
+"P",
+"Boulder field, single triangle, enlarged",
+"Black 100%"
+],
+[
+"209",
+"A",
+"Dense boulder field",
+null
+],
+[
+"210",
+"A",
+"Stony ground, slow running",
+null
+],
+[
+"210.1",
+"P",
+"Stony ground, individual dot",
+"Black 100%"
+],
+[
+"211",
+"A",
+"Stony ground, walk",
+null
+],
+[
+"212",
+"A",
+"Stony ground, fight",
+null
+],
+[
+"213",
+"A",
+"Sandy ground",
+"Yellow 50%"
+],
+[
+"214",
+"A",
+"Bare rock",
+"Black 25% (Grey)"
+],
+[
+"215",
+"L",
+"Trench",
+null
+],
+[
+"301",
+"C",
+"Uncrossable body of water (full colour), with bank line",
+null
+],
+[
+"301.1",
+"A",
+"Uncrossable body of water (full colour)",
+"Blue 100% for area features"
+],
+[
+"301.2",
+"C",
+"Uncrossable body of water (dominant), with bank line",
+null
+],
+[
+"301.3",
+"A",
+"Uncrossable body of water (dominant)",
+"Blue 70%"
+],
+[
+"301.4",
+"L",
+"Uncrossable body of water, bank line",
+"Black 100%"
+],
+[
+"302",
+"C",
+"Shallow body of water, with solid outline",
+null
+],
+[
+"302.1",
+"A",
+"Shallow body of water",
+"Blue 50%"
+],
+[
+"302.2",
+"L",
+"Shallow body of water, solid outline",
+"Blue 100%"
+],
+[
+"302.3",
+"L",
+"Shallow body of water, dashed outline",
+"Blue 100%"
+],
+[
+"302.5",
+"A",
+"Small shallow body of water (full colour)",
+"Blue 100% for area features"
+],
+[
+"303",
+"P",
+"Waterhole",
+"Blue 100%"
+],
+[
+"304",
+"L",
+"Crossable watercourse",
+"Blue 100%"
+],
+[
+"305",
+"L",
+"Small crossable watercourse",
+"Blue 100%"
+],
+[
+"306",
+"L",
+"Minor/seasonal water channel",
+"Blue 100%"
+],
+[
+"307",
+"C",
+"Uncrossable marsh, with outline",
+null
+],
+[
+"307.1",
+"A",
+"Uncrossable marsh",
+null
+],
+[
+"307.2",
+"L",
+"Uncrossable marsh, outline",
+"Black 100%"
+],
+[
+"308",
+"A",
+"Marsh",
+null
+],
+[
+"308.1",
+"P",
+"Marsh, minimum size",
+"Blue 100%"
+],
+[
+"309",
+"L",
+"Narrow marsh",
+"Blue 100%"
+],
+[
+"310",
+"A",
+"Indistinct marsh",
+"Blue 100% for area features"
+],
+[
+"310.1",
+"P",
+"Indistinct marsh, minimum size",
+"Blue 100%"
+],
+[
+"311",
+"P",
+"Well, fountain or water tank",
+"Blue 100%"
+],
+[
+"312",
+"P",
+"Spring",
+"Blue 100%"
+],
+[
+"313",
+"P",
+"Prominent water feature",
+"Blue 100%"
+],
+[
+"401",
+"A",
+"Open land",
+"Yellow 100% for area features"
+],
+[
+"402",
+"A",
+"Open land with scattered trees",
+"Yellow 100% for area features"
+],
+[
+"402.1",
+"A",
+"Open land with scattered bushes (green dots)",
+"Yellow 100% for area features"
+],
+[
+"403",
+"A",
+"Rough open land",
+"Yellow 50%"
+],
+[
+"404",
+"A",
+"Rough open land with scattered trees",
+"Yellow 50%"
+],
+[
+"404.1",
+"A",
+"Rough open land with scattered bushes (green dots)",
+"Yellow 50%"
+],
+[
+"405",
+"A",
+"Forest",
+"White over green"
+],
+[
+"406",
+"A",
+"Vegetation: slow running",
+"Green 30%"
+],
+[
+"406.1",
+"A",
+"Vegetation: slow running, normal running in one direction",
+"Green 30%"
+],
+[
+"407",
+"A",
+"Vegetation: slow running, good visibility",
+null
+],
+[
+"408",
+"A",
+"Vegetation: walk",
+"Green 60%"
+],
+[
+"408.1",
+"A",
+"Vegetation: walk, normal running in one direction",
+"Green 60%"
+],
+[
+"408.2",
+"A",
+"Vegetation: walk, slow running in one direction",
+"Green 30%"
+],
+[
+"409",
+"A",
+"Vegetation: walk, good visibility",
+null
+],
+[
+"410",
+"A",
+"Vegetation: fight",
+"Green 100% for area features"
+],
+[
+"410.1",
+"A",
+"Vegetation: fight, normal running in one direction",
+"Green 100% for area features"
+],
+[
+"410.2",
+"A",
+"Vegetation: fight, slow running in one direction",
+"Green 30%"
+],
+[
+"410.3",
+"A",
+"Vegetation: fight, walk in one direction",
+"Green 60%"
+],
+[
+"410.4",
+"L",
+"Vegetation: fight, minimum width",
+"Green 100% for area features"
+],
+[
+"411",
+"A",
+"Vegetation, impassable (from ISOM 2017, first edition)",
+"Green 100% for area features"
+],
+[
+"412",
+"C",
+"Cultivated land",
+null
+],
+[
+"412.1",
+"A",
+"Cultivated land (black pattern)",
+"Black for open land"
+],
+[
+"413",
+"A",
+"Orchard",
+"Yellow 100% for area features"
+],
+[
+"413.1",
+"A",
+"Orchard, rough open land",
+"Yellow 50%"
+],
+[
+"414",
+"A",
+"Vineyard or similar",
+"Yellow 100% for area features"
+],
+[
+"414.1",
+"A",
+"Vineyard or similar, rough open land",
+"Yellow 50%"
+],
+[
+"415",
+"L",
+"Distinct cultivation boundary",
+"Black 100%"
+],
+[
+"416",
+"L",
+"Distinct vegetation boundary",
+"Black 100%"
+],
+[
+"416.1",
+"L",
+"Distinct vegetation boundary, green dashed line",
+"Green 100%/Black 50%"
+],
+[
+"417",
+"P",
+"Prominent large tree",
+"Green 100%"
+],
+[
+"418",
+"P",
+"Prominent bush or tree",
+"White over green"
+],
+[
+"419",
+"P",
+"Prominent vegetation feature",
+"Green 100%"
+],
+[
+"501",
+"C",
+"Paved area, with bounding line",
+"Black below upper brown 50%"
+],
+[
+"501.1",
+"A",
+"Paved area",
+"Upper brown 50%"
+],
+[
+"501.2",
+"L",
+"Paved area, bounding line",
+"Black below purple for track symbols"
+],
+[
+"502",
+"L",
+"Wide road, minimum width",
+"Upper brown 50%"
+],
+[
+"502.1",
+"L",
+"Wide road, 0.5 mm (from ISOM2000)",
+"Upper brown 50%"
+],
+[
+"502.2",
+"C",
+"Road with two carriageways",
+"Lower brown 50%"
+],
+[
+"503",
+"L",
+"Road",
+"Black 100%"
+],
+[
+"504",
+"L",
+"Vehicle track",
+"Black 100%"
+],
+[
+"505",
+"L",
+"Footpath",
+"Black 100%"
+],
+[
+"506",
+"L",
+"Small footpath",
+"Black 100%"
+],
+[
+"507",
+"L",
+"Less distinct small footpath",
+"Black 100%"
+],
+[
+"508",
+"L",
+"Narrow ride",
+"Black 100%"
+],
+[
+"508.1",
+"C",
+"Narrow ride, easy running",
+"Yellow 100% for narrow ride"
+],
+[
+"508.2",
+"C",
+"Narrow ride, normal runnability",
+"White over green"
+],
+[
+"508.3",
+"C",
+"Narrow ride, slow running",
+"Green 30% for narrow ride"
+],
+[
+"508.4",
+"C",
+"Narrow ride, walk",
+"Green 60% for narrow ride"
+],
+[
+"509",
+"C",
+"Railway",
+"Black 100%"
+],
+[
+"510",
+"L",
+"Power line, cableway or skilift",
+"Black 100%"
+],
+[
+"511",
+"L",
+"Major power line, minimum width",
+null
+],
+[
+"511.1",
+"L",
+"Major power line",
+null
+],
+[
+"511.2",
+"C",
+"Major power line, large carrying masts",
+null
+],
+[
+"512",
+"L",
+"Bridge / tunnel",
+"Black 100%"
+],
+[
+"512.1",
+"P",
+"Bridge / tunnel, minimum size",
+"Black 100%"
+],
+[
+"512.2",
+"P",
+"Footbridge",
+"Black 100%"
+],
+[
+"513",
+"L",
+"Wall",
+"Black 100%"
+],
+[
+"514",
+"L",
+"Ruined wall",
+"Black 100%"
+],
+[
+"515",
+"L",
+"Impassable wall",
+"Black 100%"
+],
+[
+"516",
+"L",
+"Fence",
+"Black 100%"
+],
+[
+"517",
+"L",
+"Ruined fence",
+"Black 100%"
+],
+[
+"518",
+"L",
+"Impassable fence",
+"Black 100%"
+],
+[
+"519",
+"P",
+"Crossing point",
+"Black 100%"
+],
+[
+"520",
+"A",
+"Area that shall not be entered",
+"Yellow 100%/Green 50%"
+],
+[
+"520.1",
+"L",
+"Area that shall not be entered, solid colour, bounding line",
+"Black 100%"
+],
+[
+"520.2",
+"A",
+"Area that shall not be entered, stripes",
+null
+],
+[
+"520.3",
+"L",
+"Area that shall not be entered, stripes, bounding line",
+"Black 100%"
+],
+[
+"521",
+"A",
+"Building",
+"Black below purple for track symbols"
+],
+[
+"521.1",
+"P",
+"Building, minimum size",
+"Black 100%"
+],
+[
+"521.2",
+"C",
+"Large building with outline",
+null
+],
+[
+"521.3",
+"A",
+"Large building",
+"Black 65%"
+],
+[
+"521.4",
+"L",
+"Large building, outline",
+"Black 100%"
+],
+[
+"522",
+"C",
+"Canopy with outline",
+null
+],
+[
+"522.1",
+"A",
+"Canopy",
+"Black 20%"
+],
+[
+"522.2",
+"L",
+"Canopy, outline",
+"Black 100%"
+],
+[
+"523",
+"L",
+"Ruin",
+"Black 100%"
+],
+[
+"523.1",
+"P",
+"Ruin, minimum size",
+"Black 100%"
+],
+[
+"524",
+"P",
+"High tower",
+"Black 100%"
+],
+[
+"525",
+"P",
+"Small tower",
+"Black 100%"
+],
+[
+"526",
+"P",
+"Cairn",
+"Black 100%"
+],
+[
+"527",
+"P",
+"Fodder rack",
+"Black 100%"
+],
+[
+"528",
+"L",
+"Prominent line feature",
+"Black 100%"
+],
+[
+"529",
+"L",
+"Prominent impassable line feature",
+"Black 100%"
+],
+[
+"530",
+"P",
+"Prominent man-made feature – ring",
+"Black 100%"
+],
+[
+"531",
+"P",
+"Prominent man-made feature – x",
+"Black 100%"
+],
+[
+"532",
+"L",
+"Stairway",
+"White over green"
+],
+[
+"532.1",
+"L",
+"Stairway, without border lines",
+"White over green"
+],
+[
+"601.1",
+"L",
+"Magnetic north line",
+"Black 100%"
+],
+[
+"601.2",
+"A",
+"North lines pattern",
+null
+],
+[
+"601.3",
+"L",
+"Magnetic north line, blue",
+"Blue 100%"
+],
+[
+"601.4",
+"A",
+"North lines pattern, blue",
+null
+],
+[
+"602",
+"P",
+"Registration mark",
+null
+],
+[
+"603.0",
+"P",
+"Spot height, dot",
+"Black 100%"
+],
+[
+"603.1",
+"T",
+"Spot height, text",
+null
+],
+[
+"701",
+"P",
+"Start",
+"Purple for track symbols"
+],
+[
+"702",
+"P",
+"Map issue point",
+"Purple for course overprint"
+],
+[
+"703",
+"P",
+"Control point",
+"Purple for track symbols"
+],
+[
+"704",
+"T",
+"Control number",
+null
+],
+[
+"705",
+"L",
+"Course line",
+"Purple for track symbols"
+],
+[
+"706",
+"P",
+"Finish",
+"Purple for track symbols"
+],
+[
+"707",
+"L",
+"Marked route",
+"Purple for course overprint"
+],
+[
+"708",
+"L",
+"Out-of-bounds boundary",
+"Purple for track symbols"
+],
+[
+"709",
+"A",
+"Out-of-bounds area",
+null
+],
+[
+"709.1",
+"L",
+"Out-of-bounds area, solid boundary",
+"Purple for course overprint"
+],
+[
+"709.2",
+"L",
+"Out-of-bounds area, dashed boundary",
+"Purple for course overprint"
+],
+[
+"710",
+"P",
+"Crossing point",
+"Purple for track symbols"
+],
+[
+"711",
+"L",
+"Out-of-bounds route",
+null
+],
+[
+"711.1",
+"P",
+"Out-of-bounds route, single cross",
+"Purple for course overprint"
+],
+[
+"712",
+"P",
+"First aid post",
+"Purple for course overprint"
+],
+[
+"713",
+"P",
+"Refreshment point",
+"Purple for course overprint"
+],
+[
+"799",
+"L",
+"Simple Orienteering Course",
+null
+],
+[
+"999",
+"P",
+"OpenOrienteering Logo",
+"Black 25% (Grey)"
+]
+],
+"ISSprOM2019": [
+[
+"101",
+"L",
+"Contour",
+"Brown 100%"
+],
+[
+"101.1",
+"P",
+"Slope line, contour",
+"Brown 100%"
+],
+[
+"102",
+"L",
+"Index contour",
+"Brown 100%"
+],
+[
+"102.1",
+"P",
+"Slope line, index contour",
+"Brown 100%"
+],
+[
+"102.2",
+"T",
+"Contour value",
+null
+],
+[
+"103",
+"L",
+"Form line",
+"Brown 100%"
+],
+[
+"103.1",
+"P",
+"Slope line, form line",
+"Brown 100%"
+],
+[
+"104",
+"L",
+"Earth bank",
+"Brown 100%"
+],
+[
+"104.1",
+"L",
+"Earth bank, very high",
+"Brown 100%"
+],
+[
+"104.2",
+"L",
+"Earth bank, tag line",
+"Brown 100%"
+],
+[
+"105",
+"L",
+"Small earth wall",
+"Brown 100%"
+],
+[
+"107",
+"L",
+"Erosion gully or trench",
+"Brown 100%"
+],
+[
+"108",
+"L",
+"Small erosion gully",
+"Brown 100%"
+],
+[
+"109",
+"P",
+"Small knoll",
+"Brown 100%"
+],
+[
+"110",
+"P",
+"Small elongated knoll",
+"Brown 100%"
+],
+[
+"111",
+"P",
+"Small depression",
+"Brown 100%"
+],
+[
+"112",
+"P",
+"Pit or hole",
+"Brown 100%"
+],
+[
+"113",
+"A",
+"Broken ground",
+null
+],
+[
+"113.1",
+"P",
+"Broken ground, single dot",
+"Brown 100%"
+],
+[
+"113.2",
+"A",
+"Broken ground, dense",
+null
+],
+[
+"113.6",
+"P",
+"Broken ground, single dot, enlarged",
+"Brown 100%"
+],
+[
+"115",
+"P",
+"Prominent landform feature",
+"Brown 100%"
+],
+[
+"201",
+"L",
+"Impassable cliff",
+"Black 100%"
+],
+[
+"201.1",
+"P",
+"Impassable cliff, minimum size",
+"Black 100%"
+],
+[
+"201.3",
+"L",
+"Impassable cliff, top line",
+"Black 100%"
+],
+[
+"201.4",
+"L",
+"Impassable cliff, tag line",
+"Black 100%"
+],
+[
+"201.8",
+"P",
+"Impassable cliff, no tags, minimum size (from ISSOM)",
+"Black 100%"
+],
+[
+"201.9",
+"P",
+"Impassable cliff, minimum size (from ISSOM)",
+"Black 100%"
+],
+[
+"202",
+"L",
+"Passable rock face, small (rounded ends, no tags)",
+"Black 100%"
+],
+[
+"202.1",
+"L",
+"Passable rock face",
+"Black 100%"
+],
+[
+"202.2",
+"P",
+"Passable rock face, minimum size",
+"Black 100%"
+],
+[
+"202.3",
+"L",
+"Passable rock face, top line (flat ends)",
+"Black 100%"
+],
+[
+"202.4",
+"L",
+"Passable rock face, tag line",
+"Black 100%"
+],
+[
+"202.8",
+"P",
+"Passable rock face, small (rounded ends, no tags; minimum size, from ISSOM)",
+"Black 100%"
+],
+[
+"202.9",
+"P",
+"Passable rock face, minimum size (from ISSOM)",
+"Black 100%"
+],
+[
+"203",
+"P",
+"Rocky pit or cave (without a distinct entrance)",
+"Black 100%"
+],
+[
+"203.1",
+"P",
+"Cave (with a distinct entrance)",
+"Black 100%"
+],
+[
+"203.9",
+"P",
+"Cave (with a distinct entrance) (from ISSOM)",
+"Black 100%"
+],
+[
+"204",
+"P",
+"Boulder",
+"Black 100%"
+],
+[
+"205",
+"P",
+"Large boulder",
+"Black 100%"
+],
+[
+"206",
+"A",
+"Gigantic boulder or rock pillar",
+"Black 100%"
+],
+[
+"207",
+"P",
+"Boulder cluster",
+"Black 100%"
+],
+[
+"207.1",
+"P",
+"Boulder cluster, large",
+"Black 100%"
+],
+[
+"208",
+"A",
+"Boulder field",
+null
+],
+[
+"208.1",
+"P",
+"Boulder field, single triangle",
+"Black 100%"
+],
+[
+"208.2",
+"P",
+"Boulder field, single triangle, enlarged",
+"Black 100%"
+],
+[
+"208.5",
+"A",
+"Dense boulder field",
+null
+],
+[
+"210",
+"A",
+"Stony ground",
+null
+],
+[
+"210.1",
+"P",
+"Stony ground, single dot",
+"Black 100%"
+],
+[
+"210.2",
+"A",
+"Stony ground, enlarged",
+null
+],
+[
+"210.3",
+"P",
+"Stony ground, single dot, enlarged",
+"Black 100%"
+],
+[
+"213",
+"A",
+"Open sandy ground",
+"Yellow 50%"
+],
+[
+"214",
+"A",
+"Bare rock",
+"Black 30% for bare rock"
+],
+[
+"301",
+"C",
+"Uncrossable body of water (full colour)",
+null
+],
+[
+"301.1",
+"A",
+"Uncrossable body of water (full colour), fill",
+"Blue 100% for area features"
+],
+[
+"301.2",
+"C",
+"Uncrossable body of water (dominant)",
+null
+],
+[
+"301.3",
+"A",
+"Uncrossable body of water (dominant), fill",
+"Blue 70%"
+],
+[
+"301.6",
+"L",
+"Uncrossable body of water, bank line",
+"Black 100%"
+],
+[
+"302",
+"C",
+"Crossable body of water",
+null
+],
+[
+"302.1",
+"A",
+"Crossable body of water, fill",
+"Blue 30%"
+],
+[
+"302.6",
+"L",
+"Crossable body of water, border line",
+"Blue 100% for area features"
+],
+[
+"303",
+"P",
+"Waterhole",
+"Blue 100%"
+],
+[
+"305",
+"L",
+" Small crossable watercourse",
+"Blue 100%"
+],
+[
+"306",
+"L",
+" Minor / seasonal watercourse",
+"Blue 100%"
+],
+[
+"307",
+"C",
+"Uncrossable marsh",
+null
+],
+[
+"307.1",
+"A",
+"Uncrossable marsh, fill",
+null
+],
+[
+"307.2",
+"L",
+"Uncrossable marsh, border line",
+"Black 100%"
+],
+[
+"308",
+"A",
+"Marsh",
+null
+],
+[
+"308.1",
+"P",
+"Marsh, minimum size",
+"Blue 100% for area features"
+],
+[
+"309",
+"L",
+"Narrow marsh",
+"Blue 100%"
+],
+[
+"310",
+"A",
+"Indistinct marsh",
+"Blue 100% for area features"
+],
+[
+"310.1",
+"P",
+"Indistinct marsh, minimum size",
+"Blue 100% for area features"
+],
+[
+"311",
+"P",
+"Small fountain or well",
+"Blue 100%"
+],
+[
+"312",
+"P",
+"Spring",
+"Blue 100%"
+],
+[
+"313",
+"P",
+"Prominent water feature",
+"Blue 100%"
+],
+[
+"401",
+"A",
+"Open land",
+"Yellow 100%"
+],
+[
+"402",
+"A",
+"Open land with scattered trees",
+"Yellow 100%"
+],
+[
+"402.1",
+"A",
+"Open land with scattered trees",
+"Yellow 100%"
+],
+[
+"403",
+"A",
+"Rough open land",
+"Yellow 50%"
+],
+[
+"404",
+"A",
+"Rough open land with scattered trees",
+"Yellow 50%"
+],
+[
+"404.1",
+"A",
+"Rough open land with scattered trees",
+"Yellow 50%"
+],
+[
+"405",
+"A",
+"Forest",
+"White over green"
+],
+[
+"406",
+"A",
+" Vegetation: slow running",
+"Green 30%"
+],
+[
+"406.1",
+"A",
+"Vegetation: slow running, normal running in one direction",
+"Green 30%"
+],
+[
+"406.2",
+"L",
+"Vegetation: slow running, minimum width",
+"Green 30%"
+],
+[
+"407",
+"A",
+" Vegetation: slow running, good visibility",
+null
+],
+[
+"408",
+"A",
+" Vegetation: walk",
+"Green 60%"
+],
+[
+"408.1",
+"A",
+"Vegetation: walk, normal running in one direction",
+"Green 60%"
+],
+[
+"408.2",
+"A",
+"Vegetation: walk, slow running in one direction",
+"Green 30%"
+],
+[
+"408.3",
+"L",
+" Vegetation: walk, minimum width",
+"Green 60%"
+],
+[
+"409",
+"A",
+"Vegetation: walk, good visibility",
+null
+],
+[
+"410",
+"A",
+" Impassable vegetation",
+"Green 100% for area features"
+],
+[
+"410.1",
+"L",
+" Impassable vegetation, minimum width (hedge)",
+"Green 100%"
+],
+[
+"412",
+"C",
+"Cultivated land",
+null
+],
+[
+"412.1",
+"A",
+"Cultivated land (black pattern)",
+"Black for open land"
+],
+[
+"413",
+"A",
+"Orchard",
+"Yellow 100%"
+],
+[
+"413.1",
+"A",
+"Orchard, rough open land",
+"Yellow 50%"
+],
+[
+"414",
+"A",
+" Vineyard or similar",
+"Yellow 100%"
+],
+[
+"414.1",
+"A",
+" Vineyard or similar, rough open land",
+"Yellow 50%"
+],
+[
+"415",
+"L",
+"Distinct cultivation boundary",
+"Black 100%"
+],
+[
+"416",
+"L",
+"Distinct vegetation boundary",
+"Black 100%"
+],
+[
+"417",
+"P",
+"Prominent large tree",
+"Green 100%"
+],
+[
+"418",
+"P",
+"Prominent bush or small tree",
+"White over green"
+],
+[
+"419",
+"P",
+"Prominent vegetation feature",
+"Green 100%"
+],
+[
+"501",
+"C",
+"Paved area, light traffic, with border",
+"Black below lower light brown"
+],
+[
+"501.5",
+"A",
+"Paved area, light traffic",
+"Lower brown 30%"
+],
+[
+"501.2",
+"A",
+" Paved area in multilevel structures, light traffic",
+null
+],
+[
+"501.3",
+"A",
+"Paved area with scattered trees",
+"Lower brown 30%"
+],
+[
+"501.1",
+"L",
+" Step or edge of paved area",
+"Black 100%"
+],
+[
+"501.6",
+"L",
+"Paved area, light traffic, footprint: 1.4 m",
+"Lower brown 30%"
+],
+[
+"501.7",
+"L",
+"Paved area, light traffic, footprint: 2 m",
+"Lower brown 30%"
+],
+[
+"501.8",
+"L",
+"Paved area, light traffic, footprint: 3 m",
+"Lower brown 30%"
+],
+[
+"501.9",
+"L",
+"Paved area, light traffic, footprint: 4 m",
+"Lower brown 30%"
+],
+[
+"501.10",
+"C",
+"Paved area, heavy traffic, with border",
+"Black below lower light brown"
+],
+[
+"501.11",
+"A",
+"Paved area, heavy traffic",
+"Lower brown 50%"
+],
+[
+"501.12",
+"A",
+" Paved area in multilevel structures, heavy traffic",
+null
+],
+[
+"501.16",
+"L",
+"Paved area, heavy traffic, footprint: 1.4 m",
+"Lower brown 50%"
+],
+[
+"501.17",
+"L",
+"Paved area, heavy traffic, footprint: 2 m",
+"Lower brown 50%"
+],
+[
+"501.18",
+"L",
+"Paved area, heavy traffic, footprint: 3 m",
+"Lower brown 50%"
+],
+[
+"501.19",
+"L",
+"Paved area, heavy traffic, footprint: 4 m",
+"Lower brown 50%"
+],
+[
+"505.1",
+"L",
+"Unpaved footpath or track, footprint: 1.4 m",
+"Lower brown 30%"
+],
+[
+"505.2",
+"L",
+"Unpaved footpath or track, footprint: 2 m",
+"Lower brown 30%"
+],
+[
+"506",
+"L",
+"Small unpaved footpath or track",
+"Black 100%"
+],
+[
+"507",
+"L",
+"Less distinct small path",
+"Black 100%"
+],
+[
+"508",
+"L",
+"Narrow ride",
+"Black 100%"
+],
+[
+"509.1",
+"C",
+"Railway",
+"Black 100%"
+],
+[
+"509.2",
+"L",
+"Tramway",
+null
+],
+[
+"510",
+"L",
+"Power line, cableway or skilift",
+"Black 100%"
+],
+[
+"511",
+"L",
+"Major power line",
+null
+],
+[
+"511.1",
+"L",
+"Major power line with pylons",
+null
+],
+[
+"512",
+"L",
+"Bridge, one side",
+"Black 100%"
+],
+[
+"512.1",
+"L",
+"Bridge, minimum width",
+null
+],
+[
+"512.2",
+"L",
+"Underpass or tunnel",
+"Black 100%"
+],
+[
+"513.1",
+"L",
+"Passable wall",
+"Black 100%"
+],
+[
+"513.2",
+"L",
+"Passable retained wall",
+"Black 100%"
+],
+[
+"515",
+"L",
+"Impassable wall",
+"Black 100%"
+],
+[
+"516",
+"L",
+"Passable fence or railing",
+"Black 100%"
+],
+[
+"518",
+"L",
+"Impassable fence or railing",
+"Black 100%"
+],
+[
+"519",
+"P",
+"Crossing point (optional)",
+"Black 100%"
+],
+[
+"520",
+"A",
+"Area that shall not be entered ",
+"Green 50%/Yellow 100%"
+],
+[
+"520.1",
+"L",
+"Area that shall not be entered, boundary line",
+"Black below lower light brown"
+],
+[
+"521",
+"C",
+"Building",
+null
+],
+[
+"521.1",
+"P",
+"Building, minimum size",
+"Black 100%"
+],
+[
+"521.3",
+"A",
+"Building, fill",
+"Black 60%"
+],
+[
+"521.4",
+"L",
+"Building, outline",
+"Black 100%"
+],
+[
+"522",
+"C",
+"Canopy",
+null
+],
+[
+"522.3",
+"A",
+"Canopy, fill",
+"Black 20%"
+],
+[
+"522.4",
+"L",
+"Canopy, outline",
+"Black 100%"
+],
+[
+"522.1",
+"P",
+"Pillar",
+"Black 100%"
+],
+[
+"524",
+"P",
+"High tower",
+"Black 100%"
+],
+[
+"525",
+"P",
+"Small tower",
+"Black 100%"
+],
+[
+"526",
+"P",
+"Cairn, memorial, small monument or boundary stone",
+"Black 100%"
+],
+[
+"527",
+"P",
+"Fodder rack",
+"Black 100%"
+],
+[
+"528",
+"L",
+" Prominent line feature",
+"Black 100%"
+],
+[
+"529",
+"L",
+" Prominent impassable line feature",
+"Black 100%"
+],
+[
+"530",
+"P",
+"Prominent man-made feature – ring",
+"Black 100%"
+],
+[
+"531",
+"P",
+"Prominent man-made feature – x",
+"Black 100%"
+],
+[
+"532.6",
+"L",
+"Stairway, footprint: 1.6 m",
+"Lower brown 30%"
+],
+[
+"532.7",
+"L",
+"Stairway, footprint: 2 m",
+"Lower brown 30%"
+],
+[
+"532.8",
+"L",
+"Stairway, footprint: 3 m",
+"Lower brown 30%"
+],
+[
+"532.9",
+"L",
+"Stairway, footprint: 4 m",
+"Lower brown 30%"
+],
+[
+"601.1",
+"A",
+"North lines pattern",
+null
+],
+[
+"601",
+"L",
+"Magnetic north line",
+"Black 100%"
+],
+[
+"601.4",
+"L",
+"Magnetic north line, black, with arrow",
+"Black 100%"
+],
+[
+"601.6",
+"A",
+"North lines pattern, blue",
+null
+],
+[
+"601.5",
+"L",
+"Magnetic north line, blue",
+"Blue 100%"
+],
+[
+"601.9",
+"L",
+"Magnetic north line, blue, with arrow",
+"Blue 100%"
+],
+[
+"701",
+"P",
+"Start",
+"Purple for track symbols"
+],
+[
+"702",
+"P",
+" Map issue point",
+"Purple for course overprint"
+],
+[
+"703",
+"P",
+"Control point",
+"Purple for track symbols"
+],
+[
+"704",
+"T",
+"Control number",
+null
+],
+[
+"704.1",
+"T",
+"Control number, with white border",
+null
+],
+[
+"705",
+"L",
+"Course line",
+"Purple for track symbols"
+],
+[
+"706",
+"P",
+"Finish",
+"Purple for track symbols"
+],
+[
+"707",
+"L",
+"Marked route",
+"Purple for course overprint"
+],
+[
+"708",
+"L",
+"Out-of-bounds boundary",
+"Purple for track symbols"
+],
+[
+"709",
+"A",
+"Out-of-bounds area",
+null
+],
+[
+"709.1",
+"L",
+"Out-of-bounds area, solid boundary",
+"Purple for course overprint"
+],
+[
+"709.2",
+"L",
+"Out-of-bounds area, dashed boundary",
+"Purple for course overprint"
+],
+[
+"710.1",
+"P",
+"Crossing point",
+"Purple for track symbols"
+],
+[
+"710.2",
+"L",
+"Crossing section, one side",
+"Purple for course overprint"
+],
+[
+"714",
+"C",
+" Temporary construction or closed area",
+"Purple for course overprint"
+],
+[
+"714.1",
+"P",
+" Temporary construction or closed area, minimum size",
+"Purple for course overprint"
+],
+[
+"799",
+"L",
+"Simple Orienteering Course",
+null
+],
+[
+"999",
+"P",
+"OpenOrienteering Logo",
+"Black 30% for bare rock"
+]
+],
+"ISOM2000": [
+[
+"101",
+"L",
+"Contour",
+"Brown"
+],
+[
+"102",
+"L",
+"Index contour",
+"Brown"
+],
+[
+"103",
+"L",
+"Form line",
+"Brown"
+],
+[
+"104",
+"P",
+"Slope line",
+"Brown"
+],
+[
+"105",
+"T",
+"Contour value",
+null
+],
+[
+"106",
+"L",
+"Earth bank",
+"Brown"
+],
+[
+"106.0.1",
+"P",
+"Earth bank, minimum size",
+"Brown"
+],
+[
+"106.1",
+"L",
+"Earth bank, very high",
+"Brown"
+],
+[
+"106.1.1",
+"P",
+"Earth bank, very high, minimum size",
+"Brown"
+],
+[
+"106.2",
+"L",
+"Earth bank, tag line",
+"Brown"
+],
+[
+"107",
+"L",
+"Earth wall",
+"Brown"
+],
+[
+"108",
+"L",
+"Small earth wall",
+"Brown"
+],
+[
+"109",
+"L",
+"Erosion gully",
+"Brown"
+],
+[
+"110",
+"L",
+"Small erosion gully",
+"Brown"
+],
+[
+"112",
+"P",
+"Small knoll",
+"Brown"
+],
+[
+"113",
+"P",
+"Elongated knoll",
+"Brown"
+],
+[
+"115",
+"P",
+"Small depression",
+"Brown"
+],
+[
+"116",
+"P",
+"Pit",
+"Brown"
+],
+[
+"117.1",
+"P",
+"Broken ground, small",
+"Brown"
+],
+[
+"117.2",
+"P",
+"Broken ground, big",
+"Brown"
+],
+[
+"118",
+"P",
+"Special land form feature",
+"Brown"
+],
+[
+"201",
+"L",
+"Impassable cliff",
+"Black"
+],
+[
+"201.0.1",
+"P",
+"Impassable cliff, minimum size",
+"Black"
+],
+[
+"201.1",
+"L",
+"Impassable cliff, no tags",
+"Black"
+],
+[
+"201.2",
+"L",
+"Impassable cliff, tag line",
+"Black"
+],
+[
+"202",
+"A",
+"Rock pillars/cliffs",
+"Black"
+],
+[
+"203",
+"L",
+"Passable rock face",
+"Black"
+],
+[
+"203.0.1",
+"P",
+"Passable rock face, minimum size",
+"Black"
+],
+[
+"203.1",
+"L",
+"Passable rock face, no tags",
+"Black"
+],
+[
+"203.1.1",
+"P",
+"Passable rock face, no tags, minimum size",
+"Black"
+],
+[
+"203.2",
+"L",
+"Passable rock face, no tags, rounded",
+"Black"
+],
+[
+"203.2.1",
+"P",
+"Passable rock face, no tags, rounded, minimum size",
+"Black"
+],
+[
+"204",
+"P",
+"Rocky pit",
+"Black"
+],
+[
+"205",
+"P",
+"Cave",
+"Black"
+],
+[
+"206",
+"P",
+"Boulder",
+"Black"
+],
+[
+"206.1",
+"P",
+"Boulder, enlarged",
+"Black"
+],
+[
+"207",
+"P",
+"Large boulder",
+"Black"
+],
+[
+"208",
+"P",
+"Boulder field",
+"Black"
+],
+[
+"208.1",
+"P",
+"Boulder field, large",
+"Black"
+],
+[
+"209",
+"P",
+"Boulder cluster",
+"Black"
+],
+[
+"209.1",
+"P",
+"Boulder cluster, large",
+"Black"
+],
+[
+"210",
+"P",
+"Stony ground, small",
+"Black"
+],
+[
+"210.1",
+"P",
+"Stony ground",
+"Black"
+],
+[
+"211",
+"A",
+"Open sandy ground",
+"Yellow 50%"
+],
+[
+"212",
+"A",
+"Bare rock",
+"Black 30%"
+],
+[
+"301",
+"A",
+"Lake",
+"Blue 50%"
+],
+[
+"301.1",
+"L",
+"Lake, bank line",
+"Black"
+],
+[
+"301.2",
+"C",
+"Lake, with bank line",
+null
+],
+[
+"302",
+"A",
+"Pond",
+"Opaque Blue"
+],
+[
+"303",
+"P",
+"Waterhole",
+"Blue"
+],
+[
+"305",
+"L",
+"Crossable watercourse",
+"Blue"
+],
+[
+"306",
+"L",
+"Crossable small watercourse",
+"Blue"
+],
+[
+"307",
+"L",
+"Minor water channel",
+"Blue"
+],
+[
+"308",
+"L",
+"Narrow marsh",
+"Blue"
+],
+[
+"309",
+"A",
+"Uncrossable marsh",
+null
+],
+[
+"309.1",
+"L",
+"Uncrossable marsh, border line",
+"Black"
+],
+[
+"309.2",
+"C",
+"Uncrossable marsh, with border line",
+null
+],
+[
+"310",
+"A",
+"Marsh",
+null
+],
+[
+"310.1",
+"P",
+"Marsh, minimum size",
+"Blue"
+],
+[
+"311",
+"A",
+"Indistinct marsh",
+"Blue"
+],
+[
+"311.1",
+"P",
+"Indistinct marsh, minimum size",
+"Blue"
+],
+[
+"312",
+"P",
+"Well",
+"Blue"
+],
+[
+"313",
+"P",
+"Spring",
+"Blue"
+],
+[
+"314",
+"P",
+"Special water feature",
+"Blue"
+],
+[
+"401",
+"A",
+"Open land",
+"Yellow"
+],
+[
+"402",
+"A",
+"Open land with scattered trees",
+"Yellow"
+],
+[
+"403",
+"A",
+"Rough open land",
+"Yellow 50%"
+],
+[
+"404",
+"A",
+"Rough open land with scattered trees",
+"Yellow 70%"
+],
+[
+"405",
+"A",
+"Forest: easy running",
+"Opaque White over Green"
+],
+[
+"406",
+"A",
+"Forest: slow running",
+"Green 30%"
+],
+[
+"407",
+"A",
+"Undergrowth: slow running",
+null
+],
+[
+"408",
+"A",
+"Forest: difficult to run",
+"Green 60%"
+],
+[
+"409",
+"A",
+"Undergrowth: difficult to run",
+null
+],
+[
+"410",
+"A",
+"Vegetation: very difficult to run, impassable",
+"Opaque Green"
+],
+[
+"410.1",
+"L",
+"Vegetation: very difficult to run, impassable, line",
+"Opaque Green"
+],
+[
+"411.0",
+"A",
+"Forest runnable in one direction, 1",
+"Green 30%"
+],
+[
+"411.1",
+"A",
+"Forest runnable in one direction, 2",
+"Green 60%"
+],
+[
+"411.2",
+"A",
+"Forest runnable in one direction, 3",
+"Opaque Green"
+],
+[
+"412",
+"A",
+"Orchard",
+"Yellow"
+],
+[
+"413",
+"A",
+"Vineyard",
+"Yellow"
+],
+[
+"414",
+"L",
+"Distinct cultivation boundary",
+"Black"
+],
+[
+"415",
+"A",
+"Cultivated land",
+"Yellow"
+],
+[
+"416",
+"L",
+"Distinct vegetation boundary",
+"Black"
+],
+[
+"418",
+"P",
+"Special vegetation feature",
+"Green over White over Green"
+],
+[
+"419",
+"P",
+"Special vegetation feature",
+"Green over White over Green"
+],
+[
+"420",
+"P",
+"Special vegetation feature",
+"Green over White over Green"
+],
+[
+"501.0",
+"C",
+"Motorway",
+"Brown 50%"
+],
+[
+"501.5",
+"C",
+"Motorway, under construction",
+"Brown 50%"
+],
+[
+"502",
+"L",
+"Major road, minimum width",
+"Brown 50%"
+],
+[
+"502.1",
+"L",
+"Major road, minimum width, under construction",
+"Brown 50%"
+],
+[
+"503",
+"L",
+"Minor road",
+"Brown 50%"
+],
+[
+"503.1",
+"L",
+"Minor road, under construction",
+"Brown 50%"
+],
+[
+"504",
+"L",
+"Road",
+"Black"
+],
+[
+"505",
+"L",
+"Vehicle track",
+"Black"
+],
+[
+"506",
+"L",
+"Footpath",
+"Black"
+],
+[
+"507",
+"L",
+"Small path",
+"Black"
+],
+[
+"508",
+"L",
+"Less distinct small path",
+"Black"
+],
+[
+"509",
+"L",
+"Narrow ride",
+"Black"
+],
+[
+"512",
+"P",
+"Footbridge",
+"Black"
+],
+[
+"515",
+"L",
+"Railway",
+"Black"
+],
+[
+"516",
+"L",
+"Power line",
+"Black"
+],
+[
+"517",
+"L",
+"Major power line",
+null
+],
+[
+"518",
+"L",
+"Tunnel",
+"Black"
+],
+[
+"518.1",
+"P",
+"Tunnel, minimum size",
+"Black"
+],
+[
+"519",
+"L",
+"Stone wall",
+"Black"
+],
+[
+"520",
+"L",
+"Ruined stone wall",
+"Black"
+],
+[
+"521",
+"L",
+"High stone wall",
+"Black"
+],
+[
+"522",
+"L",
+"Fence",
+"Black"
+],
+[
+"523",
+"L",
+"Ruined fence",
+"Black"
+],
+[
+"524",
+"L",
+"High fence",
+"Black"
+],
+[
+"525",
+"P",
+"Crossing point",
+"Black"
+],
+[
+"526",
+"A",
+"Building",
+"Black"
+],
+[
+"526.1",
+"P",
+"Building, minimum size",
+"Black"
+],
+[
+"527",
+"A",
+"Settlement",
+"Green 50%, Yellow"
+],
+[
+"527.1",
+"A",
+"Settlement",
+null
+],
+[
+"528",
+"A",
+"Permanently out of bounds",
+null
+],
+[
+"528.1",
+"L",
+"Permanently out of bounds, bounding line",
+"Black"
+],
+[
+"529",
+"A",
+"Paved area",
+"Brown 50%"
+],
+[
+"529.1",
+"L",
+"Paved area, bounding line",
+"Black"
+],
+[
+"529.2",
+"C",
+"Paved area, with bounding line",
+null
+],
+[
+"530",
+"L",
+"Ruin",
+"Black"
+],
+[
+"530.1",
+"L",
+"Ruin, no dashes",
+"Black"
+],
+[
+"530.2",
+"P",
+"Ruin, minimum size",
+"Black"
+],
+[
+"531",
+"L",
+"Firing range",
+"Black"
+],
+[
+"532",
+"P",
+"Grave",
+"Black"
+],
+[
+"533",
+"L",
+"Crossable pipeline",
+"Black"
+],
+[
+"534",
+"L",
+"Uncrossable pipeline",
+"Black"
+],
+[
+"535",
+"P",
+"High tower",
+"Black"
+],
+[
+"536",
+"P",
+"Small tower",
+"Black"
+],
+[
+"537",
+"P",
+"Cairn",
+"Black"
+],
+[
+"538",
+"P",
+"Fodder rack",
+"Black"
+],
+[
+"539",
+"P",
+"Special man-made feature",
+"Black"
+],
+[
+"540",
+"P",
+"Special man-made feature",
+"Black"
+],
+[
+"601",
+"L",
+"Magnetic north line",
+"Black"
+],
+[
+"601.1",
+"A",
+"North lines pattern",
+null
+],
+[
+"601.2",
+"L",
+"Magnetic north line, blue",
+"Blue"
+],
+[
+"601.3",
+"A",
+"North lines pattern, blue",
+null
+],
+[
+"602",
+"P",
+"Registration mark",
+null
+],
+[
+"603.0",
+"P",
+"Spot height, dot",
+"Black"
+],
+[
+"603.1",
+"T",
+"Spot height, text",
+null
+],
+[
+"701",
+"P",
+"Start",
+"Purple"
+],
+[
+"702",
+"P",
+"Control point",
+"Purple"
+],
+[
+"703",
+"T",
+"Control number",
+null
+],
+[
+"704",
+"L",
+"Line",
+"Purple"
+],
+[
+"705",
+"L",
+"Marked route",
+"Purple"
+],
+[
+"706",
+"P",
+"Finish",
+"Purple"
+],
+[
+"707",
+"L",
+"Uncrossable boundary",
+"Purple"
+],
+[
+"708",
+"P",
+"Crossing point",
+"Purple"
+],
+[
+"709",
+"A",
+"Out-of-bounds area",
+null
+],
+[
+"709.1",
+"L",
+"Out-of-bounds area, solid boundary",
+"Purple"
+],
+[
+"709.2",
+"L",
+"Out-of-bounds area, dashed boundary",
+"Purple"
+],
+[
+"710",
+"A",
+"Dangerous area",
+null
+],
+[
+"711",
+"P",
+"Forbidden route",
+"Purple"
+],
+[
+"712",
+"P",
+"First aid post",
+"Purple"
+],
+[
+"713",
+"P",
+"Refreshment point",
+"Purple"
+],
+[
+"799",
+"L",
+"Simple Orienteering Course",
+null
+],
+[
+"999",
+"P",
+"OpenOrienteering Logo",
+"Black 30%"
+]
+],
+"ISSOM2007": [
+[
+"101",
+"L",
+"Contour",
+"Brown for contours"
+],
+[
+"102",
+"L",
+"Index contour",
+"Brown for contours"
+],
+[
+"103",
+"L",
+"Form line",
+"Brown for contours"
+],
+[
+"104",
+"P",
+"Slope line",
+"Brown for contours"
+],
+[
+"105",
+"T",
+"Contour value",
+null
+],
+[
+"106.0",
+"L",
+"Earth bank",
+"Brown"
+],
+[
+"106.1",
+"L",
+"Earth bank, very high",
+"Brown"
+],
+[
+"106.2",
+"L",
+"Earth bank, tag line",
+"Brown"
+],
+[
+"108.1",
+"L",
+"Small earth wall",
+"Brown"
+],
+[
+"109",
+"L",
+"Erosion gully or trench",
+"Brown"
+],
+[
+"110",
+"L",
+"Small erosion gully",
+"Brown"
+],
+[
+"112",
+"P",
+"Small knoll",
+"Brown"
+],
+[
+"113",
+"P",
+"Elongated knoll",
+"Brown"
+],
+[
+"115",
+"P",
+"Small depression",
+"Brown"
+],
+[
+"116",
+"P",
+"Pit",
+"Brown"
+],
+[
+"117.1",
+"P",
+"Broken ground, small",
+"Brown"
+],
+[
+"117.2",
+"P",
+"Broken ground",
+"Brown"
+],
+[
+"118",
+"P",
+"Prominent landform feature",
+"Brown"
+],
+[
+"201",
+"L",
+"Impassable cliff <span style=\"color:magenta\">(forbidden to cross)</span>",
+"Black"
+],
+[
+"201.0.1",
+"P",
+"Impassable cliff, minimum size <span style=\"color:magenta\">(forbidden to cross)</span>",
+"Black"
+],
+[
+"201.1",
+"L",
+"Impassable cliff, no tags <span style=\"color:magenta\">(forbidden to cross)</span>",
+"Black"
+],
+[
+"201.1.1",
+"P",
+"Impassable cliff, no tags, minimum size <span style=\"color:magenta\">(forbidden to cross)</span>",
+"Black"
+],
+[
+"201.2",
+"L",
+"Impassable cliff, tag line",
+"Black"
+],
+[
+"202",
+"A",
+"Gigantic boulder or rock pillar",
+"Black"
+],
+[
+"203",
+"L",
+"Passable rock face",
+"Black"
+],
+[
+"203.0.1",
+"P",
+"Passable rock face, minimum size",
+"Black"
+],
+[
+"203.1",
+"L",
+"Passable rock face, no tags",
+"Black"
+],
+[
+"203.1.1",
+"P",
+"Passable rock face, no tags, minimum size",
+"Black"
+],
+[
+"203.2",
+"L",
+"Passable rock face, no tags, rounded",
+"Black"
+],
+[
+"203.2.1",
+"P",
+"Passable rock face, no tags, rounded, minimum size",
+"Black"
+],
+[
+"204",
+"P",
+"Rocky pit",
+"Black"
+],
+[
+"205",
+"P",
+"Cave",
+"Black"
+],
+[
+"206",
+"P",
+"Boulder",
+"Black"
+],
+[
+"207",
+"P",
+"Large boulder",
+"Black"
+],
+[
+"208",
+"P",
+"Boulder field",
+"Black"
+],
+[
+"208.1",
+"P",
+"Boulder field, large",
+"Black"
+],
+[
+"210.1",
+"P",
+"Stony ground",
+"Black"
+],
+[
+"210.2",
+"P",
+"Stony ground, large",
+"Black"
+],
+[
+"211",
+"A",
+"Open sandy ground",
+"Yellow 50%"
+],
+[
+"212",
+"A",
+"Bare rock",
+"Grey"
+],
+[
+"303",
+"P",
+"Waterhole",
+"Blue above Brown"
+],
+[
+"304.1",
+"C",
+"Impassable body of water, with bank line, 100% blue <span style=\"color:magenta\">(forbidden to cross)</span>",
+null
+],
+[
+"304.1.1",
+"C",
+"Impassable body of water, with bank line, 75% blue <span style=\"color:magenta\">(forbidden to cross)</span>",
+null
+],
+[
+"304.2",
+"L",
+"Impassable body of water, bank line <span style=\"color:magenta\">(forbidden to cross)</span>",
+"Black"
+],
+[
+"304.3",
+"A",
+"Impassable body of water, fill, 100% blue <span style=\"color:magenta\">(forbidden to cross)</span>",
+"Opaque Blue"
+],
+[
+"304.4",
+"A",
+"Impassable body of water, fill, 75% blue <span style=\"color:magenta\">(forbidden to cross)</span>",
+"Blue 75%"
+],
+[
+"305.0.1",
+"A",
+"Passable body of water, fill",
+"Blue 30%"
+],
+[
+"305.0.2",
+"L",
+"Passable body of water, bank line",
+"Opaque Blue above Brown"
+],
+[
+"305.1",
+"C",
+"Passable body of water",
+null
+],
+[
+"306",
+"L",
+"Passable small watercourse",
+"Blue above Brown"
+],
+[
+"307",
+"L",
+"Minor watercourse",
+"Blue above Brown"
+],
+[
+"308",
+"L",
+"Narrow marsh",
+"Blue above Brown"
+],
+[
+"309",
+"C",
+"Impassable marsh <span style=\"color:magenta\">(forbidden to cross)</span>",
+null
+],
+[
+"309.0.1",
+"A",
+"Impassable marsh, fill",
+null
+],
+[
+"309.0.2",
+"L",
+"Impassable marsh, border line",
+"Black"
+],
+[
+"310",
+"A",
+"Marsh",
+null
+],
+[
+"310.1",
+"P",
+"Marsh, minimum size",
+"Blue"
+],
+[
+"311",
+"A",
+"Indistinct marsh",
+"Blue"
+],
+[
+"311.1",
+"P",
+"Indistinct marsh, minimum size",
+"Blue"
+],
+[
+"312",
+"P",
+"Small fountain or well",
+"Blue above Brown"
+],
+[
+"313",
+"P",
+"Spring",
+"Blue above Brown"
+],
+[
+"314",
+"P",
+"Prominent water feature",
+"Blue above Brown"
+],
+[
+"401",
+"A",
+"Open land",
+"Yellow"
+],
+[
+"402",
+"A",
+"Open land with scattered trees",
+"Yellow"
+],
+[
+"403",
+"A",
+"Rough open land",
+"Yellow 50%"
+],
+[
+"404",
+"A",
+"Rough open land with scattered trees",
+"Yellow 70%"
+],
+[
+"405",
+"A",
+"Forest: easy running",
+"White over Green"
+],
+[
+"406",
+"A",
+"Forest: slow running",
+"Green 30%"
+],
+[
+"406.1",
+"L",
+"Forest: slow running, minimum width",
+"Green 30%"
+],
+[
+"407",
+"A",
+"Undergrowth: slow running",
+null
+],
+[
+"408",
+"A",
+"Forest: difficult to run",
+"Green 60%"
+],
+[
+"408.1",
+"L",
+"Forest: difficult to run, minimum width",
+"Green 60%"
+],
+[
+"409",
+"A",
+"Undergrowth: difficult to run",
+null
+],
+[
+"410",
+"A",
+"Vegetation: very difficult to run",
+"Opaque Green"
+],
+[
+"410.1",
+"L",
+"Vegetation, very difficult to run, minimum width (hedge)",
+"Green above Brown"
+],
+[
+"411.1",
+"A",
+"Forest (406) runnable in one direction",
+"Green 30%"
+],
+[
+"411.2",
+"A",
+"Forest (408) runnable in one direction",
+"Green 60%"
+],
+[
+"411.3",
+"A",
+"Forest (410) runnable in one direction",
+"Opaque Green"
+],
+[
+"412",
+"A",
+"Orchard",
+"Yellow"
+],
+[
+"413",
+"A",
+"Orchard, one direction (e.g. Vineyard)",
+"Yellow"
+],
+[
+"414",
+"L",
+"Distinct cultivation boundary",
+"Black"
+],
+[
+"415",
+"A",
+"Cultivated land (seasonally out of bounds)",
+"Yellow"
+],
+[
+"416",
+"L",
+"Distinct vegetation boundary",
+"Black"
+],
+[
+"418",
+"P",
+"Prominent large tree",
+"Green above Brown"
+],
+[
+"419",
+"P",
+"Prominent bush or small tree",
+"Green above Brown"
+],
+[
+"420",
+"P",
+"Prominent vegetation feature",
+"Green above Brown"
+],
+[
+"421",
+"A",
+"Impassable vegetation <span style=\"color:magenta\">(forbidden to cross)</span>",
+"Green, Black 50%"
+],
+[
+"421.1",
+"L",
+"Impassable vegetation, minimum width (hedge)",
+"Green, Black 50% above Brown"
+],
+[
+"506.1.1",
+"L",
+"Unpaved footpath or track, urban, minimum width",
+"Brown 0-30% for paved area, urban"
+],
+[
+"506.1.2",
+"L",
+"Unpaved footpath or track, urban, 0.55mm width",
+"Brown 0-30% for paved area, urban"
+],
+[
+"506.1.3",
+"L",
+"Unpaved footpath or track, non-urban, minimum width",
+"Brown 20-50% for paved area, non-urban"
+],
+[
+"506.1.4",
+"L",
+"Unpaved footpath or track, non-urban, 0.55mm width",
+"Brown 20-50% for paved area, non-urban"
+],
+[
+"507",
+"L",
+"Small unpaved footpath or track",
+"Black"
+],
+[
+"508",
+"L",
+"Less distinct small path",
+"Black"
+],
+[
+"509",
+"L",
+"Narrow ride",
+"Black"
+],
+[
+"512.1.1",
+"L",
+"Bridge, minimum width",
+null
+],
+[
+"512.1.2",
+"L",
+"Bridge, one side",
+"Black"
+],
+[
+"515.1",
+"C",
+"Railway",
+"Black"
+],
+[
+"515.2",
+"L",
+"Tramway",
+null
+],
+[
+"516",
+"L",
+"Power line, cableway or skilift",
+"Black"
+],
+[
+"517",
+"L",
+"Major power line",
+null
+],
+[
+"518.1",
+"L",
+"Underpass or tunnel",
+"Black"
+],
+[
+"519",
+"L",
+"Passable stone wall",
+"Black"
+],
+[
+"519.1.1",
+"L",
+"Passable wall",
+"Black 50%"
+],
+[
+"519.1.2",
+"A",
+"Passable wall, plan shape",
+"Black 50%"
+],
+[
+"521.1.1",
+"L",
+"Impassable wall <span style=\"color:magenta\">(forbidden to cross)</span>",
+"Black"
+],
+[
+"521.1.2",
+"A",
+"Impassable wall, plan shape <span style=\"color:magenta\">(forbidden to cross)</span>",
+"Black"
+],
+[
+"522",
+"L",
+"Passable fence or railing",
+"Black"
+],
+[
+"524",
+"L",
+"Impassable fence or railing <span style=\"color:magenta\">(forbidden to cross)</span>",
+"Black"
+],
+[
+"525",
+"P",
+"Crossing point",
+"Black"
+],
+[
+"526.1",
+"C",
+"Building <span style=\"color:magenta\">(forbidden to pass through or over)</span>",
+null
+],
+[
+"526.1.1",
+"A",
+"Building helper 1",
+"Black 50-65% for buildings"
+],
+[
+"526.1.2",
+"L",
+"Building helper 2",
+"Black"
+],
+[
+"526.1.3",
+"P",
+"Building, minimum size <span style=\"color:magenta\">(forbidden to pass through or over)</span>",
+"Black"
+],
+[
+"526.2",
+"C",
+"Canopy",
+null
+],
+[
+"526.2.1",
+"A",
+"Canopy helper 1",
+"Black 20%"
+],
+[
+"526.2.2",
+"L",
+"Canopy helper 2",
+"Black"
+],
+[
+"526.3",
+"P",
+"Pillar",
+"Black"
+],
+[
+"528.1",
+"A",
+"Area with forbidden access <span style=\"color:magenta\">(forbidden to cross)</span>",
+"Green 50%, Yellow"
+],
+[
+"529.0.1",
+"A",
+"Paved area, urban",
+"Brown 0-30% for paved area, urban"
+],
+[
+"529.0.2",
+"C",
+"Paved area with border, urban",
+null
+],
+[
+"529.0.3",
+"L",
+"Paved road, footpath or track, urban, 0.35mm width",
+"Brown 0-30% for paved area, urban"
+],
+[
+"529.0.4",
+"L",
+"Paved road, footpath or track, urban, 0.55mm width",
+"Brown 0-30% for paved area, urban"
+],
+[
+"529.0.5",
+"L",
+"Paved road, footpath or track, urban, 0.7mm width",
+"Brown 0-30% for paved area, urban"
+],
+[
+"529.0.6",
+"L",
+"Paved road, footpath or track, urban, 0.9mm width",
+"Brown 0-30% for paved area, urban"
+],
+[
+"529.0.7",
+"A",
+"Paved area, non-urban",
+"Brown 20-50% for paved area, non-urban"
+],
+[
+"529.0.8",
+"C",
+"Paved area with border, non-urban",
+null
+],
+[
+"529.0.9",
+"L",
+"Paved road, footpath or track, non-urban, 0.35mm width",
+"Brown 20-50% for paved area, non-urban"
+],
+[
+"529.0.10",
+"L",
+"Paved road, footpath or track, non-urban, 0.55mm width",
+"Brown 20-50% for paved area, non-urban"
+],
+[
+"529.0.11",
+"L",
+"Paved road, footpath or track, non-urban, 0.7mm width",
+"Brown 20-50% for paved area, non-urban"
+],
+[
+"529.0.12",
+"L",
+"Paved road, footpath or track, non-urban, 0.9mm width",
+"Brown 20-50% for paved area, non-urban"
+],
+[
+"529.1.1",
+"L",
+"Step or edge of paved area, urban",
+"Black"
+],
+[
+"529.1.2",
+"L",
+"Step or edge of paved area, non-urban",
+"Black"
+],
+[
+"529.1.3",
+"L",
+"Step or edge of paved area, narrow stairway",
+null
+],
+[
+"529.1.4",
+"L",
+"Step or edge of paved area, wide stairway",
+null
+],
+[
+"533",
+"L",
+"Passable pipeline",
+"Black"
+],
+[
+"534",
+"L",
+"Impassable pipeline <span style=\"color:magenta\">(forbidden to cross)</span>",
+"Black"
+],
+[
+"535",
+"P",
+"High tower",
+"Black"
+],
+[
+"536",
+"P",
+"Small tower",
+"Black"
+],
+[
+"537",
+"P",
+"Cairn, memorial, small monument or boundary stone",
+"Black"
+],
+[
+"538",
+"P",
+"Fodder rack",
+"Black"
+],
+[
+"539",
+"P",
+"Prominent man-made feature",
+"Black"
+],
+[
+"540",
+"P",
+"Prominent man-made feature",
+"Black"
+],
+[
+"601.0.1",
+"L",
+"Magnetic north line - black",
+"Black"
+],
+[
+"601.0.2",
+"L",
+"Magnetic north line, black with arrow",
+"Black"
+],
+[
+"601.0.3",
+"A",
+"North lines pattern - black",
+null
+],
+[
+"601.0.4",
+"L",
+"Magnetic north line, blue",
+"Blue above Brown"
+],
+[
+"601.0.5",
+"L",
+"Magnetic north line, blue, with arrow",
+"Blue above Brown"
+],
+[
+"601.0.6",
+"A",
+"North lines pattern, blue",
+null
+],
+[
+"602",
+"P",
+"Registration mark",
+null
+],
+[
+"603.0.1",
+"P",
+"Spot height, dot",
+"Black"
+],
+[
+"603.0.2",
+"T",
+"Spot height",
+null
+],
+[
+"701",
+"P",
+"Start",
+"Purple"
+],
+[
+"702",
+"P",
+"Control point",
+"Purple"
+],
+[
+"703",
+"T",
+"Control number",
+null
+],
+[
+"704",
+"L",
+"Line",
+"Purple"
+],
+[
+"705",
+"L",
+"Marked route",
+"Purple"
+],
+[
+"706",
+"P",
+"Finish",
+"Purple"
+],
+[
+"707",
+"L",
+"Uncrossable boundary <span style=\"color:magenta\">(forbidden to cross)</span>",
+"Purple"
+],
+[
+"708",
+"P",
+"Crossing point",
+"Purple"
+],
+[
+"708.1",
+"L",
+"Crossing section, one side",
+"Purple"
+],
+[
+"709",
+"A",
+"Out-of-bounds area <span style=\"color:magenta\">(forbidden to cross)</span>",
+null
+],
+[
+"709.1",
+"L",
+"Out-of-bounds area, solid boundary",
+"Purple"
+],
+[
+"709.2",
+"L",
+"Out-of-bounds area, dashed boundary",
+"Purple"
+],
+[
+"712",
+"P",
+"First aid post",
+"Purple"
+],
+[
+"713",
+"P",
+"Refreshment point",
+"Purple"
+],
+[
+"714",
+"A",
+"Temporary construction or closed area <span style=\"color:magenta\">(forbidden to cross)</span>",
+"Purple 50%"
+],
+[
+"799",
+"L",
+"Simple Orienteering Course",
+null
+],
+[
+"999",
+"P",
+"OpenOrienteering Logo",
+"Black 30%"
+]
+]
+}

@@ -1,0 +1,16 @@
+TP|Les parcours entre postes sont les parties les plus importantes d'un parcours d'orientation et déterminent sa qualité
+TP|Il est préférable qu'un circuit d'orientation ait quelques très bons parcours entre postes dont les liaisons sont conçues pour les mettre en valeur plutôt qu'un grand nombre de parcours entre postes de qualité moyenne
+TP|Un parcours plaisant est un parcours varié, c'est-à-dire qui présente des changements de direction, de longueurs différentes entre les postes et qui impose d'utiliser les diverses techniques d'orientation
+TP|L'objectif principal d'un poste de contrôle est de marquer le début et la fin d'un parcours entre postes
+TP|du dernier poste vers l'arrivée
+TP|un itinéraire balisé et obligatoire
+TP|Des itinéraires ne nécessitant aucune lecture de carte
+TP|sont à éviter
+TP|Tracer un parcours c'est penser un itinéraire
+ISOM|L'espace minimum indiquant un passage entre deux bâtiments ou entre un bâtiment et un autre élément infranchissable devrait être de 0,4 mm
+RTS|les postes ne doivent pas être placés à moins de 30 mètres à vol
+RTS|Deux postes disposés sur deux éléments de même nature ne peuvent être à moins de
+RTS|la distance minimum entre 2 postes est de 25m en distance de course et de 15m
+RTS|temps de course maximum préconisé
+RTS|Il est recommandé que la somme des dénivelées positives sur un parcours ne dépasse pas 4% de la longueur du
+TAP|Le poste est à l'intersection de la limite

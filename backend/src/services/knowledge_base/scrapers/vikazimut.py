@@ -9,7 +9,12 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 import requests
-from bs4 import BeautifulSoup
+try:
+    from bs4 import BeautifulSoup
+    _BS4_AVAILABLE = True
+except ImportError:
+    _BS4_AVAILABLE = False
+    BeautifulSoup = None  # type: ignore[assignment,misc]
 
 
 # =============================================

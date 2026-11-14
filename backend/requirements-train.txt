@@ -1,0 +1,14 @@
+# =============================================
+# AItraceur — entraînement CNN uniquement
+# (non requis pour lancer le backend FastAPI)
+# Installation : pip install -r requirements-train.txt
+# =============================================
+
+# Inclure d'abord les dépendances runtime
+-r requirements.txt
+
+# === Entraînement CNN ===
+torch>=2.1.0
+torchvision>=0.16.0
+xgboost>=2.0.0
+opencv-python>=4.8.0

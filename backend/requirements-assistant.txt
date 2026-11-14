@@ -1,0 +1,20 @@
+# =============================================
+# AItraceur — assistant RAG (knowledge_base/)
+# Sera revu en phase 8.
+# Installation : pip install -r requirements-assistant.txt
+# =============================================
+
+# Inclure d'abord les dépendances runtime
+-r requirements.txt
+
+# === Embeddings & vectorstore ===
+sentence-transformers>=2.6.0
+chromadb>=0.4.0
+
+# === Lecture de documents (knowledge_base/document_loader.py) ===
+beautifulsoup4>=4.12.0
+PyPDF2>=3.0.0
+python-docx>=1.1.0
+
+# === LLM OpenAI (optionnel, payant) ===
+openai>=1.0.0

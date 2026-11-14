@@ -11,7 +11,12 @@ from typing import Dict, List, Optional
 from urllib.parse import urljoin, urlparse, parse_qs
 
 import requests
-from bs4 import BeautifulSoup
+try:
+    from bs4 import BeautifulSoup
+    _BS4_AVAILABLE = True
+except ImportError:
+    _BS4_AVAILABLE = False
+    BeautifulSoup = None  # type: ignore[assignment,misc]
 
 
 # =============================================

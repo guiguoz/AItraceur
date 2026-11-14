@@ -107,6 +107,7 @@ backend/data/rg2/rg2_scrape_log.json
 curl.exe
 poppler/
 tools/
+!backend/tools/
 backend/data/models/best_model.pth
 *.pth
 *.pt

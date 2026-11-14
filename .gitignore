@@ -122,7 +122,7 @@ vikazimut/index.json
 vikazimut/stats.json
 
 # Dossiers non-versionés
-AItraceur/
+/AItraceur/
 xml/
 backend/data/rg2/
 

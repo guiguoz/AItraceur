@@ -10,20 +10,20 @@ from __future__ import annotations
 
 import pytest
 
-from src.aitraceur.controls.symbol_map import (
+from src.aitraceur_proto.controls.symbol_map import (
     SemanticCategory,
     TerrainType,
     get_semantic_info,
     is_forbidden,
     is_layout,
 )
-from src.aitraceur.controls.ocad_parser import (
+from src.aitraceur_proto.controls.ocad_parser import (
     parse_geojson,
     extract_forbidden_zones,
     extract_linear_features,
 )
-from src.aitraceur.controls.generator import generate_control_candidates
-from src.aitraceur.controls.candidate import DetailType
+from src.aitraceur_proto.controls.generator import generate_control_candidates
+from src.aitraceur_proto.controls.candidate import DetailType
 
 
 class TestSymbolMap:

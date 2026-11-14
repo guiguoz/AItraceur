@@ -9,10 +9,10 @@ from __future__ import annotations
 import pytest
 from shapely.geometry import LineString, Point, Polygon
 
-from src.aitraceur.controls.candidate import ControlCandidate, DetailType
-from src.aitraceur.controls.ocad_parser import SemanticFeature
-from src.aitraceur.controls.symbol_map import SemanticCategory, SemanticInfo, TerrainType
-from src.aitraceur.profiles import (
+from src.aitraceur_proto.controls.candidate import ControlCandidate, DetailType
+from src.aitraceur_proto.controls.ocad_parser import SemanticFeature
+from src.aitraceur_proto.controls.symbol_map import SemanticCategory, SemanticInfo, TerrainType
+from src.aitraceur_proto.profiles import (
     CourseEnvironment,
     PROFILE_FOREST_MIDDLE_ORANGE,
     PROFILE_SPRINT_URBAN,
@@ -140,7 +140,7 @@ def simple_semantic_features(ten_candidates):
     Simule des SemanticFeature correspondant aux 10 candidats.
     Utilisé pour tester le MovementModel sans parsing OCAD réel.
     """
-    from src.aitraceur.controls.symbol_map import get_semantic_info
+    from src.aitraceur_proto.controls.symbol_map import get_semantic_info
 
     features = []
     for cand in ten_candidates:

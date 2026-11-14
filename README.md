@@ -251,9 +251,11 @@ cd backend && python scripts/train_control_scorer.py --phase xgboost
 
 ---
 
-## Moteur `aitraceur` — Bibliothèque core (standalone)
+## Prototype gelé `aitraceur_proto/` (mars 2026)
 
-Le répertoire `backend/src/aitraceur/` est une bibliothèque Python autonome (~7 500 lignes) qui encapsule tout le pipeline de génération de tracés en dehors de FastAPI.
+Le répertoire `backend/src/aitraceur_proto/` est un prototype Python autonome (~7 500 lignes),
+non branché sur FastAPI. Gelé — supprimé en phase 6 du plan de refondation.
+Voir `docs/plan/01_ETAT_DES_LIEUX.md` §C1.
 
 ### Modules
 

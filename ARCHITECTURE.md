@@ -13,7 +13,7 @@ Frontend React + Vite
     ▼
 Backend FastAPI (8000) ←──────→ Tile Service Node.js (8089)
     │                                    │
-    ├── aitraceur/ (lib core, ~7500 LOC) │  OCAD .ocd → PNG tiles
+    ├── aitraceur_proto/ (prototype gelé, mars 2026) │  OCAD .ocd → PNG tiles
     ├── services/ (terrain, ML, export)  │
     └── SQLite                           │
 ```
@@ -64,12 +64,13 @@ POST /generate-sprint  →  {task_id, status: "processing"}  <100ms
 GET /sprint-status/{task_id}  →  {status, controls, dialogue, …}   polling 2s
 ```
 
-### 3.3. Librairie core `aitraceur/` (~7 500 LOC)
+### 3.3. Prototype gelé `aitraceur_proto/` (mars 2026)
 
-Bibliothèque Python autonome, indépendante de FastAPI. Encapsule tout le pipeline de génération.
+Bibliothèque Python autonome, non branchée sur FastAPI. Gelée — supprimée en phase 6 du plan.
+Voir `docs/plan/01_ETAT_DES_LIEUX.md` §C1.
 
 ```
-backend/src/aitraceur/
+backend/src/aitraceur_proto/
 ├── controls/          # ControlCandidate, enrichissement, parseur OCAD, carte symboles ISOM
 ├── matrix/            # CostMatrix (Tobler A* parallèle), LegCache (thread-safe), SpatialFilter
 ├── model/             # Leg, Course — objets immuables

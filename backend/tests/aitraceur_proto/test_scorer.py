@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import pytest
 
-from src.aitraceur.model.course import Course
-from src.aitraceur.scoring.scorer import score_course
-from src.aitraceur.scoring.breakdown import CourseScoreBreakdown
+from src.aitraceur_proto.model.course import Course
+from src.aitraceur_proto.scoring.scorer import score_course
+from src.aitraceur_proto.scoring.breakdown import CourseScoreBreakdown
 
 
 class TestScoreCourse:

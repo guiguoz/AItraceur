@@ -11,7 +11,7 @@ import math
 import numpy as np
 import pytest
 
-from src.aitraceur.navigation.terrain_3d import (
+from src.aitraceur_proto.navigation.terrain_3d import (
     TerrainMovementCost,
     compute_climb_along_path,
     shortest_path_time,
@@ -290,7 +290,7 @@ class TestComputeClimbAlongPath:
 
 class TestLegKmEffort:
     def test_km_effort_flat(self):
-        from src.aitraceur.model.leg import Leg
+        from src.aitraceur_proto.model.leg import Leg
         leg = Leg(
             start_id="s", end_id="e",
             distance=1000.0, bearing_deg=90.0, bearing_change_deg=0.0,
@@ -301,7 +301,7 @@ class TestLegKmEffort:
         assert abs(leg.km_effort - 1.0) < 1e-9
 
     def test_km_effort_with_climb(self):
-        from src.aitraceur.model.leg import Leg
+        from src.aitraceur_proto.model.leg import Leg
         leg = Leg(
             start_id="s", end_id="e",
             distance=1000.0, bearing_deg=90.0, bearing_change_deg=0.0,
@@ -312,7 +312,7 @@ class TestLegKmEffort:
         assert abs(leg.km_effort - 2.0) < 1e-9
 
     def test_distance_2d_alias(self):
-        from src.aitraceur.model.leg import Leg
+        from src.aitraceur_proto.model.leg import Leg
         leg = Leg(
             start_id="s", end_id="e",
             distance=500.0, bearing_deg=0.0, bearing_change_deg=0.0,
@@ -322,7 +322,7 @@ class TestLegKmEffort:
         assert leg.distance_2d == leg.distance
 
     def test_climb_default_zero(self):
-        from src.aitraceur.model.leg import Leg
+        from src.aitraceur_proto.model.leg import Leg
         leg = Leg(
             start_id="s", end_id="e",
             distance=300.0, bearing_deg=0.0, bearing_change_deg=0.0,

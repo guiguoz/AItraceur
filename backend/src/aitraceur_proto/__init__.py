@@ -1,4 +1,5 @@
-"""
+"""PROTOTYPE GELÉ (mars 2026). Ne pas modifier, ne pas importer. Supprimé en phase 6 du plan.
+
 aitraceur — Moteur sémantique de génération de circuits de CO.
 
 Architecture en 7 couches :

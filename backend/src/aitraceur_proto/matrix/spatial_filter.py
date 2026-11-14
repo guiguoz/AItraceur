@@ -9,7 +9,7 @@ Les paires sont ORIENTÉES (A→B ≠ B→A) car la topographie est asymétrique
 (montée vs descente).
 
 Exemple :
-    from src.aitraceur.matrix.spatial_filter import build_candidate_pairs
+    from src.aitraceur_proto.matrix.spatial_filter import build_candidate_pairs
 
     pairs = build_candidate_pairs(candidates, k_neighbors=15, max_distance=1500.0)
     # pairs = [(c1, c2), (c2, c1), (c1, c3), ...]

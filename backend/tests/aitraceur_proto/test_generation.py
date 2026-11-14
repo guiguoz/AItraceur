@@ -11,12 +11,12 @@ from __future__ import annotations
 import random
 import pytest
 
-from src.aitraceur.matrix.cost_matrix import CostMatrix, build_cost_matrix
-from src.aitraceur.model.course import Course
-from src.aitraceur.navigation.movement import MovementModel
-from src.aitraceur.generation.constructive import generate_initial_course
-from src.aitraceur.generation.local_opt import improve_course_local
-from src.aitraceur.scoring.scorer import score_course
+from src.aitraceur_proto.matrix.cost_matrix import CostMatrix, build_cost_matrix
+from src.aitraceur_proto.model.course import Course
+from src.aitraceur_proto.navigation.movement import MovementModel
+from src.aitraceur_proto.generation.constructive import generate_initial_course
+from src.aitraceur_proto.generation.local_opt import improve_course_local
+from src.aitraceur_proto.scoring.scorer import score_course
 
 
 # ---------------------------------------------------------------------------
@@ -56,7 +56,7 @@ class TestCostMatrix:
                 assert cm.cost(ca, cb) == cm.cost(cb, ca)
 
     def test_unknown_candidate_returns_none(self, synthetic_cost_matrix, ten_candidates):
-        from src.aitraceur.controls.candidate import ControlCandidate, DetailType
+        from src.aitraceur_proto.controls.candidate import ControlCandidate, DetailType
         from shapely.geometry import Point
         ghost = ControlCandidate(
             id="ghost_999",

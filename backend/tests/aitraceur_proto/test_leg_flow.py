@@ -15,11 +15,11 @@ import math
 import pytest
 from shapely.geometry import Point
 
-from src.aitraceur.controls.candidate import ControlCandidate, DetailType
-from src.aitraceur.controls.enricher import enrich_candidates, select_elite_candidates
-from src.aitraceur.matrix.leg_cache import LegCache
-from src.aitraceur.model.leg import Leg, compute_leg_features
-from src.aitraceur.scoring.flow import (
+from src.aitraceur_proto.controls.candidate import ControlCandidate, DetailType
+from src.aitraceur_proto.controls.enricher import enrich_candidates, select_elite_candidates
+from src.aitraceur_proto.matrix.leg_cache import LegCache
+from src.aitraceur_proto.model.leg import Leg, compute_leg_features
+from src.aitraceur_proto.scoring.flow import (
     compute_flow_score,
     compute_rhythm_score,
     compute_variation_score,
@@ -263,7 +263,7 @@ class TestRhythmScore:
 
 class TestFlowScore:
     def _make_leginfo(self, bc: float, dist: float):
-        from src.aitraceur.model.course import LegInfo
+        from src.aitraceur_proto.model.course import LegInfo
         return LegInfo(
             from_idx=0, to_idx=1,
             from_type=DetailType.BOULDER, to_type=DetailType.KNOLL,
@@ -318,7 +318,7 @@ class TestControlsQuality:
 
 class TestLegsQuality:
     def _make_enriched_leginfo(self, rcc: float, runn: float, tech: float):
-        from src.aitraceur.model.course import LegInfo
+        from src.aitraceur_proto.model.course import LegInfo
         return LegInfo(
             from_idx=0, to_idx=1,
             from_type=DetailType.BOULDER, to_type=DetailType.KNOLL,
@@ -349,7 +349,7 @@ class TestLegsQuality:
 
 class TestCourseMetricsIntegration:
     def test_new_fields_present(self, ten_candidates, forest_profile):
-        from src.aitraceur.model.course import Course
+        from src.aitraceur_proto.model.course import Course
         course = Course(controls=ten_candidates[:6], profile=forest_profile)
         course = course.compute_metrics()
         m = course.metrics
@@ -360,7 +360,7 @@ class TestCourseMetricsIntegration:
         assert hasattr(m, "flow_score")
 
     def test_new_fields_in_range(self, ten_candidates, forest_profile):
-        from src.aitraceur.model.course import Course
+        from src.aitraceur_proto.model.course import Course
         course = Course(controls=ten_candidates[:6], profile=forest_profile)
         course = course.compute_metrics()
         m = course.metrics
@@ -370,7 +370,7 @@ class TestCourseMetricsIntegration:
             assert 0.0 <= val <= 1.0, f"{attr} = {val} hors [0,1]"
 
     def test_leginfo_new_fields(self, ten_candidates, forest_profile):
-        from src.aitraceur.model.course import Course
+        from src.aitraceur_proto.model.course import Course
         course = Course(controls=ten_candidates[:4], profile=forest_profile)
         course = course.compute_metrics()
         for leg in course.metrics.legs:
@@ -387,8 +387,8 @@ class TestCourseMetricsIntegration:
 
 class TestBreakdownNewScores:
     def test_new_fields_in_breakdown(self, ten_candidates, forest_profile):
-        from src.aitraceur.model.course import Course
-        from src.aitraceur.scoring.scorer import score_course
+        from src.aitraceur_proto.model.course import Course
+        from src.aitraceur_proto.scoring.scorer import score_course
         course = Course(controls=ten_candidates[:6], profile=forest_profile)
         bd = score_course(course)
         assert hasattr(bd, "controls_quality_score")
@@ -399,8 +399,8 @@ class TestBreakdownNewScores:
         assert 0.0 <= bd.flow_score <= 1.0
 
     def test_to_dict_includes_new_fields(self, ten_candidates, forest_profile):
-        from src.aitraceur.model.course import Course
-        from src.aitraceur.scoring.scorer import score_course
+        from src.aitraceur_proto.model.course import Course
+        from src.aitraceur_proto.scoring.scorer import score_course
         course = Course(controls=ten_candidates[:6], profile=forest_profile)
         bd = score_course(course)
         d = bd.to_dict()

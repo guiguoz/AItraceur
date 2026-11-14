@@ -11,10 +11,10 @@ from __future__ import annotations
 import pytest
 from shapely.geometry import LineString, Point, Polygon
 
-from src.aitraceur.navigation.raster import BBox, CostRaster
-from src.aitraceur.navigation.graph import NavigationGraph
-from src.aitraceur.navigation.movement import MovementModel
-from src.aitraceur.profiles import CourseEnvironment, PROFILE_FOREST_MIDDLE_ORANGE
+from src.aitraceur_proto.navigation.raster import BBox, CostRaster
+from src.aitraceur_proto.navigation.graph import NavigationGraph
+from src.aitraceur_proto.navigation.movement import MovementModel
+from src.aitraceur_proto.profiles import CourseEnvironment, PROFILE_FOREST_MIDDLE_ORANGE
 
 
 class TestNavigationGraph:

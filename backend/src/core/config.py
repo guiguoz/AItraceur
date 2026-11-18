@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     # --- OCAD ---
     OCAD_SUPPORTED_VERSION: int = 12
 
+    # --- Banc d'essai ---
+    # Si défini, capture les corps de requête dans ce répertoire (hors dépôt).
+    AITRACEUR_CAPTURE_DIR: Optional[str] = None
+    # Quand False : skip OSM/MapAnt/IGN dans les pipelines de génération.
+    # Défaut True pour ne rien changer au comportement nominal.
+    AITRACEUR_ONLINE: bool = True
+
     # --- Class Config pour Pydantic ---
     class Config:
         env_file = ".env"

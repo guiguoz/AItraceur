@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from src.core.config import settings
+from src.api.capture import capture_request
 from src.core.database import get_db, engine, Base
 from src.models.circuit import Circuit, ControlPoint
 from src.models.competition import Competition
@@ -2312,7 +2313,9 @@ def _circuit_impl(body: dict) -> dict:
 
     # ── ElevationCache (SRTM/IGN — terme G fitness D+) ───────────────────────
     elevation_cache = None
-    if bounding_box:
+    if not settings.AITRACEUR_ONLINE:
+        print("[offline] build_elevation_cache ignoré", flush=True)
+    elif bounding_box:
         try:
             from src.services.terrain.lidar_manager import build_elevation_cache as _build_elev
             elevation_cache = _build_elev(bounding_box, n_cols=30, n_rows=30, timeout=20)
@@ -2338,7 +2341,9 @@ def _circuit_impl(body: dict) -> dict:
     # pour les circuits forêt/MD/LD. Non bloquant.
     _route_analyzer_circuit = None
     _ct_lower = (circuit_type or "md").lower()
-    if bounding_box and _ct_lower not in ("sprint",):
+    if not settings.AITRACEUR_ONLINE:
+        print("[offline] RouteAnalyzer OSM ignoré", flush=True)
+    elif bounding_box and _ct_lower not in ("sprint",):
         try:
             from src.services.terrain.osm_fetcher import extract_sprint_features as _ext_osm
             from src.services.optimization.route_analyzer import RouteAnalyzer as _RA
@@ -2500,6 +2505,7 @@ def _run_circuit_task(task_id: str, body: dict) -> None:
 )
 def generate_circuit_async(body: dict = Body(...)):
     task_id = str(uuid.uuid4())
+    capture_request("circuit", body)
     _circuit_tasks[task_id] = {"status": "processing"}
     _sprint_executor.submit(_run_circuit_task, task_id, body)
     return {"task_id": task_id, "status": "processing"}
@@ -4053,6 +4059,13 @@ def _sprint_impl(task_id: str, body: dict) -> None:
             map_scale = _s if 1000 <= _s <= 50000 else None
         except (ValueError, TypeError):
             pass
+    _raw_seed_s = body.get("ga_seed")
+    ga_seed: Optional[int] = None
+    if _raw_seed_s is not None:
+        try:
+            ga_seed = int(_raw_seed_s)
+        except (ValueError, TypeError):
+            pass
     _seg_cache_id_s = body.get("segment_cache_id")
     _seg_index_sprint = _seg_index_cache.get(_seg_cache_id_s) if _seg_cache_id_s else None
     _raw_features_s = list(body.get("ocad_geojson_features") or [])
@@ -4097,7 +4110,9 @@ def _sprint_impl(task_id: str, body: dict) -> None:
     # leur nombre, pour combiner les deux sources de connaissance terrain.
     # Si zones OOB déjà issues d'OCAD → skip la requête bâtiments Overpass.
     ocad_candidates_count = len(candidate_points)
-    if bounding_box:
+    if not settings.AITRACEUR_ONLINE:
+        print(f"{_tag} [offline] enrichissement OSM ignoré", flush=True)
+    elif bounding_box:
         try:
             osm_result = extract_sprint_features(bounding_box, include_buildings=not ocad_oob_fetched)
             osm_candidates = osm_result.get("candidates") or []
@@ -4319,6 +4334,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
         ocad_line_segments=ocad_line_segments_sprint,
         segment_index=_seg_index_sprint,
         latent_regime=str(body.get("latent_regime")).strip() if body.get("latent_regime") else None,
+        ga_seed=ga_seed,
     )
 
     print(f"{_tag} {_time.time()-_t0:.1f}s [...] GA generate ({len(candidate_points)} candidats)...", flush=True)
@@ -4940,6 +4956,7 @@ def _run_sprint_task(task_id: str, body: dict) -> None:
 )
 def generate_sprint_with_validation(body: dict = Body(...)):
     """Lance le pipeline sprint en arrière-plan et retourne un task_id."""
+    capture_request("sprint", body)
     task_id = str(uuid.uuid4())
     _sprint_tasks[task_id] = {"status": "processing", "result": None}
     _cleanup_sprint_tasks()

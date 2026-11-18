@@ -52,7 +52,7 @@
 - **Génération automatique** de circuits sprint (urbain) et forêt via algorithme génétique multi-objectifs
 - **Sprint asynchrone** : POST retourne `task_id` en <100ms, pipeline en arrière-plan (~35s), polling GET `/sprint-status`
 - **Contexte terrain manuel** : sélecteur [Auto / Urbain / Forêt] pour forcer le mode détection IA
-- **Fitness multicritère A→L** : IA Score CNN (HeatmapCache), distance, dog-legs, rythme, diversité, zones interdites, D+/distance, forme géométrique, point d'attaque/arrêt/main courante, longueur jambes IOF
+- **Sélection GA par `_default_scoring`** : critères pondérés (CNN HeatmapCache, distance, dog-legs, rythme, diversité, zones interdites, D+/distance, forme géométrique, navigation OCAD, longueur jambes IOF) — `evaluate_fitness` (termes A→L) est une télémétrie uniquement, non branchée sur la sélection (constat C2)
 - **Pipeline OCAD natif** : le fichier `.ocd` uploadé alimente directement l'IA — zones interdites extraites des vecteurs (sym 709/527 ISSprOM/ISOM), image rasterisée normalisée vers la distribution MapAnt d'entraînement
 - **HeatmapCache** : grille de scores V2 précomputée (O(1) lookups GA), Smart Seeding population initiale — source : OCAD tile service (priorité) ou MapAnt (fallback forêt/LD)
 - **Forbidden mask vectoriel** : polygones OOB extraits directement depuis les symboles OCAD (100 % fiable) ; requête Overpass bâtiments skippée → gain ~50s

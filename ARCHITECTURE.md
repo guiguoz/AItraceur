@@ -209,22 +209,16 @@ HeatmapCache passé au GA → lookups O(1) pendant l'évolution
 
 ## 7. Algorithme génétique — Patterns clés
 
-### 7.1. Fitness multicritère (termes A→L)
+### 7.1. Sélection GA — `_default_scoring`
 
-| Terme | Critère | Poids |
-|-------|---------|-------|
-| A | Score CNN HeatmapCache (O(1)) | ×30 |
-| B | Pénalité distance vs cible | ×40 |
-| C | Dog-legs (−20 pts/violation) | ×1 |
-| D | Rythme CV inter-postes (cap 0.8) | ×15 |
-| E | Diversité GPX Vikazimut | additive |
-| F | Zones interdites (−50 pts/poste) | additive |
-| G | D+/distance > 4% IOF (ElevationCache) | additive |
-| H | Forme géométrique anti-Z/spirale | ×10 |
-| I | Qualité point d'attaque (KDTree OCAD) | ×8 |
-| J | Ligne d'arrêt (KDTree OCAD) | ×6 |
-| K | Main courante (KDTree OCAD) | ×5 |
-| L | Longueur jambes vs profil IOF (Sprint 250m, MD 600m, LD 2000m) | ×8 |
+La sélection des circuits est faite par `_default_scoring` (`genetic_algo.py` l.3061-3414).
+`evaluate_fitness` (termes A→L) n'est appelée qu'une fois par génération sur le meilleur
+circuit, à titre de **télémétrie** ; elle n'a jamais piloté la sélection.
+Voir `docs/plan/REGISTRE.md` (E02, X01) pour le constat établi.
+
+Critères effectifs dans `_default_scoring` : score CNN HeatmapCache, pénalité distance,
+dog-legs, rythme CV, diversité, zones interdites, D+/distance, forme géométrique,
+qualité navigation OCAD (attaque/arrêt/main courante), longueur jambes IOF.
 
 ### 7.2. ISOM KDTree Phase 2
 

@@ -1,0 +1,17 @@
+{
+  "circuits_generated": 1,
+  "circuits": [
+    {
+      "id": "circuit_42",
+      "controls": [
+        [2.350, 49.120],
+        [2.355, 49.125],
+        [2.360, 49.128],
+        [2.350, 49.120]
+      ],
+      "total_length_m": 1800.0,
+      "score": 72.5,
+      "generation_method": "hybrid"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "controls": [
+    {"x": 2.350, "y": 49.120, "type": "start"},
+    {"x": 2.355, "y": 49.125, "type": "control"},
+    {"x": 2.360, "y": 49.128, "type": "control"},
+    {"x": 2.350, "y": 49.120, "type": "finish"}
+  ],
+  "is_valid": true,
+  "score": 85.0
+}

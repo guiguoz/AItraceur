@@ -4,3 +4,4 @@ sprint_20261119T172115Z_a562c112.json | PORTEN-BESSIN | sprint
 circuit_20261122T083414Z_a2f6feae.json | FORET-DE-CAEN | foret MD H21E
 circuit_20261122T084351Z_a63cd765.json | FORET-DE-CAEN | couleur Jaune
 circuit_20261122T092812Z_5685384b.json | KUTI | foret MD H21E
+circuit_20261122T095424Z_7ca39337.json | STE-ANNE-II | foret MD H21E

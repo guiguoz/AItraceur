@@ -14,16 +14,23 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$ROOT/p0-livrables"
 WT="/tmp/wt-p0-final"
 
-echo "== 1. récupération de la branche distante =="
+# Référence de base : par défaut `origin/main` (la phase 0 y est fusionnée).
+# Surchargeable : P0_BASE_REF=origin/plan/p0-socle bash p0-livrables/finalize.sh
+BASE_REF="${P0_BASE_REF:-origin/main}"
+
+echo "== 1. récupération de la référence de base ($BASE_REF) =="
 cd "$ROOT"
-git fetch origin "+refs/heads/plan/p0-socle:refs/remotes/origin/plan/p0-socle"
-TIP="$(git rev-parse --short origin/plan/p0-socle)"
-echo "   tip = $TIP"
+case "$BASE_REF" in
+  origin/*) git fetch origin "+refs/heads/${BASE_REF#origin/}:refs/remotes/$BASE_REF" ;;
+  *)        git fetch origin "$BASE_REF" ;;
+esac
+TIP="$(git rev-parse --short "$BASE_REF")"
+echo "   tip = $TIP ($BASE_REF)"
 
 echo "== 2. worktree sur le tip distant =="
 git worktree remove "$WT" --force 2>/dev/null || true
 git worktree prune
-git worktree add --detach "$WT" origin/plan/p0-socle >/dev/null
+git worktree add --detach "$WT" "$BASE_REF" >/dev/null
 
 echo "== 3. contrôle des huit artefacts =="
 MISSING=0
@@ -51,10 +58,14 @@ echo "== 5. injection du registre et du compte rendu =="
 python3 "$OUT/apply_registre.py" "$WT"
 python3 "$OUT/apply_p0_crc.py" "$WT"
 
-echo "== 5 bis. ajout de l'inventaire des captures (fichier nouveau) =="
+echo "== 5 bis. ajout des fichiers générés (nouveaux) =="
 cp "$OUT/P0_captures.md" "$WT/docs/plan/mesures/P0_captures.md"
-# `git add -N` : le fichier apparaît dans `git diff` comme ajout, sans être indexé
-( cd "$WT" && git add -N docs/plan/mesures/P0_captures.md )
+# `git add -N` : les fichiers apparaissent dans `git diff` comme ajouts, sans être indexés
+( cd "$WT" && git add -N \
+    docs/plan/mesures/P0_captures.md \
+    docs/plan/mesures/P0_baseline.md \
+    docs/plan/mesures/P0_synthese.md \
+    docs/plan/mesures/P0_registre_rows.md )
 
 echo "== 6. patch =="
 cd "$WT"

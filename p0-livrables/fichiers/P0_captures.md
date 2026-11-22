@@ -81,7 +81,7 @@ Le plan (`docs/plan/10_P0_socle_et_mesure.md` §0.9) demande « au minimum deux 
 | ≥ 2 sprints | 3 sprints | dépassé |
 | 3 forêts, dont une de la liste (airelles, cerisy, grochot, llose, montmirel, **steanne**) | 4 forêts : Forêt de Caen (×2), **Kûti** (Estonie), Ste Anne II | **Ste Anne II** est la seule de la liste ; Forêt de Caen (×2) et Kûti sont des substituts |
 | — | Kûti est **hors France** | non prévu ; a imposé l'enregistrement d'EPSG:3301 (E45) |
-| `docs/plan/mesures/P0_baseline.md` | `P0_baseline_summary.md` + `P0_baseline_results.jsonl` + `P0_baseline_determinism.json` + `P0_baseline_run_metadata.json` (+ les quatre équivalents `P0_baseline_offline_*`) | le plan ne demandait qu'un résumé et un seul mode ; la donnée brute des **deux** modes est versionnée en plus, pour que E36–E43 et E50 soient contrôlables à la relecture. Le nom `P0_baseline.md` n'est pas créé : il désignerait un seul mode alors que la ligne de base en couvre deux |
+| `docs/plan/mesures/P0_baseline.md` | existe : valeurs de base **par carte** (K2, K3, K4, `forbidden_hits`, `is_loop`, déterminisme) pour les **deux** modes | le plan ne demandait qu'un résumé pour un seul mode ; la ligne de base réelle couvre deux modes et sept captures. À côté sont versionnées les **huit** sorties brutes du banc (`P0_baseline_*` et `P0_baseline_offline_*`), sans lesquelles E36–E43, E49 et E50 ne seraient pas contrôlables à la relecture. Un seul fichier de base, pas deux résumés concurrents |
 
 Les deux cartes de Forêt de Caen partagent la même emprise, les mêmes 1 041 entités et les mêmes
 11 zones interdites : ce sont deux profils de la **même** carte (MD H21E et couleur Jaune), comme

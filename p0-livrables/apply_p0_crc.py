@@ -25,7 +25,15 @@ def section(md: str, header: str) -> tuple[int, int]:
 
 
 def replace_section(md: str, header: str, new_text: str) -> str:
-    start, end = section(md, header)
+    """Remplace une section. Idempotent : si l'ancien titre a disparu mais que le
+    nouveau est déjà en place, le document est renvoyé tel quel."""
+    try:
+        start, end = section(md, header)
+    except SystemExit:
+        nouveau = new_text.strip().splitlines()[0].strip() if new_text.strip() else ""
+        if nouveau and re.search(rf"^{re.escape(nouveau)}\s*$", md, re.M):
+            return md
+        raise
     return md[:start] + new_text.rstrip("\n") + "\n\n" + md[end:]
 
 
@@ -121,8 +129,9 @@ Les 4 échecs sont antérieurs à la phase 0 et tous situés dans `tests/aitrace
 | 0.9 | **Aucun sprint Caen** | l'inventaire réel comporte Bayeux, Dôme, Porten-Bessin |
 | 0.9 | **Kûti est hors de France** | carte de substitution ; a imposé l'enregistrement d'EPSG:3301 (E45) |
 | 0.9 | **Forêt de Caen remplace 5 des 6 forêts suggérées** | seule Ste Anne II figure dans la liste du plan |
-| 0.9 | **Huit artefacts versionnés au lieu d'un seul** | le plan demande `docs/plan/mesures/P0_baseline.md` ; la ligne de base réelle couvre **deux modes** (en ligne et hors ligne) et **sept captures**, ce qui demande quatre fichiers par mode. La donnée brute (`results.jsonl`) est nécessaire pour contrôler E36–E43 et E50 à la relecture |
-| 0.9 | Le fichier `P0_baseline.md` du plan n'est pas créé | il désignerait un seul mode ; les huit artefacts sont nommés `P0_baseline_*` et `P0_baseline_offline_*`, et le résumé est `P0_baseline_summary.md`. Deux variantes contradictoires du même résumé n'ont pas été produites |
+| 0.9 | **Huit sorties brutes versionnées en plus de `P0_baseline.md`** | la ligne de base réelle couvre **deux modes** (en ligne et hors ligne) et **sept captures**, ce qui demande quatre fichiers par mode. La donnée brute (`results.jsonl`) est nécessaire pour contrôler E36–E43, E49 et E50 à la relecture |
+| 0.9 | Le plan demande un seul fichier `P0_baseline.md` pour une ligne de base qui couvre **deux modes** | `P0_baseline.md` existe bien (critère d'acceptation 6) et porte les valeurs par carte pour les deux modes ; les **huit** sorties brutes du banc sont versionnées à côté, sous `P0_baseline_*` et `P0_baseline_offline_*`. Un fichier, pas deux résumés concurrents : `P0_baseline_summary.md` est la sortie brute du banc, `P0_baseline.md` est la table de base consolidée |
+| 0.9 | Trois fichiers de plus que le plan : `P0_captures.md`, `P0_synthese.md`, `P0_registre_rows.md` | l'inventaire des sept captures et l'écart au gabarit §0.9 (demandés par la tâche) ; la synthèse comparative des deux modes ; les lignes de registre issues des mesures, pour que le registre soit contrôlable à la relecture |
 | 0.9 | Deux bancs lancés en parallèle ont écrit dans le même log et le même dossier de sortie | **exécution écartée** : ni les temps ni les lignes de journal de cette exécution ne sont retenus ; le banc a été relancé seul |""")
 
     # ── Mesures ─────────────────────────────────────────────────────────────
@@ -140,7 +149,9 @@ Artefacts versionnés dans `docs/plan/mesures/` :
 | `P0_baseline_determinism.json` | verdict de reproductibilité à graine fixée, par capture |
 | `P0_baseline_run_metadata.json` | compteurs de cache avant/après préchauffage, métadonnées d'exécution |
 | `P0_baseline_offline_*` | les quatre mêmes fichiers, mode hors ligne |
-| `P0_synthese.md` | synthèse comparative des deux modes |
+| `P0_baseline.md` | **le fichier du plan** : valeurs de base par carte (K2, K3, K4, `forbidden_hits`, `is_loop`, déterminisme) pour les deux modes |
+| `P0_synthese.md` | synthèse comparative des deux modes, totaux, échecs de rejeu |
+| `P0_registre_rows.md` | lignes de registre issues des mesures (E36–E43, E46, E50, V24–V27) |
 | `P0_captures.md` | inventaire des sept captures et écart au gabarit §0.9 |
 
 {tableau}

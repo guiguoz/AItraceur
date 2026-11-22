@@ -24,6 +24,37 @@
 | 11 | Imports, tests, captures, comptes rendus vérifiés | `pytest` 226 passés / 4 échoués (pré-existants) ; `node test.js` 22/22 ; imports OK | ✅ |
 | 12 | Aucun correctif du moteur v1 hors P1 ; le service de tuiles reste un prérequis | aucun correctif moteur dans la branche ; E45 le rappelle | ✅ |
 
+## 1 bis. Conformité aux 8 critères d'acceptation du plan d'origine
+
+`docs/plan/10_P0_socle_et_mesure.md` — « Critères d'acceptation » :
+
+| # | Critère du plan | Constat | Verdict |
+|---|---|---|---|
+| 1 | Commits 14c–14d sur `main` ; étiquette `avant-plan-2026-11` | `3ccb663` (14d), `b436b34` (14c) sur `main` ; étiquette = `60b624a` | ✅ |
+| 2 | `pytest tests -q` dans un environnement neuf ; décompte consigné | 226 passés, 4 échoués (pré-existants `aitraceur_proto`), 7 warnings — consigné dans `P0.md` | ✅ |
+| 3 | `backend/src/aitraceur/` ne contient que le squelette v2 et `evalbench/` ; les 3 tests d'architecture passent | 13 sous-paquets vides + `evalbench/` ; 3 tests (imports interdits, hasard global, `except` silencieux) passent | ✅ |
+| 4 | Les six cas de `test_metrics.py` passent avec les valeurs exactes du tableau | 6/6 | ✅ |
+| 5 | Le banc rejoue au moins une capture forêt et une capture sprint, 5 graines chacune, et produit les quatre fichiers | 7 captures (3 forêts + 1 couleur + 3 sprint) × 5 graines × 2 modes → 8 fichiers | ✅ |
+| 6 | **`docs/plan/mesures/P0_baseline.md` existe** et contient, par carte, K2, K3, K4, `forbidden_hits`, `is_loop` et le déterminisme | fichier créé le 22/11/2026 : les 7 cartes × les 2 modes, avec les six indicateurs demandés | ✅ |
+| 7 | `REGISTRE.md` contient les valeurs de base et le verdict de déterminisme | E36–E43 (valeurs de base), E46 (déterminisme) | ✅ |
+| 8 | Aucune phrase de `CLAUDE.md`, du README ou d'`ARCHITECTURE.md` n'affirme que les termes A→L pilotent la génération | les trois mentions disent explicitement « télémétrie uniquement, non branchée sur la sélection (constat C2) » | ✅ |
+
+**Un écart de fond subsiste, documenté :** l'inventaire demandé au §0.9 point 2 (« au minimum deux cartes
+de sprint (**dont Caen**) et trois de forêt (parmi … **steanne**) ») n'est **pas** celui du plan — pas de sprint
+Caen, et seule Ste Anne II figure dans la liste des forêts. C'est un écart de **données disponibles**, pas de
+méthode : il est consigné dans `P0.md` § Écarts et `P0_captures.md` § 3, et il n'a pas été masqué.
+
+### Corrections apportées à cette revue
+
+* `apply_p0_crc.py` n'était pas **idempotent** : il remplace `## À tester à la main (étape 0.9)` par
+  `## Rejouer le banc (procédure vérifiée)`, donc un second passage sur un `P0.md` déjà corrigé échouait.
+  `replace_section` reconnaît désormais le remplacement déjà fait.
+* `finalize.sh` visait `origin/plan/p0-socle`, branche supprimée après fusion : la référence de base est
+  maintenant paramétrable (`P0_BASE_REF`, `origin/main` par défaut).
+* E37 et E38 distinguaient mal les groupes (le Jaune compté dans « les forêts ») : corrigés, cohérents
+  avec E36.
+* E49 compte **9/15** rejoues sprint en ligne (et 8/15 hors ligne), et non 8/15.
+
 ## 2. Ce que la phase 0 a coûté en corrections
 
 | Commit | Nature |

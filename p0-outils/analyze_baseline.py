@@ -312,6 +312,66 @@ def main() -> int:
 
     (mes / "P0_synthese.md").write_text("\n".join(lines), encoding="utf-8")
 
+    # ------------------------------------------------------------------
+    # P0_baseline.md — le fichier exigé par le plan (phase 0, §0.9 point 5
+    # et critère d'acceptation 6) : les valeurs de base PAR CARTE, pour les
+    # deux modes. Ce n'est pas un second résumé concurrent de
+    # `P0_baseline_summary.md` (sortie brute du banc, mode en ligne) : c'est
+    # la table de référence que le plan et la phase 1 lisent.
+    # ------------------------------------------------------------------
+    bl = []
+    bl.append("# Ligne de base du moteur v1 — phase 0\n")
+    bl.append(f"**Établi le {today}.** Banc : 7 captures × 5 graines × 2 modes "
+              f"({n_ok} rejoues valides en ligne, {n_ok_off} hors ligne, "
+              f"{n_err + n_err_off} en erreur).\n")
+    bl.append("Fichier de référence du plan (`docs/plan/10_P0_socle_et_mesure.md` §0.9 point 5, "
+              "critère d'acceptation 6) : les valeurs de base **par carte**, pour les deux modes.\n")
+    bl.append("Ce fichier n'est pas un second résumé concurrent : "
+              "`P0_baseline_summary.md` et `P0_baseline_offline_summary.md` sont les sorties brutes "
+              "du banc, `P0_baseline_results.jsonl` et `P0_baseline_offline_results.jsonl` en sont "
+              "la donnée brute (une ligne par rejeu), et `P0_synthese.md` porte la comparaison "
+              "complète et le détail par graine. Ici : la table de base.\n")
+    bl.append("Toutes les valeurs sont des **médianes sur les graines valides** de la capture.\n")
+    bl.append("## Valeurs par carte\n")
+    bl.append("| Capture | Carte | Mode effectif | K2 `max_in_radius` | K3 `crossings` | "
+              "K4 `coverage_4x4` | `forbidden_hits` | `is_loop` | déterminisme (K5) | "
+              "`n_controls` | longueur (m) |")
+    bl.append("|---|---|---|---|---|---|---|---|---|---|---|")
+    for cap, d in sorted(on.items()):
+        meta = CAPTURES_META.get(cap, {})
+        mode = meta.get("mode", d["kind"])
+        if meta.get("groupe") == "couleur":
+            mode = "sprint (couleur)"
+        for label, mode_d, det in (("en ligne", d, on_det.get(cap, {}).get("identical")),
+                                   ("hors ligne", off.get(cap) if off else None,
+                                    off_det.get(cap, {}).get("identical") if off else None)):
+            if mode_d is None:
+                continue
+            s = mode_d["stats"]
+            bl.append(
+                f"| {cap} | {meta.get('carte', '?')} | {mode} ({label}) "
+                f"| {fmt(s.get('max_in_radius'), 0)} | {fmt(s.get('crossings'), 0)} "
+                f"| {fmt(s.get('coverage_4x4'), 3)} | {fmt(s.get('forbidden_hits'), 0)} "
+                f"| {'oui' if s.get('is_loop') else 'non'} "
+                f"| {'✓' if det else '✗' if det is False else '?'} "
+                f"| {fmt(s.get('n_controls'), 0)} | {fmt(s.get('length_m'), 0)} |")
+    bl.append("")
+    bl.append("## Notes de lecture\n")
+    bl.append("- **K2** (`max_in_radius`) : nombre maximal de postes dans un rayon donné ; "
+              "plus il est bas, moins les postes sont groupés.")
+    bl.append("- **K3** (`crossings`) : paires de jambes non adjacentes qui se croisent.")
+    bl.append("- **K4** (`coverage_4x4`) : part de la zone de tracé couverte par la grille 4×4.")
+    bl.append("- **`is_loop`** : le circuit se referme (départ et arrivée à moins de 1 m).")
+    bl.append("- **déterminisme (K5)** : rejoue de la graine 0 après les mesures, à chaud ; "
+              "`✓` = même tracé, `✗` = tracé différent.")
+    bl.append("- **`n_controls`** : postes internes, hors départ et arrivée "
+              "(`backend/src/aitraceur/evalbench/metrics.py` l.147-149) ; ajouter 2 pour le "
+              "nombre de postes du circuit.")
+    bl.append("- **mode effectif** : ce que le moteur a réellement fait, pas ce que la "
+              "capture demandait — voir `P0_captures.md` § 2.")
+    bl.append("")
+    (mes / "P0_baseline.md").write_text("\n".join(bl), encoding="utf-8")
+
     # ------------------------------------------------- draft des entrées registre
     reg = []
     reg.append("## Lignes à insérer dans `docs/plan/REGISTRE.md`")

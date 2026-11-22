@@ -351,7 +351,7 @@ def main() -> int:
             bl.append(
                 f"| {cap} | {meta.get('carte', '?')} | {mode} ({label}) "
                 f"| {fmt(s.get('max_in_radius'), 0)} | {fmt(s.get('crossings'), 0)} "
-                f"| {fmt(s.get('coverage_4x4'), 3)} | {fmt(s.get('forbidden_hits'), 0)} "
+                f"| {fmt(s.get('coverage_4x4'), 4)} | {fmt(s.get('forbidden_hits'), 0)} "
                 f"| {'oui' if s.get('is_loop') else 'non'} "
                 f"| {'✓' if det else '✗' if det is False else '?'} "
                 f"| {fmt(s.get('n_controls'), 0)} | {fmt(s.get('length_m'), 0)} |")

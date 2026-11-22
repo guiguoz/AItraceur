@@ -58,13 +58,19 @@ def run_v1(captures: Path, seeds: list[int], out_dir: Path) -> None:
         # candidats différents → sans préchauffage, seed 0 mesuré « froid »
         # diffère du rejeu déterminisme → fausse alarme determinism=False.
         npz_before = _count_npz_caches()
-        print(f"[bench] {cap.name} préchauffage (cache_npz={npz_before})...", flush=True)
+        osm_before = _count_osm_caches()
+        print(
+            f"[bench] {cap.name} préchauffage (hmc_npz={npz_before}, osm_json={osm_before})...",
+            flush=True,
+        )
         replay(cap, 0)
         npz_after = _count_npz_caches()
+        osm_after = _count_osm_caches()
         cache_states[cap.name] = {
-            "npz_before_warmup": npz_before,
-            "npz_after_warmup": npz_after,
-            "cache_created": npz_after > npz_before,
+            "hmc_npz_before": npz_before,
+            "hmc_npz_after": npz_after,
+            "osm_json_before": osm_before,
+            "osm_json_after": osm_after,
         }
 
         # ── Mesures warm (tous les seeds) ─────────────────────────────────────
@@ -221,11 +227,16 @@ def _write_summary(
 
 
 def _count_npz_caches() -> int:
-    """Compte les fichiers .npz dans data/ — proxy de l'état du cache heatmap."""
-    data_dir = Path("data")
-    if not data_dir.is_dir():
-        return -1
-    return sum(1 for _ in data_dir.rglob("*.npz"))
+    """Compte les fichiers heatmap (.npz) dans le répertoire temporaire."""
+    import tempfile
+    return len(list(Path(tempfile.gettempdir()).glob("aitraceur_hmc_*.npz")))
+
+
+def _count_osm_caches() -> int:
+    """Compte les fichiers OSM/sprint_features (.json) dans le répertoire temporaire."""
+    import tempfile
+    d = Path(tempfile.gettempdir()) / "aitraceur_osm"
+    return len(list(d.glob("*.json"))) if d.is_dir() else 0
 
 
 def _write_metadata(path: Path, captures: list[Path], cache_states: dict[str, dict]) -> None:

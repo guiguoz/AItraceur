@@ -1,39 +1,18 @@
-diff --git a/docs/plan/mesures/P0_baseline.md b/docs/plan/mesures/P0_baseline.md
-index 13bf5ac..e30119e 100644
---- a/docs/plan/mesures/P0_baseline.md
-+++ b/docs/plan/mesures/P0_baseline.md
-@@ -12,20 +12,20 @@ Toutes les valeurs sont des **médianes sur les graines valides** de la capture.
+diff --git a/docs/plan/REGISTRE.md b/docs/plan/REGISTRE.md
+index 241d88c..128b1b0 100644
+--- a/docs/plan/REGISTRE.md
++++ b/docs/plan/REGISTRE.md
+@@ -65,6 +65,8 @@ ce plan.
+ | E48 | L'instrument de mesure de la phase 0 ne pouvait pas lire la sortie du moteur pour les circuits de forêt : `_extract_circuit_points` lisait `controls` comme une liste de paires `[lng, lat]`, alors que `ai_generator.py` produit des dicts `{"x", "y", …}` — les quatre captures de forêt échouaient au rejeu sur `KeyError: 0`. La fixture `circuit_sample.json` était écrite dans le format supposé : les tests unitaires passaient donc en validant le bug. Corrigé le 22/11/2026 : adaptateur aligné sur le format réel et fixture réécrite. | commit `632603f` ; `backend/src/aitraceur/evalbench/replay_v1.py` l.98 ; `backend/tests/aitraceur/fixtures/v1_outputs/circuit_sample.json` | 2026-11-22 |
+ | E49 | Sur les cartes urbaines, le moteur v1 place deux postes au même point : 9 des 15 rejoues sprint présentent une paire de postes à distance nulle en ligne (`min_pair_dist_m` = 0,0 m) — Bayeux graines 0/2/3/4, Dôme graines 0/3, Porten-Bessin graines 1/3/4 — et 8 des 15 hors ligne. Sur les 15 rejoues de forêt, aucune paire sous 30 m. Le contrôle interne de distance minimale ne porte que sur les postes consécutifs (E09) : le banc, qui mesure toutes les paires, le révèle. Bayeux graine 2 cumule 7 paires sous 30 m, 9 paires sous 60 m et 6 auto-intersections. Le défaut n'est pas propre au mode en ligne : il survit à la disparition des candidats OSM. | `docs/plan/mesures/P0_baseline_results.jsonl` ; `docs/plan/mesures/P0_baseline_offline_results.jsonl` ; `backend/src/aitraceur/evalbench/metrics.py` l.163-175 (toutes paires, sauf départ–arrivée) | 2026-11-22 |
+ | E50 | Hors ligne, sur 7 capture(s) exploitables et 35 rejoue(s) valide(s) (0 en erreur) : « distance minimale entre postes » 65.8 m en médiane, « auto-intersections du tracé » 0 en médiane (maximum 2), « postes en zone interdite » 0, « densité maximale de postes » 3, « couverture de la zone de tracé » 0.188. Le mode hors ligne est donc **opérationnel** : il produit des circuits valides, sans violation de zone interdite et de longueur comparable à celle du mode en ligne (3285 m). | `docs/plan/mesures/P0_baseline_offline_results.jsonl` ; `docs/plan/mesures/P0_baseline_offline_summary.md` | 2026-11-22 |
++| E51 | L'inventaire réel de la phase 0 ne comporte pas de sprint de Caen : les trois cartes de sprint sont Bayeux, Dôme et Porten-Bessin ; les quatre cartes de forêt sont Forêt de Caen (MD et couleur Jaune), Kûti MD et Ste Anne II MD, dont une seule — Ste Anne II — figure dans la liste du gabarit §0.9 (airelles, cerisy, grochot, llose, montmirel, steanne). Le gabarit demande « au minimum deux cartes de sprint (dont Caen) et trois de forêt » : le quota est dépassé (3 et 4), la composition diffère. C'est un écart de **données**, non de méthode — le traceur ne dispose pas de carte de sprint de Caen. Non bloquant pour la phase 1 : aucun de ses critères ne cite une carte précise, et l'étape 1.12 reprend ces mêmes cartes. | `docs/plan/mesures/P0_captures.md` § 3 ; `docs/plan/comptes-rendus/P0.md` § Écarts au plan ; `docs/plan/mesures/P0_baseline.md` | 2026-11-22 |
++| E52 | La forme complète du correctif CRS — registre de projections unique partagé entre le service de tuiles et le front, et section de tests qui vérifie leur accord — n'est pas accomplie en phase 0 : elle n'est pas listée dans les étapes 1.1 à 1.12. Elle est rattachée à l'étape 2.8 (« Pont v1 : nourrir le moteur actuel avec des entrées justes »), seule étape autorisée à modifier le service de tuiles hors des corrections listées en phase 1 (règles de travail §8), et à l'étape 2.3 qui fait du code EPSG une donnée du paquet de carte (`GeoRef.epsg`) au lieu d'un registre codé en dur à deux endroits. L'état actuel n'est pas défectueux : 2154 et 3301 fonctionnent et leur accord est vérifié par la capture Kûti de bout en bout. | `docs/plan/03_REGLES_DE_TRAVAIL.md` § 8 ; `docs/plan/12_P2_carte_et_symboles.md` étapes 2.3 et 2.8 ; `docs/plan/REGISTRE.md` E45 | 2026-11-22 |
+ ## Réfuté
  
- | Capture | Carte | Mode effectif | K2 `max_in_radius` | K3 `crossings` | K4 `coverage_4x4` | `forbidden_hits` | `is_loop` | déterminisme (K5) | `n_controls` | longueur (m) |
- |---|---|---|---|---|---|---|---|---|---|---|
--| circuit_20261122T083414Z_a2f6feae.json | Forêt de Caen | foret (en ligne) | 3 | 0 | 0.562 | 0 | oui | ✗ | 25 | 8345 |
--| circuit_20261122T083414Z_a2f6feae.json | Forêt de Caen | foret (hors ligne) | 3 | 0 | 0.562 | 0 | oui | ✗ | 25 | 7722 |
--| circuit_20261122T084351Z_a63cd765.json | Forêt de Caen | sprint (couleur) (en ligne) | 2 | 0 | 0.250 | 0 | oui | ✗ | 10 | 2287 |
--| circuit_20261122T084351Z_a63cd765.json | Forêt de Caen | sprint (couleur) (hors ligne) | 2 | 0 | 0.188 | 0 | oui | ✗ | 10 | 2276 |
--| circuit_20261122T092812Z_5685384b.json | Kûti (Estonie) | foret (en ligne) | 3 | 0 | 0.312 | 0 | oui | ✗ | 25 | 8202 |
--| circuit_20261122T092812Z_5685384b.json | Kûti (Estonie) | foret (hors ligne) | 3 | 0 | 0.250 | 0 | oui | ✗ | 25 | 8331 |
--| circuit_20261122T095424Z_7ca39337.json | Ste Anne II | foret (en ligne) | 3 | 0 | 0.562 | 0 | oui | ✗ | 25 | 8392 |
--| circuit_20261122T095424Z_7ca39337.json | Ste Anne II | foret (hors ligne) | 3 | 0 | 0.625 | 0 | oui | ✗ | 25 | 7849 |
--| sprint_20261119T164701Z_a530a9ea.json | Bayeux | sprint (en ligne) | 3 | 2 | 0.125 | 0 | oui | ✗ | 14 | 2606 |
--| sprint_20261119T164701Z_a530a9ea.json | Bayeux | sprint (hors ligne) | 2 | 2 | 0.125 | 0 | oui | ✗ | 14 | 2695 |
--| sprint_20261119T171122Z_46871982.json | Dôme | sprint (en ligne) | 2 | 1 | 0.250 | 0 | non | ✓ | 14 | 2614 |
--| sprint_20261119T171122Z_46871982.json | Dôme | sprint (hors ligne) | 2 | 2 | 0.188 | 0 | non | ✗ | 14 | 3020 |
--| sprint_20261119T172115Z_a562c112.json | Porten-Bessin | sprint (en ligne) | 2 | 2 | 0.125 | 0 | non | ✓ | 14 | 3285 |
--| sprint_20261119T172115Z_a562c112.json | Porten-Bessin | sprint (hors ligne) | 3 | 2 | 0.125 | 0 | non | ✓ | 14 | 3255 |
-+| circuit_20261122T083414Z_a2f6feae.json | Forêt de Caen | foret (en ligne) | 3 | 0 | 0.5625 | 0 | oui | ✗ | 25 | 8345 |
-+| circuit_20261122T083414Z_a2f6feae.json | Forêt de Caen | foret (hors ligne) | 3 | 0 | 0.5625 | 0 | oui | ✗ | 25 | 7722 |
-+| circuit_20261122T084351Z_a63cd765.json | Forêt de Caen | sprint (couleur) (en ligne) | 2 | 0 | 0.2500 | 0 | oui | ✗ | 10 | 2287 |
-+| circuit_20261122T084351Z_a63cd765.json | Forêt de Caen | sprint (couleur) (hors ligne) | 2 | 0 | 0.1875 | 0 | oui | ✗ | 10 | 2276 |
-+| circuit_20261122T092812Z_5685384b.json | Kûti (Estonie) | foret (en ligne) | 3 | 0 | 0.3125 | 0 | oui | ✗ | 25 | 8202 |
-+| circuit_20261122T092812Z_5685384b.json | Kûti (Estonie) | foret (hors ligne) | 3 | 0 | 0.2500 | 0 | oui | ✗ | 25 | 8331 |
-+| circuit_20261122T095424Z_7ca39337.json | Ste Anne II | foret (en ligne) | 3 | 0 | 0.5625 | 0 | oui | ✗ | 25 | 8392 |
-+| circuit_20261122T095424Z_7ca39337.json | Ste Anne II | foret (hors ligne) | 3 | 0 | 0.6250 | 0 | oui | ✗ | 25 | 7849 |
-+| sprint_20261119T164701Z_a530a9ea.json | Bayeux | sprint (en ligne) | 3 | 2 | 0.1250 | 0 | oui | ✗ | 14 | 2606 |
-+| sprint_20261119T164701Z_a530a9ea.json | Bayeux | sprint (hors ligne) | 2 | 2 | 0.1250 | 0 | oui | ✗ | 14 | 2695 |
-+| sprint_20261119T171122Z_46871982.json | Dôme | sprint (en ligne) | 2 | 1 | 0.2500 | 0 | non | ✓ | 14 | 2614 |
-+| sprint_20261119T171122Z_46871982.json | Dôme | sprint (hors ligne) | 2 | 2 | 0.1875 | 0 | non | ✗ | 14 | 3020 |
-+| sprint_20261119T172115Z_a562c112.json | Porten-Bessin | sprint (en ligne) | 2 | 2 | 0.1250 | 0 | non | ✓ | 14 | 3285 |
-+| sprint_20261119T172115Z_a562c112.json | Porten-Bessin | sprint (hors ligne) | 3 | 2 | 0.1250 | 0 | non | ✓ | 14 | 3255 |
- 
- ## Notes de lecture
- 
+ | Id | Croyance | Ce qui la réfute | Date |
+@@ -118,3 +120,4 @@ ce plan.
+ | V25 | Le résultat dépend-il de l'état du cache disque ? | OUI, le résultat dépend de l'état du cache disque : les compteurs `hmc_npz` ont évolué pendant le banc en ligne sur sprint_20261119T171122Z_46871982.json, sprint_20261119T172115Z_a562c112.json (les compteurs OSM sont restés stables). Combiné au déterminisme de 2/7 captures à graine fixée, cela montre que la graine fixe l'aléa du GA mais pas l'ensemble des entrées. | Phase 1 |
+ | V26 | Le mode hors ligne dégrade-t-il la qualité (candidats OSM absents) ? | OUI, mais de façon bornée. Par groupe (médiane par carte) : forêt — longueur 8345 m → 7849 m ; forêt — couverture 0.562 → 0.562 ; forêt — dist. min. entre postes 80.0 m → 86.8 m ; forêt — auto-intersections 0 → 0 ; sprint urbain — longueur 2614 m → 3020 m ; sprint urbain — couverture 0.125 → 0.125 ; sprint urbain — dist. min. entre postes 0.0 m → 0.0 m ; sprint urbain — auto-intersections 2 → 2. Le nombre de postes demandés est identique dans les deux modes, et aucune zone interdite n'est violée hors ligne (le service de tuiles est local, il reste joignable). En revanche les paires de postes à distance nulle sur les cartes urbaines ne disparaissent pas : 9/15 rejoues en ligne, 8/15 hors ligne. Conclusion : le mode hors ligne est utilisable ; c'est la garantie de non-duplication des postes qui manque, pas la production de circuits. | Phase 1 |
+ | V27 | Le moteur v1 est-il une référence exploitable pour la phase 1, ou faut-il le remplacer ? | Trancher en phase 1 à partir de E36–E43, E46, E49 et V26 : conformité aux seuils RTS vérifiée en forêt mais pas en sprint urbain (paires de postes à distance nulle), couverture faible en ville (médiane 0.25), déterminisme 2/7 captures à graine fixée. Les mesures de la phase 0 sont acquises et versionnées : la décision de conserver ou remplacer le moteur v1 appartient à la phase 1. | Phase 1 |
++| V28 | La ligne de base de la phase 0 doit-elle être complétée par une carte de sprint de Caen ? Le traceur n'en dispose pas aujourd'hui ; le gabarit §0.9 la demande (voir E51). | Produire une carte de sprint de Caen, puis refaire le banc **en une seule exécution** avec les 8 captures × 5 graines × 2 modes (≈ 4,2 h non surveillé : ≈ 2,3 h en ligne, ≈ 1,9 h hors ligne) et régénérer les huit artefacts, la synthèse et les lignes de registre. Refaire un banc complet plutôt que d'y ajouter un rejeu : un seul `run_metadata.json` pour une seule exécution (règles §6.4). | Phase 2 |

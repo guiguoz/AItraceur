@@ -52,6 +52,32 @@ MANUELS_ETABLIS = {
         "`docs/plan/mesures/P0_baseline_offline_results.jsonl` ; "
         "`backend/src/aitraceur/evalbench/metrics.py` l.163-175 (toutes paires, sauf départ–arrivée)",
     ),
+    "E51": (
+        "L'inventaire réel de la phase 0 ne comporte pas de sprint de Caen : les trois cartes de "
+        "sprint sont Bayeux, Dôme et Porten-Bessin ; les quatre cartes de forêt sont Forêt de Caen "
+        "(MD et couleur Jaune), Kûti MD et Ste Anne II MD, dont une seule — Ste Anne II — figure "
+        "dans la liste du gabarit §0.9 (airelles, cerisy, grochot, llose, montmirel, steanne). Le "
+        "gabarit demande « au minimum deux cartes de sprint (dont Caen) et trois de forêt » : le "
+        "quota est dépassé (3 et 4), la composition diffère. C'est un écart de **données**, non de "
+        "méthode — le traceur ne dispose pas de carte de sprint de Caen. Non bloquant pour la phase "
+        "1 : aucun de ses critères ne cite une carte précise, et l'étape 1.12 reprend ces mêmes "
+        "cartes.",
+        "`docs/plan/mesures/P0_captures.md` § 3 ; `docs/plan/comptes-rendus/P0.md` § Écarts au plan ; "
+        "`docs/plan/mesures/P0_baseline.md`",
+    ),
+    "E52": (
+        "La forme complète du correctif CRS — registre de projections unique partagé entre le "
+        "service de tuiles et le front, et section de tests qui vérifie leur accord — n'est pas "
+        "accomplie en phase 0 : elle n'est pas listée dans les étapes 1.1 à 1.12. Elle est "
+        "rattachée à l'étape 2.8 (« Pont v1 : nourrir le moteur actuel avec des entrées justes »), "
+        "seule étape autorisée à modifier le service de tuiles hors des corrections listées en "
+        "phase 1 (règles de travail §8), et à l'étape 2.3 qui fait du code EPSG une donnée du "
+        "paquet de carte (`GeoRef.epsg`) au lieu d'un registre codé en dur à deux endroits. "
+        "L'état actuel n'est pas défectueux : 2154 et 3301 fonctionnent et leur accord est vérifié "
+        "par la capture Kûti de bout en bout.",
+        "`docs/plan/03_REGLES_DE_TRAVAIL.md` § 8 ; `docs/plan/12_P2_carte_et_symboles.md` étapes 2.3 "
+        "et 2.8 ; `docs/plan/REGISTRE.md` E45",
+    ),
     "E48": (
         "L'instrument de mesure de la phase 0 ne pouvait pas lire la sortie du moteur pour les "
         "circuits de forêt : `_extract_circuit_points` lisait `controls` comme une liste de paires "
@@ -86,6 +112,16 @@ MANUELS_VERIFIER = {
         "Comparer `docs/plan/mesures/P0_baseline_summary.md` et "
         "`P0_baseline_offline_summary.md`, capture par capture",
         "Phase 1",
+    ),
+    "V28": (
+        "La ligne de base de la phase 0 doit-elle être complétée par une carte de sprint de Caen ? "
+        "Le traceur n'en dispose pas aujourd'hui ; le gabarit §0.9 la demande (voir E51).",
+        "Produire une carte de sprint de Caen, puis refaire le banc **en une seule exécution** avec "
+        "les 8 captures × 5 graines × 2 modes (≈ 4,2 h non surveillé : ≈ 2,3 h en ligne, "
+        "≈ 1,9 h hors ligne) et régénérer les huit artefacts, la synthèse et les lignes de "
+        "registre. Refaire un banc complet plutôt que d'y ajouter un rejeu : un seul "
+        "`run_metadata.json` pour une seule exécution (règles §6.4).",
+        "Phase 2",
     ),
     "V27": (
         "Le moteur v1 est-il une référence exploitable pour la phase 1, ou faut-il le remplacer ?",

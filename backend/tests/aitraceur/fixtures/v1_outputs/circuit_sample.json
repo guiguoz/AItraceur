@@ -4,10 +4,10 @@
     {
       "id": "circuit_42",
       "controls": [
-        [2.350, 49.120],
-        [2.355, 49.125],
-        [2.360, 49.128],
-        [2.350, 49.120]
+        {"order": 1, "x": 2.350, "y": 49.120, "type": "start",   "description": "Départ"},
+        {"order": 2, "x": 2.355, "y": 49.125, "type": "control", "description": "Poste"},
+        {"order": 3, "x": 2.360, "y": 49.128, "type": "control", "description": "Poste"},
+        {"order": 4, "x": 2.350, "y": 49.120, "type": "finish",  "description": "Arrivée"}
       ],
       "total_length_m": 1800.0,
       "score": 72.5,

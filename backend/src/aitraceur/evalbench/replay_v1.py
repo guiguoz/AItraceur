@@ -88,13 +88,14 @@ def _kind_from_name(filename: str) -> str:
 def _extract_circuit_points(result: dict) -> list[tuple[float, float]]:
     """Extrait (lng, lat) du premier circuit retourné par _circuit_impl.
 
-    Le champ controls contient des listes [lng, lat] (tuples Python sérialisés en JSON).
+    Le champ controls contient des dicts {"x": lng, "y": lat, ...} — format réel
+    de ai_generator.py (GeneratedCircuit.controls).
     """
     circuits = result.get("circuits") or []
     if not circuits:
         raise ValueError("Aucun circuit dans le résultat _circuit_impl")
     controls = circuits[0].get("controls") or []
-    return [(float(c[0]), float(c[1])) for c in controls]
+    return [(float(c["x"]), float(c["y"])) for c in controls]
 
 
 def _extract_sprint_points(result: dict) -> list[tuple[float, float]]:

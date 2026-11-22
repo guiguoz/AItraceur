@@ -12,20 +12,20 @@ Toutes les valeurs sont des **médianes sur les graines valides** de la capture.
 
 | Capture | Carte | Mode effectif | K2 `max_in_radius` | K3 `crossings` | K4 `coverage_4x4` | `forbidden_hits` | `is_loop` | déterminisme (K5) | `n_controls` | longueur (m) |
 |---|---|---|---|---|---|---|---|---|---|---|
-| circuit_20261122T083414Z_a2f6feae.json | Forêt de Caen | foret (en ligne) | 3 | 0 | 0.562 | 0 | oui | ✗ | 25 | 8345 |
-| circuit_20261122T083414Z_a2f6feae.json | Forêt de Caen | foret (hors ligne) | 3 | 0 | 0.562 | 0 | oui | ✗ | 25 | 7722 |
-| circuit_20261122T084351Z_a63cd765.json | Forêt de Caen | sprint (couleur) (en ligne) | 2 | 0 | 0.250 | 0 | oui | ✗ | 10 | 2287 |
-| circuit_20261122T084351Z_a63cd765.json | Forêt de Caen | sprint (couleur) (hors ligne) | 2 | 0 | 0.188 | 0 | oui | ✗ | 10 | 2276 |
-| circuit_20261122T092812Z_5685384b.json | Kûti (Estonie) | foret (en ligne) | 3 | 0 | 0.312 | 0 | oui | ✗ | 25 | 8202 |
-| circuit_20261122T092812Z_5685384b.json | Kûti (Estonie) | foret (hors ligne) | 3 | 0 | 0.250 | 0 | oui | ✗ | 25 | 8331 |
-| circuit_20261122T095424Z_7ca39337.json | Ste Anne II | foret (en ligne) | 3 | 0 | 0.562 | 0 | oui | ✗ | 25 | 8392 |
-| circuit_20261122T095424Z_7ca39337.json | Ste Anne II | foret (hors ligne) | 3 | 0 | 0.625 | 0 | oui | ✗ | 25 | 7849 |
-| sprint_20261119T164701Z_a530a9ea.json | Bayeux | sprint (en ligne) | 3 | 2 | 0.125 | 0 | oui | ✗ | 14 | 2606 |
-| sprint_20261119T164701Z_a530a9ea.json | Bayeux | sprint (hors ligne) | 2 | 2 | 0.125 | 0 | oui | ✗ | 14 | 2695 |
-| sprint_20261119T171122Z_46871982.json | Dôme | sprint (en ligne) | 2 | 1 | 0.250 | 0 | non | ✓ | 14 | 2614 |
-| sprint_20261119T171122Z_46871982.json | Dôme | sprint (hors ligne) | 2 | 2 | 0.188 | 0 | non | ✗ | 14 | 3020 |
-| sprint_20261119T172115Z_a562c112.json | Porten-Bessin | sprint (en ligne) | 2 | 2 | 0.125 | 0 | non | ✓ | 14 | 3285 |
-| sprint_20261119T172115Z_a562c112.json | Porten-Bessin | sprint (hors ligne) | 3 | 2 | 0.125 | 0 | non | ✓ | 14 | 3255 |
+| circuit_20261122T083414Z_a2f6feae.json | Forêt de Caen | foret (en ligne) | 3 | 0 | 0.5625 | 0 | oui | ✗ | 25 | 8345 |
+| circuit_20261122T083414Z_a2f6feae.json | Forêt de Caen | foret (hors ligne) | 3 | 0 | 0.5625 | 0 | oui | ✗ | 25 | 7722 |
+| circuit_20261122T084351Z_a63cd765.json | Forêt de Caen | sprint (couleur) (en ligne) | 2 | 0 | 0.2500 | 0 | oui | ✗ | 10 | 2287 |
+| circuit_20261122T084351Z_a63cd765.json | Forêt de Caen | sprint (couleur) (hors ligne) | 2 | 0 | 0.1875 | 0 | oui | ✗ | 10 | 2276 |
+| circuit_20261122T092812Z_5685384b.json | Kûti (Estonie) | foret (en ligne) | 3 | 0 | 0.3125 | 0 | oui | ✗ | 25 | 8202 |
+| circuit_20261122T092812Z_5685384b.json | Kûti (Estonie) | foret (hors ligne) | 3 | 0 | 0.2500 | 0 | oui | ✗ | 25 | 8331 |
+| circuit_20261122T095424Z_7ca39337.json | Ste Anne II | foret (en ligne) | 3 | 0 | 0.5625 | 0 | oui | ✗ | 25 | 8392 |
+| circuit_20261122T095424Z_7ca39337.json | Ste Anne II | foret (hors ligne) | 3 | 0 | 0.6250 | 0 | oui | ✗ | 25 | 7849 |
+| sprint_20261119T164701Z_a530a9ea.json | Bayeux | sprint (en ligne) | 3 | 2 | 0.1250 | 0 | oui | ✗ | 14 | 2606 |
+| sprint_20261119T164701Z_a530a9ea.json | Bayeux | sprint (hors ligne) | 2 | 2 | 0.1250 | 0 | oui | ✗ | 14 | 2695 |
+| sprint_20261119T171122Z_46871982.json | Dôme | sprint (en ligne) | 2 | 1 | 0.2500 | 0 | non | ✓ | 14 | 2614 |
+| sprint_20261119T171122Z_46871982.json | Dôme | sprint (hors ligne) | 2 | 2 | 0.1875 | 0 | non | ✗ | 14 | 3020 |
+| sprint_20261119T172115Z_a562c112.json | Porten-Bessin | sprint (en ligne) | 2 | 2 | 0.1250 | 0 | non | ✓ | 14 | 3285 |
+| sprint_20261119T172115Z_a562c112.json | Porten-Bessin | sprint (hors ligne) | 3 | 2 | 0.1250 | 0 | non | ✓ | 14 | 3255 |
 
 ## Notes de lecture
 

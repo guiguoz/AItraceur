@@ -1,0 +1,56 @@
+{
+  "commit": "89dab05",
+  "dirty": true,
+  "AITRACEUR_ONLINE": false,
+  "tile_service_reachable": true,
+  "python_version": "3.14.0 (tags/v3.14.0:ebf955d, Oct  7 2025, 10:15:03) [MSC v.1944 64 bit (AMD64)]",
+  "numpy_version": "2.3.5",
+  "scipy_version": "1.17.1",
+  "date_utc": "2026-11-22T16:43:45.572681+00:00",
+  "command": "E:\\Vikazim\\AItraceur\\backend\\src\\aitraceur\\evalbench\\run.py v1 --captures ../captures --seeds 0 1 2 3 4 --out ../runs/p0_baseline_offline",
+  "n_captures": 7,
+  "sprint_features_cache": {
+    "circuit_20261122T083414Z_a2f6feae.json": {
+      "hmc_npz_before": 7,
+      "hmc_npz_after": 7,
+      "osm_json_before": 6,
+      "osm_json_after": 6
+    },
+    "circuit_20261122T084351Z_a63cd765.json": {
+      "hmc_npz_before": 7,
+      "hmc_npz_after": 7,
+      "osm_json_before": 6,
+      "osm_json_after": 6
+    },
+    "circuit_20261122T092812Z_5685384b.json": {
+      "hmc_npz_before": 7,
+      "hmc_npz_after": 7,
+      "osm_json_before": 6,
+      "osm_json_after": 6
+    },
+    "circuit_20261122T095424Z_7ca39337.json": {
+      "hmc_npz_before": 7,
+      "hmc_npz_after": 7,
+      "osm_json_before": 6,
+      "osm_json_after": 6
+    },
+    "sprint_20261119T164701Z_a530a9ea.json": {
+      "hmc_npz_before": 7,
+      "hmc_npz_after": 7,
+      "osm_json_before": 6,
+      "osm_json_after": 6
+    },
+    "sprint_20261119T171122Z_46871982.json": {
+      "hmc_npz_before": 7,
+      "hmc_npz_after": 7,
+      "osm_json_before": 6,
+      "osm_json_after": 6
+    },
+    "sprint_20261119T172115Z_a562c112.json": {
+      "hmc_npz_before": 7,
+      "hmc_npz_after": 7,
+      "osm_json_before": 6,
+      "osm_json_after": 6
+    }
+  }
+}

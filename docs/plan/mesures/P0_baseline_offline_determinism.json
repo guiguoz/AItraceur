@@ -1,0 +1,25 @@
+{
+  "results": {
+    "circuit_20261122T083414Z_a2f6feae.json": {
+      "identical": false
+    },
+    "circuit_20261122T084351Z_a63cd765.json": {
+      "identical": false
+    },
+    "circuit_20261122T092812Z_5685384b.json": {
+      "identical": false
+    },
+    "circuit_20261122T095424Z_7ca39337.json": {
+      "identical": false
+    },
+    "sprint_20261119T164701Z_a530a9ea.json": {
+      "identical": false
+    },
+    "sprint_20261119T171122Z_46871982.json": {
+      "identical": false
+    },
+    "sprint_20261119T172115Z_a562c112.json": {
+      "identical": true
+    }
+  }
+}

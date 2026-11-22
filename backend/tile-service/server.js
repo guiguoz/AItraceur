@@ -8,6 +8,7 @@ const OcadTiler = require('ocad-tiler')
 const { renderSvg } = require('ocad2tiles')
 const { XMLSerializer } = require('xmldom')
 const sharp = require('sharp')
+const { chooseResolution } = require('./resolution')
 const proj4 = require('proj4')
 
 const app = express()
@@ -41,14 +42,10 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     const outputPath = path.join(RENDER_DIR, `${mapId}.png`)
     const extent = tiler.bounds
 
-    // Adaptive resolution: fine for small maps (sprint), coarser for large maps.
-    // Keeps output under Sharp's 268Mpx hard limit (we target <50Mpx).
-    // sprint 600×600m @ 0.1m/px → 36Mpx ✓  |  MD 2km² @ 0.5m/px → 16Mpx ✓  |  LD ≥1m/px
+    // Adaptive resolution — voir resolution.js pour la formule.
     const extentW = extent[2] - extent[0]
     const extentH = extent[3] - extent[1]
-    const areaPx = extentW * extentH / 50_000_000
-    const RAW = Math.sqrt(areaPx)
-    const RESOLUTION = RAW < 0.3 ? 0.1 : RAW < 0.8 ? 0.5 : Math.ceil(RAW)
+    const RESOLUTION = chooseResolution(extentW, extentH)
     console.log(`[render] Extent ${Math.round(extentW)}×${Math.round(extentH)}m → resolution ${RESOLUTION}m/px`)
 
     // Use renderSvg directly (not render()) to avoid an oversized intermediate raster.

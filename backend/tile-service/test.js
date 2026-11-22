@@ -151,6 +151,51 @@ try {
 }
 
 // ============================================================
+// Test 5 : Résolution adaptative (resolution.js)
+// ============================================================
+section('[5/5] Résolution adaptative');
+
+try {
+  const { chooseResolution, pixelCount } = require('./resolution');
+  const MAX_PX = 200_000_000;
+
+  const cases = [
+    { w: 600,   h: 600,   expectedRes: 0.1,  label: '600×600m (sprint)' },
+    { w: 2107,  h: 2045,  minRes: 0.29, maxRes: 0.30, label: '2107×2045m (Forêt de Caen — le cas qui plantait)' },
+    { w: 4163,  h: 3083,  expectedRes: 0.5,  label: '4163×3083m (Bayeux)' },
+    { w: 8000,  h: 8000,  expectedRes: 2,    label: '8000×8000m' },
+    { w: 20000, h: 20000, expectedRes: 3,    label: '20000×20000m' },
+  ];
+
+  cases.forEach(({ w, h, expectedRes, minRes, maxRes, label }) => {
+    const res = chooseResolution(w, h);
+    const px  = pixelCount(w, h, res);
+
+    if (expectedRes !== undefined) {
+      if (Math.abs(res - expectedRes) < 0.0001) {
+        ok(`${label} → ${res} m/px`);
+      } else {
+        fail(`${label} : résolution incorrecte`, `obtenu ${res}, attendu ${expectedRes}`);
+      }
+    } else {
+      if (res >= minRes && res <= maxRes) {
+        ok(`${label} → ${res.toFixed(4)} m/px`);
+      } else {
+        fail(`${label} : résolution hors plage [${minRes}, ${maxRes}]`, `obtenu ${res}`);
+      }
+    }
+
+    if (px <= MAX_PX) {
+      ok(`  pixels ≤ 200 Mpx : ${(px / 1_000_000).toFixed(1)} Mpx`);
+    } else {
+      fail(`  pixels > 200 Mpx`, `${(px / 1_000_000).toFixed(1)} Mpx`);
+    }
+  });
+} catch (e) {
+  fail('Impossible de charger resolution.js', e.message);
+}
+
+// ============================================================
 // Résumé (appelé après les tests async de sharp)
 // ============================================================
 function printSummary() {

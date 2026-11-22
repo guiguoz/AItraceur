@@ -309,3 +309,7 @@ v1* ; la vraie vérité arrive en phase 3).
   qui diffèrent sur ce point n'a pas de sens.
 - Si `determinism.json` dit `false` malgré la graine, ne pas chercher à corriger ici : le consigner
   au registre. C'est une donnée sur le moteur v1.
+- Le dossier `renders/` conserve les PNG par `map_id`. Après un changement de la résolution de
+  rendu, vider `renders/` et recharger chaque carte dans l'application, sinon le banc rejoue un PNG
+  périmé. Ici les PNG déjà produits (Bayeux, Dôme, Porten-Bessin) restent valides : leur résolution
+  est inchangée.

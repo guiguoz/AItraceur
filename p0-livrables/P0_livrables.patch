@@ -1,0 +1,384 @@
+diff --git a/docs/plan/REGISTRE.md b/docs/plan/REGISTRE.md
+index 7cf052f..241d88c 100644
+--- a/docs/plan/REGISTRE.md
++++ b/docs/plan/REGISTRE.md
+@@ -51,7 +51,20 @@ ce plan.
+ | E34 | Livelox : ses conditions d'utilisation (version du 7 août 2026) interdisent « to systematically extract data from the services except through authenticated and authorized API access » et réservent aux organisateurs « all rights to maps and courses » ; son `robots.txt` interdit `/Viewer/` à tous les robots ; son API est accordée au cas par cas, pour des applications publiques et non un usage personnel, et ne fournit ni cartes ni traces. | `https://www.livelox.com/UserAgreement`, `https://www.livelox.com/robots.txt`, `https://www.livelox.com/Documentation/Api` | 2026-11-14 |
+ | E35 | Le client Livelox du dépôt se connecte avec un compte personnel et imite un navigateur (en-têtes `User-Agent`, `Origin`, `Referer`) pour interroger `api.livelox.com` sans clé ; il sert à des collectes par lots. | `livelox_client.py` l.40-124 ; `backend/ingest_livelox.py` | 2026-11-14 |
+ | E44 | Le service de tuiles ne peut pas rendre les cartes d'emprise comprise entre ~2,7 et 4,5 km² : la résolution adaptative (`server.js` l.44-49) raffinait à 0,1 m/px quand RAW < 0,3, produisant 431 Mpx pour une carte de 4,3 km² (La Forêt de Caen 2022, 2107 × 2045 m), au-delà de la limite dure de Sharp (268 Mpx). Correctif : la résolution est `Math.max(0.1, RAW)` (plancher 0,1 m/px) plus une garantie dure à 200 Mpx. Les cartes déjà rendues (Bayeux, Dôme, Porten-Bessin) ne changent pas de résolution. | Banc P0 / carte « La Forêt de Caen 2022 » ; `resolution.js` `chooseResolution()` | 2026-11-22 |
+-
++| E36 | Sur les 3 cartes de forêt, la plus petite distance entre deux postes est de 68.5 m au minimum (médiane 80.0 m) — seuil RTS p. 9/12 : 30 m, conforme. Sur les 3 cartes de sprint urbain : 0.0 m au minimum (médiane 0.0 m) — seuil RTS p. 9/12 : 15 m, non conforme (paire de postes à distance nulle). Sur la carte de forêt en couleur Jaune (produite par le chemin sprint, voir E47) : 42.5 m au minimum (médiane 42.5 m) — seuil RTS p. 9/12 : 30 m, conforme. Réserve de méthode : le moteur impose lui-même 60 m en forêt et 30 m en sprint (`scale_min_separation`, `genetic_algo.py` l.175-192) ; la mesure vérifie donc le respect de la contrainte du moteur, pas la conformité au seuil RTS, qui est plus bas (30 m / 15 m). | `docs/plan/mesures/P0_baseline_summary.md` ; `docs/plan/mesures/P0_baseline_results.jsonl` | 2026-11-22 |
++| E37 | Sur les 3 cartes de forêt (Forêt de Caen MD, Kûti MD, Ste Anne II MD), le banc relève 0 paire(s) de postes à moins de 30 m en médiane par carte (maximum 0) — seuil RTS p. 9/12 (30 m), conforme. Sur les 3 cartes de sprint urbain : 1 paire(s) à moins de 30 m en médiane (le seuil sprint est 15 m, non mesuré par le banc : à instrumenter) ; sur la 1 carte de forêt en couleur Jaune : 0. | `docs/plan/mesures/P0_baseline_results.jsonl` | 2026-11-22 |
++| E38 | Sur les 3 cartes de forêt (Forêt de Caen MD, Kûti MD, Ste Anne II MD), 0 paire(s) de postes à moins de 60 m en médiane par carte (maximum 0) — règle des 60 m entre postes de même nature (RTS p. 9/12), conforme. Le banc ne distingue pas les libellés : ces paires sont une borne supérieure des violations de la règle. Sur les 3 cartes de sprint urbain : 3 paire(s) à moins de 60 m en médiane ; sur la 1 carte de forêt en couleur Jaune : 0. | `docs/plan/mesures/P0_baseline_results.jsonl` | 2026-11-22 |
++| E39 | Sur les 7 cartes exploitables du banc, « auto-intersections du tracé » vaut 0 en médiane (min 0, max 2). (K3) | `docs/plan/mesures/P0_baseline_summary.md` ; `docs/plan/mesures/P0_baseline_results.jsonl` | 2026-11-22 |
++| E40 | Sur les 7 cartes exploitables du banc, 5 circuits sur 7 se referment sur eux-mêmes (départ et arrivée à moins de 1 m). | `docs/plan/mesures/P0_baseline_summary.md` ; `docs/plan/mesures/P0_baseline_results.jsonl` | 2026-11-22 |
++| E41 | Sur les 7 cartes exploitables du banc, 0 poste(s) en zone interdite en médiane par carte (maximum 0) — zones interdites issues de l'OCAD (hors-limites, végétation impassable), buildings exclus. | `docs/plan/mesures/P0_baseline_summary.md` ; `docs/plan/mesures/P0_baseline_results.jsonl` | 2026-11-22 |
++| E42 | Sur les 7 cartes exploitables du banc, « densité maximale de postes » vaut 3 en médiane (min 2, max 3). (K2) | `docs/plan/mesures/P0_baseline_summary.md` ; `docs/plan/mesures/P0_baseline_results.jsonl` | 2026-11-22 |
++| E43 | Sur les 7 cartes exploitables du banc, « couverture de la zone de tracé » vaut 0.25 en médiane (min 0.12, max 0.56). (K4) | `docs/plan/mesures/P0_baseline_summary.md` ; `docs/plan/mesures/P0_baseline_results.jsonl` | 2026-11-22 |
++| E45 | Le service de tuiles et le registre front ne connaissaient pas EPSG:3301 : la carte Kûti (Estonie) ne pouvait pas être projetée. Correctif minimal appliqué dans la branche : définition EPSG:3301 côté Node (`backend/tile-service/server.js`) et côté front (`frontend/src/services/ocadCrs.js`). La forme complète attendue par le plan — module `crs.js` centralisé, sixième section de tests, fiche de registre dédiée — n'est pas dans la branche : elle reste à faire, et le service de tuiles reste un prérequis infrastructurel. | `backend/tile-service/server.js` ; `frontend/src/services/ocadCrs.js` ; capture `circuit_20261122T092812Z_5685384b.json` ; `docs/plan/mesures/P0_captures.md` § 1 | 2026-11-22 |
++| E46 | À graine fixée, le moteur v1 reproduit le même tracé sur 2 capture(s) sur 7 au banc en ligne (rejeu de la graine 0 après les mesures, à chaud) ; ne sont PAS reproductibles : circuit_20261122T083414Z_a2f6feae.json, circuit_20261122T084351Z_a63cd765.json, circuit_20261122T092812Z_5685384b.json, circuit_20261122T095424Z_7ca39337.json, sprint_20261119T164701Z_a530a9ea.json. C'est une donnée sur le moteur v1, à consigner telle quelle (le plan recommande explicitement de ne pas la corriger en phase 0) : la graine fixe l'aléa du GA, pas l'ensemble des entrées, qui dépendent des caches disque et de l'enrichissement OSM. | `docs/plan/mesures/P0_baseline_determinism.json` | 2026-11-22 |
++| E47 | Le champ `technical_level` porte deux significations : le niveau technique IOF dans les branches sprint/md/ld, la difficulté du terrain dans la branche couleur (« TD = difficulté terrain », `backend/data/ffco_categories.json`). Le moteur le lit toujours avec le sens IOF (`ai_generator.py` l.250 : `technical_level in ("TD1", "TD2")` ⇒ sprint) : un circuit couleur Jaune (TD1) est donc produit par le chemin sprint — séparation minimale imposée de 40 m au lieu de 60 m, re-ranker d'itinéraire activé. Conséquence directe de E08. | `backend/src/services/generation/ai_generator.py` l.250-252 ; `backend/src/services/generation/genetic_algo.py` l.175-192 ; `backend/data/ffco_categories.json` (bloc `couleur`) ; `docs/plan/mesures/P0_captures.md` § 2 | 2026-11-22 |
++| E48 | L'instrument de mesure de la phase 0 ne pouvait pas lire la sortie du moteur pour les circuits de forêt : `_extract_circuit_points` lisait `controls` comme une liste de paires `[lng, lat]`, alors que `ai_generator.py` produit des dicts `{"x", "y", …}` — les quatre captures de forêt échouaient au rejeu sur `KeyError: 0`. La fixture `circuit_sample.json` était écrite dans le format supposé : les tests unitaires passaient donc en validant le bug. Corrigé le 22/11/2026 : adaptateur aligné sur le format réel et fixture réécrite. | commit `632603f` ; `backend/src/aitraceur/evalbench/replay_v1.py` l.98 ; `backend/tests/aitraceur/fixtures/v1_outputs/circuit_sample.json` | 2026-11-22 |
++| E49 | Sur les cartes urbaines, le moteur v1 place deux postes au même point : 9 des 15 rejoues sprint présentent une paire de postes à distance nulle en ligne (`min_pair_dist_m` = 0,0 m) — Bayeux graines 0/2/3/4, Dôme graines 0/3, Porten-Bessin graines 1/3/4 — et 8 des 15 hors ligne. Sur les 15 rejoues de forêt, aucune paire sous 30 m. Le contrôle interne de distance minimale ne porte que sur les postes consécutifs (E09) : le banc, qui mesure toutes les paires, le révèle. Bayeux graine 2 cumule 7 paires sous 30 m, 9 paires sous 60 m et 6 auto-intersections. Le défaut n'est pas propre au mode en ligne : il survit à la disparition des candidats OSM. | `docs/plan/mesures/P0_baseline_results.jsonl` ; `docs/plan/mesures/P0_baseline_offline_results.jsonl` ; `backend/src/aitraceur/evalbench/metrics.py` l.163-175 (toutes paires, sauf départ–arrivée) | 2026-11-22 |
++| E50 | Hors ligne, sur 7 capture(s) exploitables et 35 rejoue(s) valide(s) (0 en erreur) : « distance minimale entre postes » 65.8 m en médiane, « auto-intersections du tracé » 0 en médiane (maximum 2), « postes en zone interdite » 0, « densité maximale de postes » 3, « couverture de la zone de tracé » 0.188. Le mode hors ligne est donc **opérationnel** : il produit des circuits valides, sans violation de zone interdite et de longueur comparable à celle du mode en ligne (3285 m). | `docs/plan/mesures/P0_baseline_offline_results.jsonl` ; `docs/plan/mesures/P0_baseline_offline_summary.md` | 2026-11-22 |
+ ## Réfuté
+ 
+ | Id | Croyance | Ce qui la réfute | Date |
+@@ -101,3 +114,7 @@ ce plan.
+ | V21 | Livelox accorde-t-il l'accès à son API à AItraceur (application publique, libre) ? | Demande à info@livelox.com, si le traceur le souhaite | Dès la phase 6 (réponse attendue avant la phase 9) |
+ | V22 | Conditions d'utilisation des sites RouteGadget des clubs et de Vikazimut pour la collecte qui a servi au CNN ; visibilité des quatre jeux de données Kaggle. | Lecture des conditions ; vérification sur Kaggle ; consigner | Phase 1 (étape 1.11) |
+ | V23 | Mémoire vidéo exacte de la RTX 3060 du traceur (12, 8 ou 6 Go). | `nvidia-smi --query-gpu=name,memory.total --format=csv` | Phase 8 |
++| V24 | Le banc complet (7 captures × 5 graines, 2 modes) est-il rejouable sans intervention et en temps acceptable ? | OUI, rejouable sans intervention : 35 rejoues valides et 0 en erreur en ligne, 35 valides et 0 en erreur hors ligne, sur les deux modes successifs. Durée cumulée : 1.86 h en ligne et 1.49 h hors ligne (soit 3.35 h pour le banc complet). | Phase 1 |
++| V25 | Le résultat dépend-il de l'état du cache disque ? | OUI, le résultat dépend de l'état du cache disque : les compteurs `hmc_npz` ont évolué pendant le banc en ligne sur sprint_20261119T171122Z_46871982.json, sprint_20261119T172115Z_a562c112.json (les compteurs OSM sont restés stables). Combiné au déterminisme de 2/7 captures à graine fixée, cela montre que la graine fixe l'aléa du GA mais pas l'ensemble des entrées. | Phase 1 |
++| V26 | Le mode hors ligne dégrade-t-il la qualité (candidats OSM absents) ? | OUI, mais de façon bornée. Par groupe (médiane par carte) : forêt — longueur 8345 m → 7849 m ; forêt — couverture 0.562 → 0.562 ; forêt — dist. min. entre postes 80.0 m → 86.8 m ; forêt — auto-intersections 0 → 0 ; sprint urbain — longueur 2614 m → 3020 m ; sprint urbain — couverture 0.125 → 0.125 ; sprint urbain — dist. min. entre postes 0.0 m → 0.0 m ; sprint urbain — auto-intersections 2 → 2. Le nombre de postes demandés est identique dans les deux modes, et aucune zone interdite n'est violée hors ligne (le service de tuiles est local, il reste joignable). En revanche les paires de postes à distance nulle sur les cartes urbaines ne disparaissent pas : 9/15 rejoues en ligne, 8/15 hors ligne. Conclusion : le mode hors ligne est utilisable ; c'est la garantie de non-duplication des postes qui manque, pas la production de circuits. | Phase 1 |
++| V27 | Le moteur v1 est-il une référence exploitable pour la phase 1, ou faut-il le remplacer ? | Trancher en phase 1 à partir de E36–E43, E46, E49 et V26 : conformité aux seuils RTS vérifiée en forêt mais pas en sprint urbain (paires de postes à distance nulle), couverture faible en ville (médiane 0.25), déterminisme 2/7 captures à graine fixée. Les mesures de la phase 0 sont acquises et versionnées : la décision de conserver ou remplacer le moteur v1 appartient à la phase 1. | Phase 1 |
+diff --git a/docs/plan/comptes-rendus/P0.md b/docs/plan/comptes-rendus/P0.md
+index e846e43..71da3fa 100644
+--- a/docs/plan/comptes-rendus/P0.md
++++ b/docs/plan/comptes-rendus/P0.md
+@@ -55,9 +55,47 @@
+ - `backend/src/aitraceur/evalbench/replay_v1.py` : `replay(capture_path, seed) → ReplayResult` ; adaptateurs `_extract_circuit_points` et `_extract_sprint_points`.
+ - `backend/src/aitraceur/evalbench/run.py` : CLI `python -m src.aitraceur.evalbench.run v1 --captures ... --seeds ... --out ...` ; produit `results.jsonl`, `summary.md`, `determinism.json`, `run_metadata.json`.
+ - Fixtures `circuit_sample.json` / `sprint_sample.json` + **8 tests** `test_extract_points.py` — tous passent.
++- **Correctif du 22/11/2026 (`632603f`, voir E48)** : l'adaptateur de circuit lisait `controls` comme une liste de paires `[lng, lat]`, alors que `ai_generator.py` produit des dicts `{"x", "y", …}`. Les quatre captures de forêt échouaient donc au rejeu (`KeyError: 0`). La fixture `circuit_sample.json` était écrite dans le format supposé : les tests passaient en validant le bug. Adaptateur aligné sur le format réel, fixture réécrite, **8/8 tests**.
+ 
+ ### 0.9 — Ligne de base sur cartes du traceur
+-**À faire manuellement.** Voir instructions dans le plan §0.9.
++
++**Fait.** Sept captures produites les 19 novembre 2026 (sprints) et le 22 novembre 2026
++(forêts), puis rejouées par le banc en ligne et hors ligne.
++
++Inventaire réel, et correspondance fichier ↔ carte ↔ profil : `docs/plan/mesures/P0_captures.md`.
++
++| Type | Captures |
++|---|---|
++| sprint (3) | Bayeux, Dôme, Porten-Bessin |
++| forêt MD H21E (3) | Forêt de Caen, Kûti (Estonie), Ste Anne II |
++| forêt couleur Jaune (1) | Forêt de Caen |
++
++Le banc a rejoué les sept captures, cinq graines chacune, dans les deux modes, et a produit
++les huit artefacts de `docs/plan/mesures/` (`P0_baseline_*` et `P0_baseline_offline_*`).
++
++#### Écart au gabarit §0.9 du plan
++
++Le plan demande « au minimum deux cartes de sprint (**dont Caen**) et trois de forêt (parmi
++airelles, cerisy, grochot, llose, montmirel, steanne) ».
++
++| Attendu par le gabarit | Réel | Écart |
++|---|---|---|
++| un sprint **Caen** | Bayeux, Dôme, Porten-Bessin | **manquant** — aucun sprint Caen dans l'inventaire |
++| au moins 2 sprints | 3 | dépassé |
++| 3 forêts, dont une de la liste (airelles, cerisy, grochot, llose, montmirel, **steanne**) | 4 forêts : Forêt de Caen (×2), **Kûti** (Estonie), Ste Anne II | **Ste Anne II** est la seule de la liste ; Forêt de Caen (×2) et Kûti sont des substituts |
++| — | Kûti est **hors France** | non prévu : a imposé l'enregistrement d'EPSG:3301 (E45) |
++| `docs/plan/mesures/P0_baseline.md` | `P0_baseline_summary.md` + `P0_baseline_results.jsonl` + `P0_baseline_determinism.json` + `P0_baseline_run_metadata.json` | le plan ne demandait qu'un résumé ; la **donnée brute** est versionnée en plus, pour que E36–E43 soient contrôlables à la relecture |
++
++Deux cartes de Forêt de Caen partagent la même emprise, les mêmes 1 041 entités et les mêmes
++11 zones interdites : ce sont deux profils de la **même** carte (MD H21E et couleur Jaune), comme
++le demande le gabarit.
++
++#### Point de vigilance sur la capture « couleur Jaune »
++
++La capture Jaune est un circuit **de forêt**, mais le moteur la produit par le **chemin sprint** :
++dans la branche `couleur`, le champ `technical_level` porte la *difficulté du terrain*
++(« TD = difficulté terrain », `ffco_categories.json`), et `ai_generator.py` l.250 le lit avec le
++sens du niveau technique IOF. Conséquence directe de E08, consignée en E47.
+ 
+ ### 0.10 — Documentation
+ - 18 scripts d'analyse mai-2026 déplacés dans `backend/scripts/archive_2026-05/` + `LISEZMOI.md`.
+@@ -67,66 +105,131 @@
+ 
+ ## Résultat final des tests
+ 
++Revérifié le 22 novembre 2026 sur `plan/p0-socle` au tip `672d948` :
++
+ ```
+-226 passés, 4 échoués (pré-existants aitraceur_proto), 7 warnings
++pytest tests -q   →  226 passés, 4 échoués (pré-existants aitraceur_proto), 7 warnings
++node tile-service/test.js  →  22/22 tests passés
+ ```
+ 
+-Décompte par rapport à la ligne de base (0.3) : **+32 tests** ajoutés.
+-
+----
++Les 4 échecs sont antérieurs à la phase 0 et tous situés dans `tests/aitraceur_proto/`
++(prototype gelé, hors périmètre). **Aucune régression** par rapport à la ligne de base (§0.3).
+ 
+ ## Écarts au plan
+ 
+ | Étape | Écart | Motif |
+ |-------|-------|-------|
+ | 0.1 | Frontend npm test non exécuté | Test manuel ; tests backend vérifiés |
+-| 0.9 | Non exécutée | Action manuelle traceur |
+-
+----
++| 0.8 | Le banc ne pouvait pas rejouer les circuits de forêt | `_extract_circuit_points` lisait `controls` comme des paires au lieu de dicts ; fixture masking le bug. Corrigé (`632603f`, E48) |
++| 0.9 | **Aucun sprint Caen** | l'inventaire réel comporte Bayeux, Dôme, Porten-Bessin |
++| 0.9 | **Kûti est hors de France** | carte de substitution ; a imposé l'enregistrement d'EPSG:3301 (E45) |
++| 0.9 | **Forêt de Caen remplace 5 des 6 forêts suggérées** | seule Ste Anne II figure dans la liste du plan |
++| 0.9 | **Huit artefacts versionnés au lieu d'un seul** | le plan demande `docs/plan/mesures/P0_baseline.md` ; la ligne de base réelle couvre **deux modes** (en ligne et hors ligne) et **sept captures**, ce qui demande quatre fichiers par mode. La donnée brute (`results.jsonl`) est nécessaire pour contrôler E36–E43 et E50 à la relecture |
++| 0.9 | Le fichier `P0_baseline.md` du plan n'est pas créé | il désignerait un seul mode ; les huit artefacts sont nommés `P0_baseline_*` et `P0_baseline_offline_*`, et le résumé est `P0_baseline_summary.md`. Deux variantes contradictoires du même résumé n'ont pas été produites |
++| 0.9 | Deux bancs lancés en parallèle ont écrit dans le même log et le même dossier de sortie | **exécution écartée** : ni les temps ni les lignes de journal de cette exécution ne sont retenus ; le banc a été relancé seul |
+ 
+ ## Mesures
+ 
+-Aucune capture disponible (étape 0.9 en attente). `docs/plan/mesures/P0_baseline.md` sera créé après l'étape 0.9.
+-
+----
++Banc P0 : 7 captures × 5 graines, en ligne (`AITRACEUR_ONLINE=1`) puis hors ligne
++(`AITRACEUR_ONLINE=0`), sur la machine du traceur, service de tuiles actif.
++
++Artefacts versionnés dans `docs/plan/mesures/` :
++
++| Fichier | Contenu |
++|---|---|
++| `P0_baseline_results.jsonl` | données brutes : une ligne par rejeu (capture, graine, `ok`, temps, 15 indicateurs) |
++| `P0_baseline_summary.md` | résumé par capture et par graine |
++| `P0_baseline_determinism.json` | verdict de reproductibilité à graine fixée, par capture |
++| `P0_baseline_run_metadata.json` | compteurs de cache avant/après préchauffage, métadonnées d'exécution |
++| `P0_baseline_offline_*` | les quatre mêmes fichiers, mode hors ligne |
++| `P0_synthese.md` | synthèse comparative des deux modes |
++| `P0_captures.md` | inventaire des sept captures et écart au gabarit §0.9 |
++
++| Capture | Carte | Mode effectif | sépa. moteur | graines | long. (m) | min paire (m) | <30 m | <60 m | crois. (K3) | boucle | interdits | densité (K2) | couv. (K4) | déterm. | durée (s) |
++|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
++| circuit_20261122T083414Z_a2f6feae.json | FORET-DE-CAEN | foret MD H21E | foret | 60 m | 5/5 | 8345 | 68.5 | 0 | 0 | 0 | oui | 0 | 3 | 0.562 | ✗ | 150 |
++| circuit_20261122T084351Z_a63cd765.json | FORET-DE-CAEN | couleur Jaune | sprint (couleur) | 40 m | 5/5 | 2287 | 42.5 | 0 | 0 | 0 | oui | 0 | 2 | 0.250 | ✗ | 22 |
++| circuit_20261122T092812Z_5685384b.json | KUTI | foret MD H21E | foret | 60 m | 5/5 | 8202 | 88.7 | 0 | 0 | 0 | oui | 0 | 3 | 0.312 | ✗ | 144 |
++| circuit_20261122T095424Z_7ca39337.json | STE-ANNE-II | foret MD H21E | foret | 60 m | 5/5 | 8392 | 80.0 | 0 | 0 | 0 | oui | 0 | 3 | 0.562 | ✗ | 157 |
++| sprint_20261119T164701Z_a530a9ea.json | BAYEUX | sprint | sprint | 30 m | 5/5 | 2606 | 0.0 | 1 | 4 | 2 | oui | 0 | 3 | 0.125 | ✗ | 294 |
++| sprint_20261119T171122Z_46871982.json | DOME | sprint | sprint | 30 m | 5/5 | 2614 | 10.2 | 1 | 3 | 1 | non | 0 | 2 | 0.250 | ✓ | 289 |
++| sprint_20261119T172115Z_a562c112.json | PORTEN-BESSIN | sprint | sprint | 30 m | 5/5 | 3285 | 0.0 | 1 | 2 | 2 | non | 0 | 2 | 0.125 | ✓ | 290 |
++
++Détail complet et comparaison en ligne / hors ligne : `docs/plan/mesures/P0_synthese.md`.
+ 
+ ## Registre — Mises à jour
+ 
+-Fait établi pendant la phase 0 (service de tuiles) :
++Faits établis pendant la phase 0 (service de tuiles) :
+ 
+ - **E44** — Le service de tuiles ne peut pas rendre les cartes d'emprise entre ~2,7 et 4,5 km² :
+   la résolution adaptative raffinait à 0,1 m/px quand RAW < 0,3, produisant ~431 Mpx pour
+   La Forêt de Caen 2022 (2107 × 2045 m), au-dessus de la limite Sharp (268 Mpx).
+   Correctif : `Math.max(0.1, RAW)` + garantie dure 200 Mpx dans `resolution.js`.
+ 
++Faits établis par le banc de la phase 0 :
++
++- **E36** à **E43** — valeurs de base du moteur v1 : distance minimale entre postes, paires à
++  moins de 30 m et de 60 m, auto-intersections (K3), circuit refermé, postes en zone interdite,
++  densité maximale (K2), couverture de la zone de tracé (K4). Voir `docs/plan/REGISTRE.md`.
++- **E45** — EPSG:3301 (Kûti, Estonie) : correctif minimal appliqué dans la branche ; la forme
++  complète (module `crs.js` centralisé, sixième section de tests) reste à faire et le service de
++  tuiles reste un prérequis infrastructurel.
++- **E46** — verdict de déterminisme à graine fixée, mesuré par le banc (rejeu de la graine 0 après
++  les mesures, à chaud).
++- **E47** — `technical_level` porte deux significations (niveau IOF / difficulté du terrain) ; une
++  capture couleur Jaune passe par le chemin sprint.
++- **E48** — l'instrument de mesure de la phase 0 ne savait pas lire la sortie du moteur pour les
++  circuits de forêt ; la fixture de test validait le bug.
++
++Questions ouvertes reportées en phase 1 : **V24** (rejouabilité et temps du banc), **V25**
++(influence cache froid / chaud), **V26** (comparaison hors ligne / en ligne), **V27** (le moteur v1
++est-il une référence, ou faut-il le remplacer ?).
++
+ **Bug corrigé dans le code de la phase :** `_segments_intersect` utilisait `(d1 > 0 < d2)` (comparaison chaînée Python) au lieu de `d1 * d2 < 0` — corrigé dans `metrics.py`.
+ 
+ **Bug corrigé dans `.gitignore` :**
+ - `AItraceur/` sur Windows (case-insensitive) bloquait `backend/src/aitraceur/` → ancré `/AItraceur/`.
+ - `tools/` bloquait `backend/tools/` → exception `!backend/tools/` ajoutée.
+ 
+----
++## Rejouer le banc (procédure vérifiée)
+ 
+-## À tester à la main (étape 0.9)
++Le banc doit tourner **sur la machine du traceur**, service de tuiles actif, et **un seul job à la
++fois** (deux exécutions concurrentes écrivent dans le même log et le même dossier de sortie, et
++se corrompent mutuellement les caches disque).
+ 
+ ```bash
+-# Démarrer avec capture
+-AITRACEUR_CAPTURE_DIR=captures uvicorn src.main:app --reload
+-# Générer au moins 2 sprints + 3 circuits forêt
+-# Lancer le banc
++# service de tuiles
++curl -s http://localhost:8089/health          # {"status":"ok"}
++
++# banc en ligne
+ cd backend
+ python -m src.aitraceur.evalbench.run v1 \
+     --captures ../captures \
+     --seeds 0 1 2 3 4 \
+-    --out ../runs/p0_baseline
+-# Copier summary.md
+-cp ../runs/p0_baseline/summary.md docs/plan/mesures/P0_baseline.md
+-```
++    --out ../runs/p0_baseline_online
+ 
+----
++# banc hors ligne
++AITRACEUR_ONLINE=0 python -m src.aitraceur.evalbench.run v1 \
++    --captures ../captures \
++    --seeds 0 1 2 3 4 \
++    --out ../runs/p0_baseline_offline
++
++# versement des huit artefacts
++cp ../runs/p0_baseline_online/results.jsonl      ../docs/plan/mesures/P0_baseline_results.jsonl
++cp ../runs/p0_baseline_online/summary.md          ../docs/plan/mesures/P0_baseline_summary.md
++cp ../runs/p0_baseline_online/determinism.json    ../docs/plan/mesures/P0_baseline_determinism.json
++cp ../runs/p0_baseline_online/run_metadata.json   ../docs/plan/mesures/P0_baseline_run_metadata.json
++cp ../runs/p0_baseline_offline/results.jsonl     ../docs/plan/mesures/P0_baseline_offline_results.jsonl
++cp ../runs/p0_baseline_offline/summary.md         ../docs/plan/mesures/P0_baseline_offline_summary.md
++cp ../runs/p0_baseline_offline/determinism.json   ../docs/plan/mesures/P0_baseline_offline_determinism.json
++cp ../runs/p0_baseline_offline/run_metadata.json  ../docs/plan/mesures/P0_baseline_offline_run_metadata.json
++```
+ 
+ ## Remarques
+ 
+ - Le `run.py` importe `src.core.config` (settings) et `numpy`/`scipy` — disponibles dans `requirements.txt`.
+ - `replay_v1.py` : import `src.main` local (dans la fonction) — l'appel démarre la base SQLite et les routeurs FastAPI ; lancer depuis `backend/`.
+ - Le `AITRACEUR_ONLINE=False` ne désactive pas les appels réseau dans `replay_v1.py` directement : c'est le settings qui est lu par le moteur. Passer `AITRACEUR_ONLINE=0` comme variable d'environnement avant le lancement.
++- **Le service de tuiles doit rester actif pendant les deux bancs** : sans lui, `/forbidden-zones` est indisponible et `forbidden_hits` est faussé. Le plan le signale dans ses pièges ; c'est aussi la raison pour laquelle le banc n'a pas été lancé sur la machine de revue.
++- **Un seul banc à la fois.** Deux exécutions concurrentes ont écrit dans le même journal et le même dossier de sortie : le journal contenait des octets NUL, les lignes des deux exécutions étaient entremêlées et les temps de rejeu étaient gonflés par la concurrence. Cette exécution a été écartée et le banc relancé seul.
++- Les compteurs de cache de `run_metadata.json` (`hmc_npz`, `osm_json`) sont cumulés sur le disque : ils mesurent l'activité du préchauffage, pas l'état du cache au moment du rejeu.
+diff --git a/docs/plan/mesures/P0_captures.md b/docs/plan/mesures/P0_captures.md
+new file mode 100644
+index 0000000..ab95f4c
+--- /dev/null
++++ b/docs/plan/mesures/P0_captures.md
+@@ -0,0 +1,137 @@
++# Captures du banc P0 — inventaire et écarts au gabarit §0.9
++
++**Date :** 2026-11-22
++**Source :** `captures/LISEZMOI.md` (versionné) + corps des 7 requêtes capturées
++**Banc :** `backend/src/aitraceur/evalbench/run.py` — 7 captures × 5 graines × 2 modes
++
++---
++
++## 1. Les sept captures
++
++Les corps capturés sont hors dépôt (`.gitignore` : `captures/*`, avec `!captures/LISEZMOI.md`) :
++ils pèsent plusieurs mégaoctets (`ocad_geojson_features`). Seule la table de correspondance
++est versionnée, dans `captures/LISEZMOI.md`.
++
++| Fichier | Carte | Type | Profil | `category` | `technical_level` | Longueur | Postes | Points candidats | Zones interdites | Emprise WGS84 |
++|---|---|---|---|---|---|---|---|---|---|---|
++| `sprint_20261119T164701Z_a530a9ea.json` | Bayeux | sprint | — | H21E | TD3 | 2 800 m | 16 | 251 | 4 130 | -0,74346 / 49,26830 → -0,68601 / 49,29897 |
++| `sprint_20261119T171122Z_46871982.json` | Dôme | sprint | — | H21E | TD3 | 2 800 m | 16 | 91 | 2 245 | -0,36489 / 49,17349 → -0,33047 / 49,19238 |
++| `sprint_20261119T172115Z_a562c112.json` | Porten-Bessin | sprint | — | H21E | TD3 | 2 800 m | 16 | 2 230 | 354 | -0,82494 / 49,31901 → -0,73414 / 49,36075 |
++| `circuit_20261122T083414Z_a2f6feae.json` | Forêt de Caen | forêt | MD H21E | H21E | TD5 | 7 300 m | 27 | 1 041 | 11 | -0,44644 / 49,03106 → -0,41887 / 49,05025 |
++| `circuit_20261122T084351Z_a63cd765.json` | Forêt de Caen | forêt | couleur Jaune | Couleur-Jaune | TD1 | 2 000 m | 12 | 1 041 | 11 | -0,44644 / 49,03106 → -0,41887 / 49,05025 |
++| `circuit_20261122T092812Z_5685384b.json` | Kûti (Estonie) | forêt | MD H21E | H21E | TD5 | 7 300 m | 27 | 1 824 | 6 | 25,65611 / 58,05565 → 25,74364 / 58,10022 |
++| `circuit_20261122T095424Z_7ca39337.json` | Ste Anne II | forêt | MD H21E | H21E | TD5 | 7 300 m | 27 | 426 | 7 | -0,45827 / 49,04278 → -0,43270 / 49,06827 |
++
++Les paramètres `longueur`, `postes` et `technical_level` ne sont pas choisis à la main : le front
++les calcule à partir de `backend/data/ffco_categories.json`
++(`App.jsx`, `getCircuitParams()`). La vérification est exacte :
++
++| Capture | Table FFCO | Front calcule | Capturé |
++|---|---|---|---|
++| forêts MD | `md.H21E` : min 6 000 / max 8 500 m, 18 postes, TD5 | `round((6000+8500)/2/100)×100` = 7 300 ; `ceil(18×1,5)` = 27 | 7 300 m, 27, TD5 ✓ |
++| sprints | `sprint.H21E` : min 2 400 / max 3 200 m, 16 postes, TD3 | `round((2400+3200)/2/100)×100` = 2 800 ; 16 (×1,5 non appliqué au sprint) | 2 800 m, 16, TD3 ✓ |
++| Jaune | `couleur.Jaune` : min 1 500 / max 2 500 m, 8 postes, TD1 | `round((1500+2500)/2/100)×100` = 2 000 ; `ceil(8×1,5)` = 12 | 2 000 m, 12, TD1 ✓ |
++
++## 2. Ce que le moteur fait réellement de chaque capture
++
++`ai_generator.py` l.250 :
++
++```python
++sprint_mode = request.circuit_type == "sprint" or request.technical_level in ("TD1", "TD2")
++_base_dist = 30 if sprint_mode else 60
++min_dist = scale_min_separation(_base_dist, request.map_scale, request.circuit_type or "md")
++```
++
++| Capture | Mode effectif | Séparation imposée | Seuil RTS p. 9/12 | Re-ranker d'itinéraire |
++|---|---|---|---|---|
++| Forêt de Caen MD | forêt | 60 m | 30 m | non |
++| Kûti MD | forêt | 60 m | 30 m | non |
++| Ste Anne II MD | forêt | 60 m | 30 m | non |
++| **Forêt de Caen Jaune** | **sprint** | **40 m** | 30 m | **oui** |
++| Bayeux, Dôme, Porten-Bessin | sprint | 30 m | 15 m | oui |
++
++**La capture Jaune est un cas particulier.** Dans la branche `couleur`, le champ `technical_level`
++ne porte pas le niveau technique IOF mais la **difficulté du terrain** — la note de
++`ffco_categories.json` est explicite : « TD = difficulté terrain » ; jaune = TD1 (le plus facile),
++noir = TD5. Le moteur lit ce champ avec le sens IOF (échelle britannique) et bascule donc la
++capture en mode sprint : séparation 40 m au lieu de 60 m, re-ranker d'itinéraire activé.
++C'est une conséquence directe de **E08**.
++
++**Ce qui est établi, et ce qui ne l'est pas.** Ce n'est pas l'interface qui a été observée, c'est
++le **corps de la requête capturé** : il porte `circuit_type: "couleur"` et
++`category: "Couleur-Jaune"`. Ce sont ces deux champs qui font foi. Le mode effectif `sprint` en
++découle mécaniquement (TD1) ; il ne dit rien du parcours de navigation. En particulier, le fait que
++le moteur ait produit cette capture par le chemin sprint **ne prouve pas** qu'un mode « urbain »
++ait été choisi à l'écran : un circuit de couleur peut être demandé depuis le parcours de forêt.
++La formulation à retenir est donc « capture de catégorie `couleur` / Couleur-Jaune, traitée par le
++chemin sprint à cause de TD1 », et non « capture urbaine ».
++
++Effet de bord à retenir pour la lecture des mesures : `forbidden_hits` n'est pas comparable d'un
++type à l'autre (4 130 zones interdites sur Bayeux, 2245 sur Dôme, 354 sur Porten-Bessin, 6 à 11
++sur les forêts).
++
++## 3. Écart au gabarit §0.9 du plan
++
++Le plan (`docs/plan/10_P0_socle_et_mesure.md` §0.9) demande « au minimum deux cartes de sprint
++(**dont Caen**) et trois de forêt (parmi airelles, cerisy, grochot, llose, montmirel, steanne) ».
++
++| Attendu par §0.9 | Réel | Écart |
++|---|---|---|
++| un sprint **Caen** | aucun sprint Caen | **manquant** — l'inventaire réel comporte Bayeux, Dôme, Porten-Bessin |
++| ≥ 2 sprints | 3 sprints | dépassé |
++| 3 forêts, dont une de la liste (airelles, cerisy, grochot, llose, montmirel, **steanne**) | 4 forêts : Forêt de Caen (×2), **Kûti** (Estonie), Ste Anne II | **Ste Anne II** est la seule de la liste ; Forêt de Caen (×2) et Kûti sont des substituts |
++| — | Kûti est **hors France** | non prévu ; a imposé l'enregistrement d'EPSG:3301 (E45) |
++| `docs/plan/mesures/P0_baseline.md` | `P0_baseline_summary.md` + `P0_baseline_results.jsonl` + `P0_baseline_determinism.json` + `P0_baseline_run_metadata.json` (+ les quatre équivalents `P0_baseline_offline_*`) | le plan ne demandait qu'un résumé et un seul mode ; la donnée brute des **deux** modes est versionnée en plus, pour que E36–E43 et E50 soient contrôlables à la relecture. Le nom `P0_baseline.md` n'est pas créé : il désignerait un seul mode alors que la ligne de base en couvre deux |
++
++Les deux cartes de Forêt de Caen partagent la même emprise, les mêmes 1 041 entités et les mêmes
++11 zones interdites : ce sont deux profils de la **même** carte (MD H21E et couleur Jaune), comme
++le demande §0.9 (« et, sur une carte de forêt, un circuit de couleur “Jaune” »).
++
++## 4. Reproductibilité des captures
++
++* Chaque fichier porte un horodatage UTC et une empreinte SHA-8 du corps de la requête
++  (`backend/src/api/capture.py`) : `circuit_<AAAAMMJJTHHMMSSZ>_<sha8>.json`.
++* Les 7 captures ont été produites les 19 novembre 2026 (sprints) et le 22 novembre 2026 (forêts).
++* Le banc rejoue ces corps tels quels ; il ne dépend que d'eux et de la graine.
++
++## 5. Ce que le banc mesure, et ce qu'il ne peut pas mesurer
++
++* **Il mesure** : la rejouabilité (5 graines), le temps de rejeu, le déterminisme à graine fixée,
++  et les indicateurs géométriques K2 (`max_in_radius`), K3 (`crossings`), K4 (`coverage_4x4`),
++  `forbidden_hits`, `is_loop`, plus les distances entre postes.
++* **Il ne mesure pas** : la conformité aux seuils RTS. Le moteur impose lui-même 60 m en forêt et
++  30 m en sprint, alors que le RTS p. 9/12 demande 30 m et 15 m : la mesure vérifie le respect de
++  la contrainte du moteur, pas celle du règlement. Seule une capture à seuil plus bas pourrait
++  trancher.
++* **Il ne mesure pas** la couleur FFCO du circuit « Jaune » : ce que le moteur traite, c'est un
++  `technical_level` de difficulté de terrain.
++
++## 6. Ce que le mode hors ligne ajoute
++
++Le même banc a été rejoué avec `AITRACEUR_ONLINE=0` : MapAnt, Overpass et l'IGN sont coupés, le
++service de tuiles local reste joignable. Les 35 rejoues hors ligne ont abouti, **0 erreur**.
++
++| Ce qui est comparé | En ligne | Hors ligne |
++|---|---|---|
++| Rejoues valides | 35/35 | **35/35** |
++| Durée cumulée | 1,86 h | **1,49 h** |
++| Postes livrés | 25 / 10 / 14 | **25 / 10 / 14** (identique) |
++| Zones interdites violées | 0 | **0** |
++| Couverture (médiane) | 0,250 | 0,188 |
++| Distance minimale, sprint | 0,0 m (9/15 rejoues) | 0,0 m (8/15 rejoues) |
++| Reproductibilité à graine fixée | 2/7 | **1/7** |
++
++Trois enseignements :
++
++1. **Le mode hors ligne est opérationnel.** Longueur, nombre de postes et respect des zones
++   interdites sont conservés : couper les données externes ne casse pas la production de circuits.
++2. **Le gain de temps ne vient pas des cartes urbaines.** Les forêts passent de ~150 s à ~60-90 s
++   par rejeu ; les sprints restent à ~285 s, dominés par le CPU et non par le réseau.
++3. **Le défaut de duplication des postes survit à la coupure.** Bayeux passe de 0,0 m à 35,1 m
++   (le doublon disparaît), mais le Dôme passe de 10,2 m à 0,0 m (le doublon apparaît). Ce n'est donc
++   pas un artefact de l'enrichissement OSM, mais une propriété du placement des postes sur un
++   jeu de candidats réduit (voir **E49**).
++
++Cas isolé à signaler : Porten-Bessin graine 0 hors ligne produit 22 auto-intersections et un tracé
++de 4 478 m, contre une médiane de 3 255 m et 2 auto-intersections. La médiane du mode reste à 2 ;
++c'est un rejeu extrême, pas une tendance.

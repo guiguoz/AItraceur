@@ -11,6 +11,9 @@ const sharp = require('sharp')
 const { chooseResolution } = require('./resolution')
 const proj4 = require('proj4')
 
+// Kûti : EPSG:3301 (Estonie) — proj4 ne connaît que les zones UTM WGS84
+proj4.defs('EPSG:3301', '+proj=lcc +lat_0=57.5175539305556 +lon_0=24 +lat_1=59.3333333333333 +lat_2=58 +x_0=500000 +y_0=6375000 +ellps=GRS80 +units=m +no_defs +type=crs')
+
 const app = express()
 app.use(cors())
 

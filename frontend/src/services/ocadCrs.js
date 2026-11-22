@@ -14,6 +14,10 @@ import proj4 from 'proj4';
 // The entries below cover national/regional CRS not included by default.
 
 const EXTRA_DEFS = {
+  // Kûti : EPSG:3301 (Estonie)
+  'EPSG:3301':
+    '+proj=lcc +lat_0=57.5175539305556 +lon_0=24 +lat_1=59.3333333333333 +lat_2=58 +x_0=500000 +y_0=6375000 +ellps=GRS80 +units=m +no_defs +type=crs',
+
   // France — Lambert-93 (most common for modern French O-maps)
   'EPSG:2154':
     '+proj=lcc +lat_0=46.5 +lon_0=3 +lat_1=44 +lat_2=49 +x_0=700000 +y_0=6600000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs',

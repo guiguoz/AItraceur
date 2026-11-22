@@ -37,7 +37,7 @@ cette phase, « bon pour un niveau vert » a une définition écrite que le mote
 - `placement_rules.json` décrit ses blocs en couleurs britanniques (« Blanc/Jaune », « Vert/Violet ») ;
   `Lora/mondial_tracage_QR_v4.jsonl` (54 questions-réponses) enseigne la même échelle au modèle
   `ffco-iof-v7`.
-- La FFCO définit six niveaux par couleur (RTS §3.2.1, p. 7/12), décrits par la Méthode fédérale
+- La FFCO définit six niveaux par couleur (RTS §3.2.1, p. 8/12), décrits par la Méthode fédérale
   (p. 4 à 9 pour la forêt, p. 10 à 13 pour le sprint) ; le Guide des circuits de couleur donne les
   distances par format (p. 4-5). Les couleurs des tableaux de la Méthode ont été vérifiées sur le
   rendu des pages. Les citations de l'annexe A2 ont été contrôlées mot à mot contre le texte des
@@ -59,7 +59,7 @@ cette phase, « bon pour un niveau vert » a une définition écrite que le mote
     "MF_T1": { "doc": "Méthode Fédérale - Edition 2016.pdf", "page": 4,
                "quote": "T1 : Le parcours doit être tracé sur un terrain comportant des éléments de planimétrie évidents et reliés entre eux. Les postes sont toujours sur des lignes identiques et aux changements de direction. Un seul itinéraire possible. Le point d'attaque est confondu avec le poste. Choisir des postes faciles : bâtiment, jonction ou croisement de chemins",
                "check": ["Un seul itinéraire possible", "Choisir des postes faciles"] },
-    "RTS_3_2_1": { "doc": "RTS_CO_(Ed.mai2025)_b6e41MU.pdf", "page": 8, "printed_page": "7/12",
+    "RTS_3_2_1": { "doc": "RTS_CO_(Ed.mai2025)_b6e41MU.pdf", "page": 9, "printed_page": "8/12",
                    "quote": "…", "check": ["temps de course maximum préconisé"] }
   },
   "forest": {

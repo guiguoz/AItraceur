@@ -23,7 +23,7 @@ numérotation imprimée « n/12 ».
 
 ## 2. Les six couleurs
 
-| Couleur | Difficulté (GC p. 2) | Étape de la Méthode fédérale | Règles de traçage | Âge et temps de course maximal préconisé (RTS §3.2.1, p. 7/12) |
+| Couleur | Difficulté (GC p. 2) | Étape de la Méthode fédérale | Règles de traçage | Âge et temps de course maximal préconisé (RTS §3.2.1, p. 8/12) |
 |---------|----------------------|------------------------------|-------------------|--------------------------------------------|
 | vert | très facile | Acquisition des fondamentaux (MF p. 4) | T1, T2, T3 | niveau maximal des 10 ans et moins ; 30 min |
 | bleu | facile | Acquisition des techniques de base (MF p. 5) | T4 à T7 | niveau maximal des 11-12 ans ; 40 min |
@@ -187,10 +187,10 @@ comportant des angles, les obstacles ou tout autre élément pouvant provoquer u
 
 Distances minimales entre postes, tous niveaux de sprint : « pour des échelles 1:4000 et 1:3000 :
 la distance minimum entre 2 postes est de 25m en distance de course et de 15m à vol d'oiseau »
-(RTS, « Distance minimale entre les postes », p. 8/12).
+(RTS, « Distance minimale entre les postes », p. 9/12).
 Échelles 1:7 500, 1:10 000 et 1:15 000 : « les postes ne doivent pas être placés à moins de
 30 mètres à vol d'oiseau les uns des autres. Deux postes disposés sur deux éléments de même nature
-ne peuvent être à moins de 60m à vol d'oiseau l'un de l'autre » (RTS p. 8/12 ; même règle dans
+ne peuvent être à moins de 60m à vol d'oiseau l'un de l'autre » (RTS p. 9/12 ; même règle dans
 TP §3.5.6, p. 10).
 
 ## 6. Formats et distances
@@ -213,7 +213,7 @@ en sprint, des distances « réelles de course en prenant en compte les itinéra
 | vert | 2 – 3 km | 2 – 2,5 km | — |
 
 Dénivelé : « La dénivelée positive ne doit pas excéder 4 % de la longueur totale du parcours par
-l'itinéraire le plus logique » (TP §3.11.6, p. 17 ; le RTS, p. 7/12, en fait une recommandation).
+l'itinéraire le plus logique » (TP §3.11.6, p. 17 ; le RTS, p. 8/12, en fait une recommandation).
 
 Conséquence pour le moteur : en forêt, la longueur d'un circuit se mesure sur les **itinéraires**
 (et non à vol d'oiseau) et s'exprime en « kilomètres-effort » ; tant que le relief n'est pas connu

@@ -133,5 +133,6 @@ backend/data/candidates.json
 
 # Plan — données locales non versionnées
 runs/
-captures/
+captures/*
+!captures/LISEZMOI.md
 backend/data/local/

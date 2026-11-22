@@ -71,14 +71,14 @@ d'exactitude contre les PDF.
 
 | Id | Règle | Gravité | Source |
 |----|-------|---------|--------|
-| R01 | Deux postes à moins de 30 m à vol d'oiseau (forêt) | bloquant | RTS p. 8/12 |
-| R02 | Deux postes sur éléments de même nature à moins de 60 m (forêt) | bloquant | RTS p. 8/12 |
-| R03 | Sprint : deux postes à moins de 15 m à vol d'oiseau ou de 25 m de course | bloquant | RTS p. 8/12 |
+| R01 | Deux postes à moins de 30 m à vol d'oiseau (forêt) | bloquant | RTS p. 9/12 |
+| R02 | Deux postes sur éléments de même nature à moins de 60 m (forêt) | bloquant | RTS p. 9/12 |
+| R03 | Sprint : deux postes à moins de 15 m à vol d'oiseau ou de 25 m de course | bloquant | RTS p. 9/12 |
 | R04 | Poste en zone interdite, infranchissable ou inaccessible | bloquant | TP §3.4.2 p. 8 ; RTS §3.2.1 (interdictions des propriétaires) |
 | R05 | Jambe non conforme au niveau (une ligne par paramètre violé, chacune avec sa propre source) | bloquant si la source du paramètre est une citation ; avertissement si « plan » | A2 |
 | R06 | Retour sur ses pas au poste (entrée et sortie par le même cheminement) | avertissement | TP §3.5.5 p. 10 |
 | R07 | Itinéraire tentant à travers une zone interdite : gain ≥ 20 % si l'interdit était franchissable | avertissement | TP §3.4.2 p. 8 — « éviter les parcours entre postes qui encourageraient les compétiteurs à franchir des zones interdites ou dangereuses » ; seuil : plan |
-| R08 | Dénivelé positif > 4 % de la longueur, par l'itinéraire le plus logique | avertissement | TP §3.11.6 p. 17 ; RTS p. 7/12 — actif à partir de la phase 10 |
+| R08 | Dénivelé positif > 4 % de la longueur, par l'itinéraire le plus logique | avertissement | TP §3.11.6 p. 17 ; RTS p. 8/12 — actif à partir de la phase 10 |
 | R09 | Temps estimé au-delà du maximum préconisé pour la couleur | avertissement | RTS §3.2.1 |
 | R10 | Longueur hors de la fourchette indicative du format | information | GC p. 4-5 |
 | R11 | Circuit vert : plus de deux changements de ligne en cours de jambe | bloquant | MF T3 |

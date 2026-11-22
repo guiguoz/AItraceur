@@ -198,7 +198,7 @@ l'ordre de `base` est conservé.
 **À faire** dans `_check_c02_too_close` (`controleur.py` l.338) : comparer **toutes** les paires de
 postes de type `control`. Seuil : valeur de `controleur_rules.json` si présente, sinon 30 m, et
 15 m en sprint. `rule_reference` : « FFCO, Règles techniques et de sécurité en Course
-d'Orientation, éd. mai 2025, "Distance minimale entre les postes", p. 8/12 » — le texte : « pour
+d'Orientation, éd. mai 2025, "Distance minimale entre les postes", p. 9/12 » — le texte : « pour
 les échelles 1:7500, 1:10000 et 1:15000 : les postes ne doivent pas être placés à moins de
 30 mètres à vol d'oiseau les uns des autres. Deux postes disposés sur deux éléments de même nature
 ne peuvent être à moins de 60m à vol d'oiseau l'un de l'autre, – pour des échelles 1:4000 et

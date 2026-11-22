@@ -41,7 +41,7 @@ en découlent**.
   techniques d'orientation. » (TP §2.3.3, p. 3)
 - « L'objectif principal d'un poste de contrôle est de marquer le début et la fin d'un parcours
   entre postes. » (TP §3.5.3, p. 9)
-- Distances minimales entre postes : RTS p. 8/12 (A2 §5). Angles : TP §3.5.5, p. 10. Arrivée :
+- Distances minimales entre postes : RTS p. 9/12 (A2 §5). Angles : TP §3.5.5, p. 10. Arrivée :
   « du dernier poste vers l'arrivée, […] un itinéraire balisé et obligatoire » (TP §3.6, p. 10).
 - Le moteur v1 fait l'inverse : il tire des postes puis note le dessin obtenu ; son interface
   demande 1,5 fois le nombre de postes voulu et les propose un par un (`App.jsx` l.979 et
@@ -255,8 +255,8 @@ Contraintes **dures** (un circuit qui en viole une n'est jamais proposé) :
 | Règle | Test | Source |
 |-------|------|--------|
 | Jambes conformes | toutes les jambes sont dans le catalogue | A2 |
-| Distance entre postes, forêt | toute paire de postes : ≥ 30 m à vol d'oiseau ; ≥ 60 m si même `label_fr` | RTS p. 8/12 |
-| Distance entre postes, sprint | toute paire : ≥ 15 m à vol d'oiseau **et** ≥ 25 m en distance de course (longueur de l'itinéraire le plus rapide) | RTS p. 8/12 |
+| Distance entre postes, forêt | toute paire de postes : ≥ 30 m à vol d'oiseau ; ≥ 60 m si même `label_fr` | RTS p. 9/12 |
+| Distance entre postes, sprint | toute paire : ≥ 15 m à vol d'oiseau **et** ≥ 25 m en distance de course (longueur de l'itinéraire le plus rapide) | RTS p. 9/12 |
 | Pas de retour sur ses pas | au poste, le cap de sortie ne fait pas moins de 30° avec l'inverse du cap d'approche (caps des itinéraires, pas des segments) | TP §3.5.5, p. 10 |
 | Amas | au plus `max_cluster` postes dans un rayon de 60 m (sprint) ou 150 m (forêt) | K2 ; plan |
 | Croisements | au plus `max_crossings` croisements entre itinéraires de jambes non consécutives | TP p. 17 ; valeur : plan |

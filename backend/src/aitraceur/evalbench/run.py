@@ -44,6 +44,7 @@ def run_v1(captures: Path, seeds: list[int], out_dir: Path) -> None:
 
     results: list[dict] = []
     determinism: dict[str, dict] = {}
+    cache_states: dict[str, dict] = {}
 
     for cap in capture_files:
         body = json.loads(cap.read_text(encoding="utf-8"))
@@ -52,16 +53,22 @@ def run_v1(captures: Path, seeds: list[int], out_dir: Path) -> None:
         bbox_wgs = _bbox_from_body(body)
         forbidden_wgs: list = body.get("forbidden_zones_polygons") or []
 
-        # Déterminisme : seed 0 joué deux fois
-        r0a = replay(cap, 0)
-        r0b = replay(cap, 0)
-        identical = (
-            r0a.ok and r0b.ok
-            and r0a.points_lnglat == r0b.points_lnglat
-        )
-        determinism[cap.name] = {"identical": identical}
-        print(f"[bench] {cap.name} déterminisme={identical}", flush=True)
+        # ── Préchauffage (non mesuré) ──────────────────────────────────────────
+        # Chauffe le cache sprint_features : froid et chaud produisent des
+        # candidats différents → sans préchauffage, seed 0 mesuré « froid »
+        # diffère du rejeu déterminisme → fausse alarme determinism=False.
+        npz_before = _count_npz_caches()
+        print(f"[bench] {cap.name} préchauffage (cache_npz={npz_before})...", flush=True)
+        replay(cap, 0)
+        npz_after = _count_npz_caches()
+        cache_states[cap.name] = {
+            "npz_before_warmup": npz_before,
+            "npz_after_warmup": npz_after,
+            "cache_created": npz_after > npz_before,
+        }
 
+        # ── Mesures warm (tous les seeds) ─────────────────────────────────────
+        seed0_points: list[tuple[float, float]] | None = None
         for seed in seeds:
             rr = replay(cap, seed)
             row: dict = {
@@ -80,18 +87,30 @@ def run_v1(captures: Path, seeds: list[int], out_dir: Path) -> None:
                 except Exception as exc:
                     row["metrics_error"] = str(exc)
             results.append(row)
+            if seed == 0:
+                seed0_points = rr.points_lnglat
             print(
                 f"[bench] {cap.name} seed={seed} ok={rr.ok} t={rr.runtime_s:.1f}s",
                 flush=True,
             )
 
+        # ── Vérification déterminisme (rejeu seed 0 après les mesures) ────────
+        r0 = replay(cap, 0)
+        identical = (
+            seed0_points is not None
+            and r0.ok
+            and seed0_points == r0.points_lnglat
+        )
+        determinism[cap.name] = {"identical": identical}
+        print(f"[bench] {cap.name} déterminisme={identical}", flush=True)
+
     _write_jsonl(out_dir / "results.jsonl", results)
-    _write_summary(out_dir / "summary.md", results, capture_files)
+    _write_summary(out_dir / "summary.md", results, capture_files, determinism)
     (out_dir / "determinism.json").write_text(
         json.dumps({"results": determinism}, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-    _write_metadata(out_dir / "run_metadata.json", capture_files)
+    _write_metadata(out_dir / "run_metadata.json", capture_files, cache_states)
     print(f"[bench] Résultats dans {out_dir}", flush=True)
 
 
@@ -166,16 +185,26 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
 
 _SUMMARY_KEYS = [
     "length_m", "leg_min_m", "leg_max_m", "leg_cv",
+    "min_pair_dist_m", "n_pairs_below_30m", "n_pairs_below_60m",
     "crossings", "doglegs", "max_in_radius", "n_clustered",
-    "coverage_4x4", "hull_ratio", "forbidden_hits",
+    "coverage_4x4", "hull_ratio", "is_loop", "forbidden_hits",
 ]
 
 
-def _write_summary(path: Path, results: list[dict], captures: list[Path]) -> None:
+def _write_summary(
+    path: Path,
+    results: list[dict],
+    captures: list[Path],
+    determinism: dict[str, dict],
+) -> None:
     lines = ["# Résumé banc d'essai moteur v1\n"]
     for cap in captures:
         ok_rows = [r for r in results if r["capture"] == cap.name and r.get("ok")]
         lines.append(f"\n## {cap.name}\n")
+        det = determinism.get(cap.name, {})
+        identical = det.get("identical")
+        det_symbol = "✓" if identical else ("✗" if identical is False else "?")
+        lines.append(f"Déterminisme : {det_symbol}  \n")
         if not ok_rows:
             lines.append("_Aucun résultat valide._\n")
             continue
@@ -191,7 +220,15 @@ def _write_summary(path: Path, results: list[dict], captures: list[Path]) -> Non
     path.write_text("".join(lines), encoding="utf-8")
 
 
-def _write_metadata(path: Path, captures: list[Path]) -> None:
+def _count_npz_caches() -> int:
+    """Compte les fichiers .npz dans data/ — proxy de l'état du cache heatmap."""
+    data_dir = Path("data")
+    if not data_dir.is_dir():
+        return -1
+    return sum(1 for _ in data_dir.rglob("*.npz"))
+
+
+def _write_metadata(path: Path, captures: list[Path], cache_states: dict[str, dict]) -> None:
     import numpy as np
     import scipy
 
@@ -225,6 +262,7 @@ def _write_metadata(path: Path, captures: list[Path]) -> None:
         "date_utc": datetime.now(timezone.utc).isoformat(),
         "command": " ".join(sys.argv),
         "n_captures": len(captures),
+        "sprint_features_cache": cache_states,
     }
     path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
 

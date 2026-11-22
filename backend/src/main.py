@@ -2268,7 +2268,7 @@ def _circuit_impl(body: dict) -> dict:
                     except Exception as _ocad_err:
                         print(f"[circuit] OCAD PNG ÉCHEC: {_ocad_err} → fallback MapAnt", flush=True)
 
-                if _mapant_result is None and bounding_box:
+                if _mapant_result is None and bounding_box and settings.AITRACEUR_ONLINE:
                     import concurrent.futures as _cfs
                     with _cfs.ThreadPoolExecutor(max_workers=1) as _mex:
                         _mapant_fut = _mex.submit(_fetch_mapant_bbox_image, bounding_box, 15)
@@ -4212,7 +4212,7 @@ def _sprint_impl(task_id: str, body: dict) -> None:
                     except Exception as _ocad_err:
                         print(f"{_tag} [WARN] OCAD PNG ECHEC: {_ocad_err} -> fallback MapAnt", flush=True)
 
-                if _mapant_result is None and bounding_box:
+                if _mapant_result is None and bounding_box and settings.AITRACEUR_ONLINE:
                     # ── Branche MapAnt (fallback) ────────────────────────────────
                     print(f"{_tag} {_time.time()-_t0:.1f}s [...] fetch MapAnt tiles...", flush=True)
                     import concurrent.futures as _cfs
